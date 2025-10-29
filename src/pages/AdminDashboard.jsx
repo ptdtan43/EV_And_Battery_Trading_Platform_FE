@@ -1717,10 +1717,6 @@ export const AdminDashboard = () => {
               <Flag className="h-5 w-5" />
               <span>Báo cáo vi phạm</span>
             </div>
-            <div className="flex items-center space-x-3 p-3 text-gray-600 hover:bg-gray-50 rounded-lg cursor-pointer">
-              <Users className="h-5 w-5" />
-              <span>User Management</span>
-            </div>
           </div>
         </nav>
 
