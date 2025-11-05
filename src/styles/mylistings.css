@@ -351,6 +351,13 @@
   color: #dc2626;
 }
 
+/* Special style for reported products (orange/warning color) */
+.mylistings-status-reported {
+  background-color: #ffedd5 !important;
+  color: #ea580c !important;
+  border: 1px solid #fb923c;
+}
+
 .mylistings-status-sold {
   background-color: #f3f4f6;
   color: #374151;
@@ -430,6 +437,8 @@
   align-items: center;
   justify-content: center;
   text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 500;
 }
 
 .mylistings-view-button:hover {
@@ -453,6 +462,8 @@
   align-items: center;
   justify-content: center;
   text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 500;
 }
 
 .mylistings-edit-button:hover {

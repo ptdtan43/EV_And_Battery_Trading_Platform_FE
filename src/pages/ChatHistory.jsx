@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { apiRequest } from "../lib/api";
+import signalRService from "../services/signalRService";
+import { validateAndShowWarning } from "../utils/messageValidator";
 import { 
   ArrowLeft, 
   Search, 
@@ -35,8 +37,74 @@ export const ChatHistory = () => {
   const [sending, setSending] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   
-  const messagesEndRef = useRef(null);
+  // SignalR connection state
+  const [isConnected, setIsConnected] = useState(false);
+  const [connectionError, setConnectionError] = useState(null);
+  
   const inputRef = useRef(null);
+  const currentChatIdRef = useRef(null);
+
+  // Initialize SignalR connection on mount
+  useEffect(() => {
+    let timeoutId = null;
+    
+    if (user) {
+      // Đợi token được lưu vào localStorage (max 5 lần check, mỗi lần 200ms)
+      let attempts = 0;
+      const maxAttempts = 5;
+      
+      const checkTokenAndInit = () => {
+        // ✅ FIX: Check token from evtb_auth
+        try {
+          const authData = localStorage.getItem('evtb_auth');
+          const token = authData ? JSON.parse(authData)?.token : null;
+          attempts++;
+          
+          console.log(`🔍 Attempt ${attempts}/${maxAttempts} - Checking token:`, token ? `Present (${token.length} chars)` : "Missing");
+          
+          if (token) {
+            console.log("✅ Token found! Initializing SignalR...");
+            initializeSignalR();
+          } else if (attempts < maxAttempts) {
+            console.log(`⏳ Token not ready, will retry in 200ms...`);
+            timeoutId = setTimeout(checkTokenAndInit, 200);
+          } else {
+            console.warn("❌ Max attempts reached. Cannot init SignalR: No token found");
+            setConnectionError("Không có token");
+          }
+        } catch (error) {
+          console.error("❌ Error checking token:", error);
+          if (attempts < maxAttempts) {
+            timeoutId = setTimeout(checkTokenAndInit, 200);
+          } else {
+            setConnectionError("Lỗi khi kiểm tra token");
+          }
+        }
+      };
+      
+      // Start checking after 100ms
+      timeoutId = setTimeout(checkTokenAndInit, 100);
+
+      // ✅ FIX: Loại bỏ polling - SignalR đã hoạt động real-time
+      // Polling gây reload liên tục, không cần thiết nữa
+      // pollingInterval = setInterval(() => {
+      //   if (!isConnected && selectedChatId) {
+      //     console.log("📡 Polling for new messages (SignalR not connected)");
+      //     loadChatMessages(selectedChatId);
+      //   }
+      // }, 3000);
+
+      return () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+        if (currentChatIdRef.current) {
+          signalRService.leaveChat(currentChatIdRef.current);
+        }
+        signalRService.disconnect();
+      };
+    }
+  }, [user]);
 
   // Load chats on mount
   useEffect(() => {
@@ -50,18 +118,160 @@ export const ChatHistory = () => {
     if (selectedChatId) {
       loadChatMessages(selectedChatId);
     } else {
+      // Leave chat when deselecting
+      if (currentChatIdRef.current) {
+        signalRService.leaveChat(currentChatIdRef.current);
+        currentChatIdRef.current = null;
+      }
       setSelectedChat(null);
       setMessages([]);
     }
   }, [selectedChatId]);
 
-  // Auto scroll to bottom
+  // Join/Leave SignalR chat rooms when connection status or selected chat changes
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    const handleChatSwitch = async () => {
+      if (!isConnected) {
+        console.log("⚠️ SignalR not connected, cannot join chat");
+        return;
+      }
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      // Leave previous chat
+      if (currentChatIdRef.current && currentChatIdRef.current !== selectedChatId) {
+        console.log(`🚪 Leaving previous chat: ${currentChatIdRef.current}`);
+        await signalRService.leaveChat(currentChatIdRef.current);
+      }
+      
+      // Join new chat
+      if (selectedChatId) {
+        console.log(`🚪 Joining new chat: ${selectedChatId}`);
+        const success = await signalRService.joinChat(selectedChatId);
+        if (success) {
+          currentChatIdRef.current = selectedChatId;
+          console.log(`✅ Successfully set currentChatIdRef to: ${selectedChatId}`);
+        }
+      } else if (currentChatIdRef.current) {
+        // No chat selected, leave current
+        await signalRService.leaveChat(currentChatIdRef.current);
+        currentChatIdRef.current = null;
+      }
+    };
+    
+    handleChatSwitch();
+  }, [isConnected, selectedChatId]);
+
+  // ====================
+  // SIGNALR SETUP
+  // ====================
+
+  const initializeSignalR = async () => {
+    try {
+      console.log("🔌 Initializing SignalR connection...");
+      await signalRService.connect();
+      setIsConnected(true);
+      setConnectionError(null);
+      
+      console.log("✅ SignalR ready, setting up listeners...");
+
+      // Setup event listeners
+      // ✅ FIX: Backend sends "ReceiveMessage" (PascalCase), not "receiveMessage"!
+      const unsubscribeMessage = signalRService.on("ReceiveMessage", handleReceiveMessage);
+      const unsubscribeReconnected = signalRService.on("reconnected", () => {
+        console.log("✅ Reconnected to SignalR");
+        setIsConnected(true);
+        setConnectionError(null);
+        // Rejoin current chat if any
+        if (currentChatIdRef.current) {
+          signalRService.joinChat(currentChatIdRef.current);
+        }
+      });
+      const unsubscribeReconnecting = signalRService.on("reconnecting", () => {
+        console.log("🔄 Reconnecting to SignalR...");
+        setIsConnected(false);
+        setConnectionError("Đang kết nối lại...");
+      });
+      const unsubscribeConnectionClosed = signalRService.on("connectionClosed", (data) => {
+        console.log("🔴 SignalR connection closed", data);
+        setIsConnected(false);
+        setConnectionError("Mất kết nối - Sử dụng chế độ polling");
+      });
+      const unsubscribeConnectionLost = signalRService.on("connectionLost", (data) => {
+        console.log("⚠️ SignalR connection lost", data);
+        setIsConnected(false);
+        setConnectionError("Mất kết nối - Đang thử kết nối lại...");
+      });
+
+      // Store unsubscribe functions for cleanup
+      return () => {
+        unsubscribeMessage();
+        unsubscribeReconnected();
+        unsubscribeReconnecting();
+        unsubscribeConnectionClosed();
+        unsubscribeConnectionLost();
+      };
+    } catch (error) {
+      console.error("❌ Failed to connect to SignalR:", error);
+      console.error("Error details:", error.message);
+      setIsConnected(false);
+      setConnectionError("Sử dụng chế độ polling");
+      
+      // Don't throw - fallback to polling
+      showToast({
+        title: "⚠️ Thông báo",
+        description: "Real-time chat không khả dụng, sử dụng chế độ polling",
+        type: "warning"
+      });
+    }
+  };
+
+  const handleReceiveMessage = (message) => {
+    console.log("📨 ====== RECEIVED MESSAGE VIA SIGNALR ======");
+    console.log("📨 Message data:", message);
+    console.log("📨 Message chatId:", message.chatId);
+    console.log("📨 Current selectedChatId:", selectedChatId);
+    console.log("📨 Are they equal?", message.chatId === parseInt(selectedChatId));
+    
+    // Only add message if it's for the current chat
+    if (message.chatId === parseInt(selectedChatId)) {
+      console.log("✅ Message is for current chat, adding to messages...");
+      setMessages(prev => {
+        // Check if message already exists (avoid duplicates)
+        const exists = prev.some(m => m.messageId === message.messageId);
+        if (exists) {
+          console.log("⚠️ Message already exists, skipping");
+          return prev;
+        }
+        
+        console.log("✅ Adding new message to state");
+        return [...prev, message];
+      });
+
+      // Mark as read if not from current user
+      const currentUserId = user?.id || user?.userId;
+      if (message.senderId !== currentUserId) {
+        try {
+          apiRequest(`/api/Message/${message.messageId}/read`, {
+            method: "PUT"
+          });
+        } catch (err) {
+          console.error("Error marking message as read:", err);
+        }
+      }
+    } else {
+      console.log("⚠️ Message is NOT for current chat, ignoring");
+    }
+
+    // ✅ FIX: Chỉ update local chat list thay vì reload
+    // Update lastMessage cho chat trong list
+    setChats(prevChats => 
+      prevChats.map(chat => 
+        chat.chatId === message.chatId 
+          ? { ...chat, lastMessage: message.content, lastMessageTime: message.sentAt }
+          : chat
+      )
+    );
+    
+    console.log("📨 ====== END RECEIVED MESSAGE ======");
   };
 
   // ====================
@@ -93,6 +303,10 @@ export const ChatHistory = () => {
     try {
       setLoadingMessages(true);
       console.log(`💬 Loading chat ${chatId}`);
+      console.log(`💬 Setting selectedChatId to: ${chatId}`);
+      
+      // ✅ FIX: Update URL to set selectedChatId
+      setSearchParams({ chat: chatId });
       
       // Get chat details
       const chatResponse = await apiRequest(`/api/Chat/${chatId}`);
@@ -151,6 +365,11 @@ export const ChatHistory = () => {
     e.preventDefault();
     if (!newMessage.trim() || sending || !selectedChatId) return;
 
+    // Validate message trước khi gửi
+    if (!validateAndShowWarning(newMessage, showToast)) {
+      return; // Dừng lại nếu tin nhắn không hợp lệ
+    }
+
     setSending(true);
     try {
       const messageData = {
@@ -169,12 +388,23 @@ export const ChatHistory = () => {
       console.log("✅ Message sent:", response);
 
       if (response) {
-        // Add to messages
-        setMessages(prev => [...prev, response]);
+        // Note: Message will be added via SignalR "ReceiveMessage" event
+        // But add it locally immediately for better UX
+        setMessages(prev => {
+          const exists = prev.some(m => m.messageId === response.messageId);
+          if (exists) return prev;
+          return [...prev, response];
+        });
         setNewMessage("");
         
-        // Reload chats to update last message
-        loadChats();
+        // ✅ FIX: Update local chat list instead of reloading
+        setChats(prevChats => 
+          prevChats.map(chat => 
+            chat.chatId === parseInt(selectedChatId) 
+              ? { ...chat, lastMessage: response.content, lastMessageTime: response.sentAt }
+              : chat
+          )
+        );
         
         // Focus input
         inputRef.current?.focus();
@@ -259,14 +489,36 @@ export const ChatHistory = () => {
       {/* Header */}
       <div className="bg-white shadow-sm border-b sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center space-x-4">
-            <button
-              onClick={() => navigate(-1)}
-              className="p-2 hover:bg-gray-100 rounded-lg"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-            <h1 className="text-xl font-semibold text-gray-900">Tin nhắn</h1>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={() => navigate(-1)}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <ArrowLeft className="h-5 w-5" />
+              </button>
+              <h1 className="text-xl font-semibold text-gray-900">Tin nhắn</h1>
+            </div>
+            
+            {/* Connection Status Indicator */}
+            <div className="flex items-center space-x-2">
+              {isConnected ? (
+                <div className="flex items-center space-x-2 px-3 py-1 bg-green-100 text-green-800 rounded-full text-xs">
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                  <span>Đã kết nối</span>
+                </div>
+              ) : connectionError ? (
+                <div className="flex items-center space-x-2 px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs">
+                  <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
+                  <span>{connectionError}</span>
+                </div>
+              ) : (
+                <div className="flex items-center space-x-2 px-3 py-1 bg-gray-100 text-gray-600 rounded-full text-xs">
+                  <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+                  <span>Đang kết nối...</span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -428,7 +680,6 @@ export const ChatHistory = () => {
                           </div>
                         );
                       })}
-                      <div ref={messagesEndRef} />
                     </>
                   )}
                 </div>

@@ -689,10 +689,19 @@ export const AuthProvider = ({ children }) => {
     return session;
   };
 
+  // Check if user is admin based on role
+  const isAdmin = user?.role === 'admin' || 
+                  user?.role === 'Admin' || 
+                  user?.role === 1 || 
+                  user?.roleId === 1 ||
+                  user?.email === 'admin@evtrading.com' ||
+                  user?.email === 'admin@gmail.com';
+
   const value = {
     user,
     profile,
     loading,
+    isAdmin,
     signIn,
     signUp,
     signOut,

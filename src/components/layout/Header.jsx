@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import {
   Zap,
   Search,
@@ -15,6 +15,7 @@ import { ChatBell } from "../common/ChatBell";
 export const Header = () => {
   const { user, profile, signOut, isAdmin } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleSignOut = async () => {
     try {
@@ -25,67 +26,87 @@ export const Header = () => {
     }
   };
 
+  // Generic handler to scroll to top when clicking link to current page
+  const handleLinkClick = (targetPath) => {
+    if (location.pathname === targetPath) {
+      window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+    }
+  };
+
+  const handleHomeClick = () => handleLinkClick("/");
+  const handleFavoritesClick = () => handleLinkClick("/favorites");
+  const handleDashboardClick = () => handleLinkClick("/dashboard");
+  const handleAdminClick = () => handleLinkClick("/admin");
+  const handleMyPurchasesClick = () => handleLinkClick("/my-purchases");
+  const handleProfileClick = () => handleLinkClick("/profile");
+  const handleLoginClick = () => handleLinkClick("/login");
+  const handleRegisterClick = () => handleLinkClick("/register");
+
+  const containerClass = isAdmin
+    ? "px-4 sm:px-6 lg:px-8" // flush-left for admin
+    : "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"; // centered for public
+
   return (
     <header className="bg-white shadow-sm sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className={containerClass}>
         <div className="flex justify-between items-center h-16">
-          <Link to="/" className="flex items-center space-x-2">
-            <div className="bg-blue-600 p-2 rounded-lg">
-              <Zap className="h-6 w-6 text-white" />
-            </div>
-            <span className="text-xl font-bold text-gray-900">EV Market</span>
-          </Link>
-
-          <nav className="hidden md:flex items-center space-x-8">
-            <Link
-              to="/"
-              className="text-gray-700 hover:text-blue-600 transition-colors"
+          {isAdmin ? (
+            <Link 
+              to="/admin" 
+              state={{ resetDashboard: true }} 
+              className="flex items-center space-x-2" 
+              aria-label="Trang quản trị"
+              onClick={handleAdminClick}
             >
-              Trang chủ
+              <div className="bg-blue-600 p-2 rounded-lg">
+                <Zap className="h-6 w-6 text-white" />
+              </div>
+              <span className="text-xl font-bold text-gray-900">EV Market</span>
             </Link>
+          ) : (
+            <Link to="/" className="flex items-center space-x-2" aria-label="Trang chủ" onClick={handleHomeClick}>
+              <div className="bg-blue-600 p-2 rounded-lg">
+                <Zap className="h-6 w-6 text-white" />
+              </div>
+              <span className="text-xl font-bold text-gray-900">EV Market</span>
+            </Link>
+          )}
+
+
+          <div className={`flex items-center ${isAdmin ? 'space-x-3' : 'space-x-4'}`}>
             {!isAdmin && (
               <Link
-                to="/search"
-                className="text-gray-700 hover:text-blue-600 transition-colors"
+                to="/"
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                title="Tìm kiếm"
+                onClick={handleHomeClick}
               >
-                Đăng tin bán
+                <Search className="h-5 w-5 text-gray-600" />
               </Link>
             )}
-            <Link
-              to="/about"
-              className="text-gray-700 hover:text-blue-600 transition-colors"
-            >
-              Cách thức hoạt động
-            </Link>
-          </nav>
-
-          <div className="flex items-center space-x-4">
-            <button
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-              title="Tìm kiếm"
-            >
-              <Search className="h-5 w-5 text-gray-600" />
-            </button>
 
             {user ? (
               <>
-                <Link
-                  to="/favorites"
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                  title="Yêu thích"
-                >
-                  <Heart className="h-5 w-5 text-gray-600" />
-                </Link>
+                {!isAdmin && (
+                  <Link
+                    to="/favorites"
+                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                    title="Yêu thích"
+                    onClick={handleFavoritesClick}
+                  >
+                    <Heart className="h-5 w-5 text-gray-600" />
+                  </Link>
+                )}
 
                 <NotificationBell />
 
-                <ChatBell />
+                {!isAdmin && <ChatBell />}
 
                 <div className="relative group">
-                  <button className="flex items-center space-x-2 p-2 hover:bg-gray-100 rounded-lg transition-colors">
+                  <button className={`flex items-center space-x-2 p-2 hover:bg-gray-100 rounded-lg transition-colors ${isAdmin ? 'ml-2' : ''}`}>
                     <User className="h-5 w-5 text-gray-600" />
                     <span className="text-sm font-medium text-gray-700">
-                      {profile?.full_name}
+                      {profile?.full_name || user?.fullName || user?.email}
                     </span>
                   </button>
 
@@ -94,15 +115,17 @@ export const Header = () => {
                       <Link
                         to="/admin"
                         className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        onClick={handleAdminClick}
                       >
                         <LayoutDashboard className="h-4 w-4 mr-2" />
-                        Admin Dashboard
+                        Bảng điều khiển quản trị
                       </Link>
                     )}
                     {!isAdmin && (
                       <Link
                         to="/dashboard"
                         className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        onClick={handleDashboardClick}
                       >
                         <User className="h-4 w-4 mr-2" />
                         Trang cá nhân
@@ -112,6 +135,7 @@ export const Header = () => {
                       <Link
                         to="/my-purchases"
                         className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        onClick={handleMyPurchasesClick}
                       >
                         <ShoppingBag className="h-4 w-4 mr-2" />
                         Sản phẩm đã mua
@@ -121,6 +145,7 @@ export const Header = () => {
                       <Link
                         to="/profile"
                         className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        onClick={handleProfileClick}
                       >
                         <User className="h-4 w-4 mr-2" />
                         Hồ sơ cá nhân
@@ -141,12 +166,14 @@ export const Header = () => {
                 <Link
                   to="/login"
                   className="text-gray-700 hover:text-blue-600 transition-colors"
+                  onClick={handleLoginClick}
                 >
                   Đăng nhập
                 </Link>
                 <Link
                   to="/register"
                   className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                  onClick={handleRegisterClick}
                 >
                   Đăng ký
                 </Link>

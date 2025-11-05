@@ -653,48 +653,13 @@ export const notificationAPI = {
 };
 
 // ===================================================================
-// 9. CHAT APIs
+// 9. CHAT APIs - DEPRECATED - Use chatService instead
 // ===================================================================
-
-export const chatAPI = {
-    /**
-     * Get chat history for user
-     * @param {number} userId - User ID
-     */
-    getHistory: async (userId) => {
-        return apiRequest(`/api/Chat/history/${userId}`);
-    },
-
-    /**
-     * Get chat messages for conversation
-     * @param {number} conversationId - Conversation ID
-     */
-    getMessages: async (conversationId) => {
-        return apiRequest(`/api/Chat/messages/${conversationId}`);
-    },
-
-    /**
-     * Send message
-     * @param {Object} messageData - Message data
-     */
-    sendMessage: async (messageData) => {
-        return apiRequest('/api/Chat/send', {
-            method: 'POST',
-            body: messageData
-        });
-    },
-
-    /**
-     * Create conversation
-     * @param {Array<number>} participants - Array of user IDs
-     */
-    createConversation: async (participants) => {
-        return apiRequest('/api/Chat/conversation', {
-            method: 'POST',
-            body: { participants }
-        });
-    }
-};
+// Note: Old chat endpoints have been removed.
+// Please use chatService from services/chatService.js which uses the new API:
+// - Chat endpoints: /api/Chat (for chat rooms)
+// - Message endpoints: /api/Message (for messages)
+// - Real-time: SignalR via signalRService
 
 // ===================================================================
 // 10. REVIEW APIs

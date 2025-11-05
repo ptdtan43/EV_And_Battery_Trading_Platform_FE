@@ -1,13 +1,21 @@
 import { useState, useEffect } from "react";
 import { Bell, X } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { getUnreadCount, markAllAsRead } from "../../lib/notificationApi";
 
 export const NotificationBell = () => {
   const { user } = useAuth();
+  const location = useLocation();
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+
+  const handleClick = () => {
+    // If already on notifications page, scroll to top
+    if (location.pathname === "/notifications") {
+      window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+    }
+  };
 
   // Load unread count
   useEffect(() => {
@@ -88,6 +96,7 @@ export const NotificationBell = () => {
         to="/notifications"
         className="relative p-2 text-gray-600 hover:text-blue-600 transition-colors group"
         title="Thông báo"
+        onClick={handleClick}
       >
         <div className="relative">
           <Bell className="h-5 w-5 transition-colors duration-300" />

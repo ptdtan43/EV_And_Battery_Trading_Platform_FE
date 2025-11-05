@@ -89,12 +89,11 @@ export const API_CONFIG = {
       STATUS: (id) => `/api/Verification/${id}/status`
     },
 
-    // Chat
+    // Chat - DEPRECATED
+    // Use chatService from services/chatService.js instead
+    // New endpoints: /api/Chat (rooms) and /api/Message (messages)
     CHAT: {
-      HISTORY: (userId) => `/api/Chat/history/${userId}`,
-      MESSAGES: (conversationId) => `/api/Chat/messages/${conversationId}`,
-      SEND: '/api/Chat/send',
-      CONVERSATION: '/api/Chat/conversation'
+      // Legacy endpoints removed - use chatService
     },
 
     // Reviews

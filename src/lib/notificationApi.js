@@ -3,9 +3,11 @@ import { apiRequest } from './api';
 
 export const NOTIFICATION_TYPES = {
   POST_CREATED: "post_created",
-  POST_APPROVED: "post_approved", 
+  POST_APPROVED: "post_approved",
   POST_REJECTED: "post_rejected",
   POST_SOLD: "post_sold",
+  POST_UPDATED: "post_updated", // NEW - Member updated post
+  POST_REPORTED: "post_reported", // NEW - Member reported post
   MESSAGE_RECEIVED: "message_received",
   SYSTEM_ANNOUNCEMENT: "system_announcement",
   VERIFICATION_PAYMENT_SUCCESS: "verification_payment_success",
@@ -20,13 +22,13 @@ export const NOTIFICATION_TYPES = {
  */
 export const createNotification = async (notificationData) => {
   console.log("🔔 Creating notification:", notificationData);
-  
+
   try {
     const response = await apiRequest('/api/Notification', {
       method: 'POST',
       body: notificationData
     });
-    
+
     console.log("✅ Notification created successfully:", response);
     return response;
   } catch (error) {
@@ -44,11 +46,11 @@ export const createNotification = async (notificationData) => {
  */
 export const getUserNotifications = async (userId, page = 1, pageSize = 10) => {
   console.log("🔔 Getting notifications for user:", userId);
-  
+
   try {
     const response = await apiRequest(`/api/Notification/user/${userId}`);
     console.log("✅ Retrieved notifications:", response);
-    
+
     // Handle different response formats
     let notifications = [];
     if (Array.isArray(response)) {
@@ -58,11 +60,11 @@ export const getUserNotifications = async (userId, page = 1, pageSize = 10) => {
     } else if (response.data && Array.isArray(response.data)) {
       notifications = response.data;
     }
-    
+
     // Debug notification structure
     console.log("🔔 First notification structure:", notifications[0]);
     console.log("🔔 All notification IDs:", notifications.map(n => ({ id: n.id, notificationId: n.notificationId })));
-    
+
     // Add pagination info
     const result = {
       notifications: notifications,
@@ -72,7 +74,7 @@ export const getUserNotifications = async (userId, page = 1, pageSize = 10) => {
       totalPages: Math.ceil(notifications.length / pageSize),
       hasMore: false
     };
-    
+
     console.log("✅ Processed notifications result:", result);
     return result;
   } catch (error) {
@@ -88,11 +90,11 @@ export const getUserNotifications = async (userId, page = 1, pageSize = 10) => {
  */
 export const getUnreadCount = async (userId) => {
   console.log("🔔 Getting unread count for user:", userId);
-  
+
   try {
     const response = await apiRequest(`/api/Notification/user/${userId}`);
     console.log("🔔 Raw response for unread count:", response);
-    
+
     // Handle different response formats
     let notifications = [];
     if (Array.isArray(response)) {
@@ -102,9 +104,9 @@ export const getUnreadCount = async (userId) => {
     } else if (response.data && Array.isArray(response.data)) {
       notifications = response.data;
     }
-    
+
     const unreadCount = notifications.filter(n => !n.isRead).length;
-    
+
     console.log("✅ Unread count:", unreadCount);
     return unreadCount;
   } catch (error) {
@@ -120,24 +122,24 @@ export const getUnreadCount = async (userId) => {
  */
 export const markAsRead = async (notificationId) => {
   console.log("🔔 Marking notification as read:", notificationId);
-  
+
   if (!notificationId) {
     console.error("❌ Notification ID is undefined or null");
     throw new Error("Notification ID is required");
   }
-  
+
   try {
     // Try PUT method first
     const response = await apiRequest(`/api/Notification/${notificationId}`, {
       method: 'PUT',
       body: { isRead: true }
     });
-    
+
     console.log("✅ Notification marked as read:", response);
     return response;
   } catch (error) {
     console.error("❌ Error marking notification as read:", error);
-    
+
     // If 403 Forbidden, try PATCH method
     if (error.message.includes("từ chối truy cập") || error.message.includes("Forbidden")) {
       console.log("🔄 Trying PATCH method for notification:", notificationId);
@@ -146,18 +148,18 @@ export const markAsRead = async (notificationId) => {
           method: 'PATCH',
           body: { isRead: true }
         });
-        
+
         console.log("✅ Notification marked as read with PATCH:", response);
         return response;
       } catch (patchError) {
         console.error("❌ PATCH method also failed:", patchError);
-        
+
         // If both PUT and PATCH fail, simulate success for UI update
         console.log("🔄 Simulating mark as read for UI update:", notificationId);
         return { id: notificationId, isRead: true, simulated: true };
       }
     }
-    
+
     throw error;
   }
 };
@@ -169,28 +171,28 @@ export const markAsRead = async (notificationId) => {
  */
 export const markAllAsRead = async (userId) => {
   console.log("🔔 Marking all notifications as read for user:", userId);
-  
+
   try {
     const notifications = await apiRequest(`/api/Notification/user/${userId}`);
     console.log("🔔 Raw notifications:", notifications);
-    
+
     const unreadNotifications = notifications.filter(n => !n.isRead);
     console.log("🔔 Unread notifications:", unreadNotifications);
-    
+
     // Mark each unread notification as read
     const validNotifications = unreadNotifications.filter(notification => {
       const id = notification.notificationId || notification.id;
       console.log("🔔 Notification ID check:", { id, notification });
       return id;
     });
-    
+
     console.log("🔔 Valid notifications to mark as read:", validNotifications);
-    
+
     if (validNotifications.length === 0) {
       console.log("🔔 No valid notifications to mark as read");
       return 0;
     }
-    
+
     const promises = validNotifications.map(notification => {
       const id = notification.notificationId || notification.id;
       console.log("🔔 Marking notification as read:", id);
@@ -199,18 +201,18 @@ export const markAllAsRead = async (userId) => {
         return null; // Continue with other notifications
       });
     });
-    
+
     const results = await Promise.all(promises);
     const successCount = results.filter(r => r !== null).length;
-    
+
     console.log("✅ Successfully marked", successCount, "out of", validNotifications.length, "notifications as read");
-    
+
     // If no notifications were marked as read due to API issues, simulate success for UI
     if (successCount === 0 && validNotifications.length > 0) {
       console.log("🔄 Simulating mark all as read for UI update");
       return validNotifications.length;
     }
-    
+
     // Return success count for UI update
     return successCount;
   } catch (error) {
@@ -226,12 +228,12 @@ export const markAllAsRead = async (userId) => {
  */
 export const deleteNotification = async (notificationId) => {
   console.log("🔔 Deleting notification:", notificationId);
-  
+
   try {
     await apiRequest(`/api/Notification/${notificationId}`, {
       method: 'DELETE'
     });
-    
+
     console.log("✅ Notification deleted successfully");
     return true;
   } catch (error) {
@@ -369,13 +371,13 @@ export const notifyUserVerificationCompleted = async (userId, productTitle, prod
     const emoji = isVerified ? '✅' : '❌';
     const title = isVerified ? 'Kiểm định xe thành công' : 'Kiểm định xe không đạt';
     const statusText = isVerified ? 'đã được kiểm định thành công' : 'không đạt yêu cầu kiểm định';
-    
+
     let content = `Sản phẩm "${productTitle}" (ID: ${productId}) của bạn ${statusText}.`;
-    
+
     if (adminNotes) {
       content += `\n\n📝 Ghi chú từ admin: ${adminNotes}`;
     }
-    
+
     if (isVerified) {
       content += `\n\n🎉 Sản phẩm của bạn giờ đã có chứng nhận kiểm định và sẽ được ưu tiên hiển thị trên trang chủ!`;
     } else {
@@ -399,6 +401,77 @@ export const notifyUserVerificationCompleted = async (userId, productTitle, prod
     return true;
   } catch (error) {
     console.error('Error sending verification completed notification to user:', error);
+    return false;
+  }
+};
+
+/**
+ * Send notification to admin when member updates a product
+ * @param {number} adminUserId - Admin user ID
+ * @param {string} productTitle - Product title
+ * @param {number} productId - Product ID
+ * @param {string} sellerName - Seller name
+ * @returns {Promise<boolean>} Success status
+ */
+export const notifyAdminProductUpdated = async (adminUserId, productTitle, productId, sellerName) => {
+  try {
+    console.log(`🔔 Sending product update notification to admin ${adminUserId} for product ${productId}`);
+
+    await createNotification({
+      userId: adminUserId,
+      notificationType: NOTIFICATION_TYPES.POST_UPDATED,
+      title: '🔄 Bài đăng đã được cập nhật',
+      content: `Người bán "${sellerName}" đã cập nhật bài đăng "${productTitle}" (ID: ${productId}). Vui lòng kiểm tra lại và duyệt bài đăng.`,
+      metadata: {
+        productId: productId,
+        productTitle: productTitle,
+        sellerName: sellerName,
+        actionRequired: 'review_product',
+        updatedDate: new Date().toISOString(),
+        priority: 'high'
+      }
+    });
+
+    console.log(`✅ Product update notification sent to admin for product ${productId}`);
+    return true;
+  } catch (error) {
+    console.error('❌ Error sending product update notification to admin:', error);
+    return false;
+  }
+};
+
+/**
+ * Notify admin when a member reports a product
+ * @param {number} adminUserId - Admin user ID
+ * @param {string} productTitle - Product title
+ * @param {number} productId - Product ID
+ * @param {string} reporterName - Reporter name
+ * @param {string} reportType - Report type
+ */
+export const notifyAdminReportReceived = async (adminUserId, productTitle, productId, reporterName, reportType) => {
+  try {
+    console.log(`🔔 Sending report notification to admin ${adminUserId} for product ${productId}`);
+
+    await createNotification({
+      userId: adminUserId,
+      notificationType: NOTIFICATION_TYPES.POST_REPORTED,
+      title: '🚨 Báo cáo vi phạm mới',
+      content: `Người dùng "${reporterName}" đã báo cáo bài đăng "${productTitle}" (ID: ${productId}) với lý do: ${reportType}. Vui lòng xem xét và xử lý.`,
+      metadata: {
+        productId: productId,
+        productTitle: productTitle,
+        reporterName: reporterName,
+        reportType: reportType,
+        actionRequired: 'review_report',
+        reportedDate: new Date().toISOString(),
+        priority: 'high'
+      }
+    });
+
+    console.log(`✅ Report notification sent to admin for product ${productId}`);
+    return true;
+  } catch (error) {
+    console.error('❌ Error sending report notification to admin:', error);
     return false;
   }
 };

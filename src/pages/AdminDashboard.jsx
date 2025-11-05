@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Users,
   Package,
@@ -20,20 +21,33 @@ import {
   Activity,
   Camera,
   Bell,
+  Flag,
+  LogOut,
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
 import { formatPrice, formatDate } from "../utils/formatters";
 import { useToast } from "../contexts/ToastContext";
+import { useAuth } from "../contexts/AuthContext";
 import { notifyPostApproved, notifyPostRejected } from "../lib/notificationApi";
 import { rejectProduct, approveProduct } from "../lib/productApi";
 import { RejectProductModal } from "../components/admin/RejectProductModal";
+import { AdminReports } from "../components/admin/AdminReports";
 import { updateVerificationStatus, getVerificationRequests } from "../lib/verificationApi";
 import { getUserNotifications, getUnreadCount, notifyUserVerificationCompleted } from "../lib/notificationApi";
 import { forceSendNotificationsForAllSuccessfulPayments, sendNotificationsForKnownPayments, sendNotificationsForVerifiedProducts } from "../lib/verificationNotificationService";
 
 export const AdminDashboard = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
   const { show: showToast } = useToast();
-  const [activeTab, setActiveTab] = useState("dashboard"); // dashboard, vehicles, batteries, inspections, transactions
+  const { signOut } = useAuth();
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      return sessionStorage.getItem('admin_active_tab') || "dashboard";
+    } catch (_) {
+      return "dashboard";
+    }
+  }); // dashboard, vehicles, batteries, inspections, transactions, reports, users
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalListings: 0,
@@ -70,6 +84,90 @@ export const AdminDashboard = () => {
   const [expandedDetails, setExpandedDetails] = useState(false);
   const [processingIds, setProcessingIds] = useState(new Set());
   const [skipImageLoading, setSkipImageLoading] = useState(false); // Add flag to skip image loading if causing issues
+  // Users management state
+  const [users, setUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersPage, setUsersPage] = useState(1);
+  const [usersPageSize, setUsersPageSize] = useState(10);
+  const [usersTotalPages, setUsersTotalPages] = useState(1);
+  const [usersSearch, setUsersSearch] = useState("");
+  const [usersRole, setUsersRole] = useState(""); // '', 'admin', 'user'
+  const [usersStatus, setUsersStatus] = useState(""); // '', 'active', 'suspended', 'deleted'
+  const [showStatusModal, setShowStatusModal] = useState(false);
+  const [pendingStatusUserId, setPendingStatusUserId] = useState(null);
+  const [pendingStatus, setPendingStatus] = useState('active');
+  const [pendingStatusReason, setPendingStatusReason] = useState(''); // legacy free-text
+  const [pendingStatusReasonCode, setPendingStatusReasonCode] = useState('');
+  const [pendingStatusReasonNote, setPendingStatusReasonNote] = useState('');
+
+  const suspendedReasonOptions = [
+    { code: 'SPAM_CONTENT', label: 'Đăng nội dung spam/quảng cáo' },
+    { code: 'FRAUD_SUSPECT', label: 'Nghi ngờ gian lận/giả mạo' },
+    { code: 'VIOLATE_POLICY', label: 'Vi phạm điều khoản sử dụng' },
+    { code: 'ABUSE_HARASS', label: 'Quấy rối/Ngôn ngữ thù hằn' },
+    { code: 'FAKE_INFO', label: 'Cung cấp thông tin sai lệch' },
+    { code: 'MULTI_ACCOUNT', label: 'Nhiều tài khoản trái quy định' },
+    { code: 'CHARGEBACK_RISK', label: 'Rủi ro thanh toán/chargeback' },
+    { code: 'PENDING_VERIFICATION', label: 'Chờ xác minh danh tính' },
+    { code: 'SECURITY_RISK', label: 'Rủi ro bảo mật' },
+    { code: 'OTHER', label: 'Lý do khác' },
+  ];
+
+  const deletedReasonOptions = [
+    { code: 'USER_REQUEST', label: 'Người dùng yêu cầu xóa' },
+    { code: 'PERMANENT_VIOLATION', label: 'Vi phạm nghiêm trọng/đã tái phạm' },
+    { code: 'LEGAL_COMPLIANCE', label: 'Theo yêu cầu pháp lý' },
+    { code: 'INACTIVE_LONG', label: 'Không hoạt động quá lâu' },
+    { code: 'FRAUD_CONFIRMED', label: 'Xác nhận gian lận' },
+    { code: 'DATA_PURGE', label: 'Dọn dẹp dữ liệu' },
+    { code: 'OTHER', label: 'Lý do khác' },
+  ];
+
+  const getReasonTextForUser = (user) => {
+    if (!user) return '';
+    
+    const status = (user.status || user.Status || '').toString().toLowerCase();
+    
+    // Priority 1: AccountStatusReason/Reason from backend (most reliable)
+    // Check explicitly for both camelCase and PascalCase, and handle empty string vs null
+    const accountStatusReason = user.accountStatusReason ?? user.AccountStatusReason ?? user.reason ?? user.Reason;
+    
+    // Debug for restricted accounts
+    if ((status === 'suspended' || status === 'deleted') && !accountStatusReason) {
+      console.warn('⚠️ Restricted user missing reason:', {
+        id: user.id || user.Id,
+        email: user.email || user.Email,
+        status: status,
+        accountStatusReason: user.accountStatusReason,
+        AccountStatusReason: user.AccountStatusReason,
+        reason: user.reason,
+        Reason: user.Reason,
+        allKeys: Object.keys(user),
+      });
+    }
+    
+    if (accountStatusReason && typeof accountStatusReason === 'string' && accountStatusReason.trim()) {
+      return accountStatusReason.trim();
+    }
+    
+    // Priority 2: reasonNote (if user manually entered custom reason)
+    const reasonNote = user.reasonNote ?? user.ReasonNote;
+    if (reasonNote && typeof reasonNote === 'string' && reasonNote.trim()) {
+      return reasonNote.trim();
+    }
+    
+    // Priority 3: Map from reasonCode to label (if no custom text)
+    const code = user.reasonCode ?? user.ReasonCode;
+    if (code && status && (status === 'suspended' || status === 'deleted')) {
+      const list = status === 'deleted' ? deletedReasonOptions : suspendedReasonOptions;
+      const found = list.find(x => x.code === code);
+      if (found && found.label) {
+        return found.label;
+      }
+    }
+    
+    return '';
+  };
 
   // Reject modal state
   const [rejectModal, setRejectModal] = useState({
@@ -87,6 +185,318 @@ export const AdminDashboard = () => {
   const [inspectionImages, setInspectionImages] = useState([]);
   const [inspectionFiles, setInspectionFiles] = useState([]);
   const [currentInspectionProduct, setCurrentInspectionProduct] = useState(null);
+
+  // Reset to dashboard when arriving from admin logo click
+  useEffect(() => {
+    if (location?.state?.resetDashboard) {
+      setActiveTab("dashboard");
+      // Clear state to avoid repeated resets on future renders
+      navigate('/admin', { replace: true, state: {} });
+    }
+  }, [location?.state, navigate]);
+
+  // Persist selected tab so back navigation returns to the same tab
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('admin_active_tab', activeTab);
+    } catch (_) {}
+  }, [activeTab]);
+
+  // Users API helpers
+  const loadUsers = async (opts = {}) => {
+    const { page = usersPage, pageSize = usersPageSize, search = usersSearch, role = usersRole, status = usersStatus } = opts;
+    try {
+      setUsersLoading(true);
+      const params = new URLSearchParams();
+      if (search) params.set('search', search);
+      if (role) params.set('role', role);
+      if (status) params.set('status', status);
+      params.set('page', String(page));
+      params.set('pageSize', String(pageSize));
+      params.set('sort', 'createdAt:desc');
+      const res = await apiRequest(`/api/admin/users?${params.toString()}`);
+      const usersData = res.Items || res.items || [];
+      
+      // Debug: Log raw response first
+      console.log('🔍 Raw API response sample:', usersData.length > 0 ? {
+        firstUser: usersData[0],
+        allKeys: Object.keys(usersData[0] || {}),
+        // Check specifically for AccountStatusReason fields
+        accountStatusReason: usersData[0].accountStatusReason,
+        AccountStatusReason: usersData[0].AccountStatusReason,
+        reason: usersData[0].reason,
+        Reason: usersData[0].Reason,
+        // Check ALL fields to see what backend actually returns
+        allFields: Object.keys(usersData[0] || {}).reduce((acc, key) => {
+          acc[key] = usersData[0][key];
+          return acc;
+        }, {}),
+      } : 'No users');
+      
+      // Find restricted user in raw data to debug
+      const restrictedRawUser = usersData.find(u => {
+        const st = (u.status ?? u.Status ?? '').toString().toLowerCase();
+        return st === 'suspended' || st === 'deleted';
+      });
+      if (restrictedRawUser) {
+        console.log('🔍 Raw restricted user from API:', {
+          id: restrictedRawUser.id ?? restrictedRawUser.Id,
+          email: restrictedRawUser.email ?? restrictedRawUser.Email,
+          status: restrictedRawUser.status ?? restrictedRawUser.Status,
+          accountStatusReason: restrictedRawUser.accountStatusReason,
+          AccountStatusReason: restrictedRawUser.AccountStatusReason,
+          reason: restrictedRawUser.reason,
+          Reason: restrictedRawUser.Reason,
+          allKeys: Object.keys(restrictedRawUser),
+          // Log ALL values to see what backend actually returns
+          allValues: Object.keys(restrictedRawUser).reduce((acc, key) => {
+            acc[key] = restrictedRawUser[key];
+            return acc;
+          }, {}),
+        });
+      }
+      
+      // Normalize field names to ensure consistent access (handle both camelCase and PascalCase)
+      const normalizedUsers = usersData.map(user => {
+        // Get raw values FIRST before any normalization
+        // IMPORTANT: Backend might return empty string '' for reason, so we need to check that too
+        // Check ALL possible field names case-insensitively
+        const rawAccountStatusReason = 
+          (user.accountStatusReason && user.accountStatusReason !== '') ? user.accountStatusReason :
+          (user.AccountStatusReason && user.AccountStatusReason !== '') ? user.AccountStatusReason :
+          (user.reason && user.reason !== '') ? user.reason :
+          (user.Reason && user.Reason !== '') ? user.Reason :
+          null;
+        
+        const rawReason = 
+          (user.reason && user.reason !== '') ? user.reason :
+          (user.Reason && user.Reason !== '') ? user.Reason :
+          rawAccountStatusReason;
+        
+        // Debug: Log what we found for restricted users
+        const st = (user.status ?? user.Status ?? '').toString().toLowerCase();
+        if (st === 'suspended' || st === 'deleted') {
+          console.log('🔍 Debug AccountStatusReason search for restricted user:', {
+            id: user.id ?? user.Id,
+            accountStatusReason_camelCase: user.accountStatusReason,
+            AccountStatusReason_PascalCase: user.AccountStatusReason,
+            reason: user.reason,
+            Reason: user.Reason,
+            allKeys: Object.keys(user),
+            foundValue: rawAccountStatusReason,
+            // Check all fields that might contain the reason
+            allFieldValues: Object.keys(user).reduce((acc, key) => {
+              if (key.toLowerCase().includes('reason') || key.toLowerCase().includes('account')) {
+                acc[key] = user[key];
+              }
+              return acc;
+            }, {}),
+          });
+        }
+        
+        // Create normalized object WITHOUT spreading user first to avoid override issues
+        const normalized = {
+          // Normalize common fields
+          id: user.id ?? user.Id,
+          Id: user.Id ?? user.id,
+          email: user.email ?? user.Email,
+          Email: user.Email ?? user.email,
+          fullName: user.fullName ?? user.FullName,
+          FullName: user.FullName ?? user.fullName,
+          status: user.status ?? user.Status,
+          Status: user.Status ?? user.status,
+          role: user.role ?? user.Role,
+          Role: user.Role ?? user.role,
+          createdAt: user.createdAt ?? user.CreatedAt,
+          CreatedAt: user.CreatedAt ?? user.createdAt,
+          // CRITICAL: Set AccountStatusReason fields - preserve the actual value
+          accountStatusReason: rawAccountStatusReason,
+          AccountStatusReason: rawAccountStatusReason,
+          reason: rawReason,
+          Reason: rawReason,
+          // Preserve reasonCode and reasonNote
+          reasonCode: user.reasonCode ?? user.ReasonCode ?? null,
+          ReasonCode: user.ReasonCode ?? user.reasonCode ?? null,
+          reasonNote: user.reasonNote ?? user.ReasonNote ?? null,
+          ReasonNote: user.ReasonNote ?? user.reasonNote ?? null,
+        };
+        
+        // Add any other fields from user that we haven't normalized yet
+        Object.keys(user).forEach(key => {
+          if (!normalized.hasOwnProperty(key) && !normalized.hasOwnProperty(key.charAt(0).toLowerCase() + key.slice(1))) {
+            normalized[key] = user[key];
+          }
+        });
+        
+        return normalized;
+      });
+      
+      // Debug: Log để kiểm tra AccountStatusReason có trong response không
+      if (normalizedUsers.length > 0) {
+        const restrictedUser = normalizedUsers.find(u => {
+          const st = (u.status ?? u.Status ?? '').toString().toLowerCase();
+          return st === 'suspended' || st === 'deleted';
+        });
+        if (restrictedUser) {
+          console.log('🔍 Restricted user data from API:', {
+            id: restrictedUser.id,
+            email: restrictedUser.email,
+            status: restrictedUser.status,
+            accountStatusReason: restrictedUser.accountStatusReason,
+            AccountStatusReason: restrictedUser.AccountStatusReason,
+            reason: restrictedUser.reason,
+            Reason: restrictedUser.Reason,
+            rawUser: usersData.find(u => (u.id ?? u.Id) === restrictedUser.id),
+            getReasonResult: getReasonTextForUser(restrictedUser),
+          });
+        }
+        const sampleUser = normalizedUsers[0];
+        console.log('🔍 Sample user data from API (normalized):', {
+          id: sampleUser.id,
+          email: sampleUser.email,
+          status: sampleUser.status,
+          accountStatusReason: sampleUser.accountStatusReason,
+          AccountStatusReason: sampleUser.AccountStatusReason,
+          reason: sampleUser.reason,
+          Reason: sampleUser.Reason,
+          rawData: usersData[0], // Log raw data để debug
+        });
+      }
+      setUsers(normalizedUsers);
+      const meta = res.Meta || res.meta || {};
+      setUsersPage(meta.Page || meta.page || page);
+      setUsersPageSize(meta.PageSize || meta.pageSize || pageSize);
+      setUsersTotalPages(meta.TotalPages || meta.totalPages || 1);
+    } catch (e) {
+      console.error('Load users failed', e);
+      showToast({ title: 'Lỗi', description: 'Không tải được danh sách người dùng', type: 'error' });
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
+  const updateUserRole = async (userId, role) => {
+    // Optimistic update: update UI immediately
+    const oldUsers = [...users];
+    setUsers(prev => prev.map(u => {
+      const id = u.id || u.Id;
+      if (id === userId) {
+        return { ...u, role: role, Role: role };
+      }
+      return u;
+    }));
+    
+    try {
+      await apiRequest(`/api/admin/users/${userId}/role`, { method: 'PUT', body: { role } });
+      showToast({ title: 'Thành công', description: 'Đã cập nhật vai trò', type: 'success' });
+      // No need to reload - optimistic update already done
+    } catch (e) {
+      console.error('Update role failed', e);
+      // Rollback on error
+      setUsers(oldUsers);
+      showToast({ title: 'Lỗi', description: 'Không cập nhật được vai trò', type: 'error' });
+    }
+  };
+
+  const updateUserStatus = async (userId, status) => {
+    // Optimistic update: update UI immediately
+    const reasonLabel = (() => {
+      const list = status === 'deleted' ? deletedReasonOptions : suspendedReasonOptions;
+      const found = list.find(x => x.code === pendingStatusReasonCode);
+      return found ? found.label : '';
+    })();
+    
+    // Build the reason text that will be sent to backend
+    // CRITICAL: If status is suspended/deleted, we MUST have a reason
+    // Priority: reasonNote (custom text) > reasonLabel (from code) > existing reason
+    let reasonText = '';
+    if (status === 'suspended' || status === 'deleted') {
+      // For suspended/deleted, we need a reason - use note if provided, otherwise use label from code
+      reasonText = pendingStatusReasonNote?.trim() || reasonLabel || '';
+    } else {
+      // For active status, clear reason (optional)
+      reasonText = '';
+    }
+    
+    const oldUsers = [...users];
+    setUsers(prev => prev.map(u => {
+      const id = u.id || u.Id;
+      if (id === userId) {
+        // For suspended/deleted, always use the new reason text
+        // For active, clear the reason
+        const finalReasonText = (status === 'suspended' || status === 'deleted') 
+          ? reasonText 
+          : '';
+        
+        return {
+          ...u,
+          status: status,
+          Status: status,
+          reasonCode: (status === 'suspended' || status === 'deleted') ? (pendingStatusReasonCode || u.reasonCode || u.ReasonCode) : null,
+          reasonNote: (status === 'suspended' || status === 'deleted') ? (pendingStatusReasonNote || u.reasonNote || u.ReasonNote) : null,
+          reason: finalReasonText,
+          ReasonCode: (status === 'suspended' || status === 'deleted') ? (pendingStatusReasonCode || u.ReasonCode || u.reasonCode) : null,
+          ReasonNote: (status === 'suspended' || status === 'deleted') ? (pendingStatusReasonNote || u.ReasonNote || u.reasonNote) : null,
+          Reason: finalReasonText,
+          // CRITICAL: Also update AccountStatusReason for consistency
+          accountStatusReason: finalReasonText,
+          AccountStatusReason: finalReasonText,
+        };
+      }
+      return u;
+    }));
+    
+    try {
+      // CRITICAL: Always send reason text for suspended/deleted status
+      const requestBody = {
+        status, 
+      };
+      
+      if (status === 'suspended' || status === 'deleted') {
+        // For suspended/deleted, always include reason fields
+        if (pendingStatusReasonCode) {
+          requestBody.reasonCode = pendingStatusReasonCode;
+        }
+        if (pendingStatusReasonNote?.trim()) {
+          requestBody.reasonNote = pendingStatusReasonNote.trim();
+        }
+        // Always send reason text (either from note or label)
+        if (reasonText) {
+          requestBody.reason = reasonText;
+        }
+      } else {
+        // For active status, clear reason fields
+        requestBody.reason = '';
+      }
+      
+      await apiRequest(`/api/admin/users/${userId}/status`, { 
+        method: 'PUT', 
+        body: requestBody
+      });
+      // Debug: Log successful update
+      console.log('✅ Status updated successfully:', {
+        userId,
+        status,
+        requestBody,
+      });
+      showToast({ title: 'Thành công', description: 'Đã cập nhật trạng thái', type: 'success' });
+      // Reload users to get AccountStatusReason from server and ensure data consistency
+      await loadUsers();
+    } catch (e) {
+      console.error('Update status failed', e);
+      // Rollback on error
+      setUsers(oldUsers);
+      showToast({ title: 'Lỗi', description: 'Không cập nhật được trạng thái', type: 'error' });
+    }
+  };
+
+  // No inline modal for user detail; we open seller profile in a new tab instead
+
+  useEffect(() => {
+    if (activeTab === 'users') {
+      loadUsers({ page: 1 });
+    }
+  }, [activeTab]);
 
   // Notification state
   const [notifications, setNotifications] = useState([]);
@@ -484,20 +894,7 @@ export const AdminDashboard = () => {
               // Reload notifications to show the new ones
               await loadAdminNotifications();
               
-              // Auto-show notification dropdown
-              setShowNotifications(true);
-              
-              // Show success toast
-              showToast({
-                title: '🔔 Thông báo tự động',
-                description: `Đã tự động gửi ${notificationsSent} thông báo kiểm định cho admin`,
-                type: 'success',
-              });
-              
-              // Auto-hide notification dropdown after 10 seconds
-              setTimeout(() => {
-                setShowNotifications(false);
-              }, 10000);
+              // Do not auto-open dropdown or show toast; icon bell already indicates updates
             }
           } catch (error) {
             console.error('❌ Error auto-sending notifications:', error);
@@ -645,7 +1042,8 @@ export const AdminDashboard = () => {
             title: item.title || item.name || item.productName || "Không có tiêu đề",
             brand: item.brand || item.brandName || "Không rõ",
             model: item.model || item.modelName || "Không rõ",
-            year: item.year || item.modelYear || item.manufacturingYear || "N/A",
+            year: item.manufactureYear || item.year || item.modelYear || item.manufacturingYear || "N/A",
+            manufactureYear: item.manufactureYear || item.year || item.modelYear || item.manufacturingYear || "N/A",
             price: parseFloat(item.price || item.listPrice || item.sellingPrice || 0),
             status: (() => {
               const rawStatus = norm(item.status || item.verificationStatus || item.approvalStatus || "pending");
@@ -731,8 +1129,25 @@ export const AdminDashboard = () => {
         sample: processedListings.slice(0, 2)
       });
 
-      // Sort listings to show newest first
+      // Sort listings: Pending first, then by updatedDate (recently updated first), then by createdDate
       const sortedListings = nonDeletedListings.sort((a, b) => {
+        // Priority 1: Pending status first
+        const isPendingA = a.status === "pending" ? 1 : 0;
+        const isPendingB = b.status === "pending" ? 1 : 0;
+        if (isPendingA !== isPendingB) {
+          return isPendingB - isPendingA; // Pending items first
+        }
+        
+        // Priority 2: Recently updated products first (only for pending items)
+        if (a.status === "pending" && b.status === "pending") {
+          const updatedA = new Date(a.updatedDate || a.createdDate || 0);
+          const updatedB = new Date(b.updatedDate || b.createdDate || 0);
+          if (updatedA.getTime() !== updatedB.getTime()) {
+            return updatedB - updatedA; // Most recently updated first
+          }
+        }
+        
+        // Priority 3: Newest created first
         const dateA = new Date(a.createdDate || 0);
         const dateB = new Date(b.createdDate || 0);
         return dateB - dateA;
@@ -1007,7 +1422,7 @@ export const AdminDashboard = () => {
         );
       } else {
         // Regular status filter
-        filtered = filtered.filter((l) => l.status === statusFilter);
+      filtered = filtered.filter((l) => l.status === statusFilter);
       }
     }
 
@@ -1184,6 +1599,13 @@ export const AdminDashboard = () => {
       
       // ✅ CHỈ MỞ MODAL - KHÔNG GỌI API, KHÔNG THAY ĐỔI STATUS
       // Trạng thái chỉ thay đổi khi admin bấm "Hoàn thành kiểm định"
+      console.log("📋 Product data for inspection:", {
+        manufactureYear: product.manufactureYear,
+        year: product.year,
+        mileage: product.mileage,
+        condition: product.condition,
+        fullProduct: product
+      });
       setCurrentInspectionProduct(product);
       setInspectionImages([]);
       setInspectionFiles([]);
@@ -1376,17 +1798,96 @@ export const AdminDashboard = () => {
         return; // Dừng lại nếu upload thất bại
       }
       
-      // ✅ BƯỚC 3: Cập nhật VerificationStatus thành "Verified" bằng API verify
+      // ✅ BƯỚC 3: Cập nhật VerificationStatus thành "Verified" TRƯỚC (quan trọng!)
       console.log(`🔄 Calling verify API for product ${productId}...`);
       try {
         const verifyResponse = await apiRequest(`/api/Product/verify/${productId}`, {
           method: 'PUT'
         });
         console.log("✅ Product verified successfully:", verifyResponse);
-      } catch (updateError) {
-        console.error("❌ Failed to verify product:", updateError);
+      } catch (verifyError) {
+        console.error("❌ Failed to verify product:", verifyError);
         showToast("Không thể hoàn thành kiểm định. Vui lòng thử lại.", "error");
         return;
+      }
+      
+      // ✅ BƯỚC 4: Cập nhật thông tin sản phẩm SAU khi đã verify (nếu admin đã chỉnh sửa)
+      console.log(`🔄 Updating product information for product ${productId} using admin API...`);
+      console.log("📋 Current inspection product data:", currentInspectionProduct);
+      
+      try {
+        // Helper function to parse int safely
+        const safeParseInt = (value) => {
+          if (!value || value === "N/A" || value === "") return null;
+          const parsed = parseInt(value);
+          return isNaN(parsed) ? null : parsed;
+        };
+
+        // Helper function to parse float safely
+        const safeParseFloat = (value) => {
+          if (!value || value === "N/A" || value === "") return 0;
+          const parsed = parseFloat(value);
+          return isNaN(parsed) ? 0 : parsed;
+        };
+
+        // Chuẩn bị dữ liệu cho ProductRequest DTO (PascalCase)
+        const productData = {
+          // ⚠️ ProductType là REQUIRED - phải có giá trị "Vehicle" hoặc "Battery"
+          ProductType: currentInspectionProduct.productType || "Vehicle",
+          Title: currentInspectionProduct.title || "",
+          Description: currentInspectionProduct.description || "",
+          Price: safeParseFloat(currentInspectionProduct.price),
+          Brand: currentInspectionProduct.brand || "",
+          Model: currentInspectionProduct.model || "",
+          Condition: currentInspectionProduct.condition || "",
+          // Các trường cho xe (nếu là xe)
+          VehicleType: currentInspectionProduct.vehicleType || null,
+          ManufactureYear: safeParseInt(currentInspectionProduct.manufactureYear || currentInspectionProduct.year),
+          Mileage: safeParseInt(currentInspectionProduct.mileage),
+          Transmission: currentInspectionProduct.transmission || null,
+          SeatCount: safeParseInt(currentInspectionProduct.seatCount),
+          LicensePlate: currentInspectionProduct.licensePlate || "",
+          // Các trường cho pin (nếu là pin) - set null để backend giữ giá trị cũ
+          BatteryType: currentInspectionProduct.batteryType || null,
+          BatteryHealth: currentInspectionProduct.batteryHealth || null,
+          Capacity: currentInspectionProduct.capacity || null,
+          Voltage: currentInspectionProduct.voltage || null,
+          BMS: currentInspectionProduct.bms || null,
+          CellType: currentInspectionProduct.cellType || null,
+          CycleCount: safeParseInt(currentInspectionProduct.cycleCount)
+        };
+
+        console.log("📝 Product data to update (ProductRequest DTO):", JSON.stringify(productData, null, 2));
+
+        // ✅ Gọi API PUT /api/Product/admin/update/{id}
+        console.log(`🚀 Calling API: PUT /api/Product/admin/update/${productId}`);
+        const updateResponse = await apiRequest(`/api/Product/admin/update/${productId}`, {
+          method: 'PUT',
+          body: productData
+        });
+        
+        console.log("✅ Product information updated successfully (status preserved):", updateResponse);
+        console.log("✅ Updated fields from response:", {
+          Title: updateResponse.title,
+          Brand: updateResponse.brand,
+          Model: updateResponse.model,
+          Price: updateResponse.price,
+          Condition: updateResponse.condition,
+          ManufactureYear: updateResponse.manufactureYear,
+          Mileage: updateResponse.mileage,
+          LicensePlate: updateResponse.licensePlate
+        });
+        
+      } catch (updateError) {
+        console.error("❌ Failed to update product information:", updateError);
+        console.error("❌ Error details:", {
+          status: updateError.status,
+          message: updateError.message,
+          data: updateError.data
+        });
+        console.error("❌ Full error object:", updateError);
+        // Không return - tiếp tục đóng modal ngay cả khi update thất bại
+        // Vì đã verify thành công rồi
       }
       
       // ✅ BƯỚC 4: Cập nhật local state
@@ -1410,7 +1911,11 @@ export const AdminDashboard = () => {
         // Không dừng lại nếu gửi thông báo thất bại
       }
       
-      // ✅ BƯỚC 6: Đóng modal và reset state
+      // ✅ BƯỚC 6: Refresh data để cập nhật UI
+      console.log("🔄 Refreshing admin data...");
+      await loadAdminData();
+      
+      // ✅ BƯỚC 7: Đóng modal và reset state
       console.log("🔄 Closing inspection modal and resetting state...");
       setShowInspectionModal(false);
       setCurrentInspectionProduct(null);
@@ -1418,10 +1923,7 @@ export const AdminDashboard = () => {
       setInspectionFiles([]);
       setShowNotifications(false);
       
-      // Refresh data
-      await loadAdminData();
-      
-      showToast(`✅ Đã hoàn thành kiểm định xe thành công! ${watermarkedFiles.length} hình ảnh đã được thêm watermark "VERIFIED" và lưu vào tin đăng.`, "success");
+      showToast("✅ Đã hoàn thành kiểm định xe và cập nhật thông tin thành công!", "success");
       
     } catch (error) {
       console.error("❌ Failed to complete inspection:", error);
@@ -1470,7 +1972,7 @@ export const AdminDashboard = () => {
     };
 
     const config = statusConfig[verificationStatus] || { color: "bg-gray-100 text-gray-800", text: "Không xác định" };
-    
+
     return (
       <span className={`px-2 py-1 text-xs font-medium rounded-full ${config.color}`}>
         {config.text}
@@ -1517,18 +2019,18 @@ export const AdminDashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 overflow-x-hidden">
       {/* Sidebar */}
       <div className="fixed left-0 top-0 h-full w-64 bg-white shadow-lg z-10">
         {/* Logo Section */}
-        <div className="p-6 border-b border-gray-200">
+        <div className="px-6 py-4">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
               <Car className="h-6 w-6 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-gray-900">EV Market</h1>
-              <p className="text-sm text-gray-500">Admin Portal</p>
+              <h1 className="text-xl font-bold text-gray-900 leading-tight">EV Market</h1>
+              <p className="text-sm text-gray-500 leading-tight">Cổng quản trị</p>
             </div>
           </div>
         </div>
@@ -1540,15 +2042,9 @@ export const AdminDashboard = () => {
               <span className="text-white font-semibold text-lg">A</span>
             </div>
             <div>
-              <h3 className="font-semibold text-gray-900">Admin User</h3>
-              <p className="text-sm text-gray-500">Super Administrator</p>
+              <h3 className="font-semibold text-gray-900">Quản trị viên</h3>
+              <p className="text-sm text-gray-500">Quản trị cấp cao</p>
             </div>
-          </div>
-          <div className="mt-3 flex items-center justify-between">
-            <div className="flex-1 bg-gray-200 rounded-full h-2">
-              <div className="bg-green-500 h-2 rounded-full" style={{ width: '95%' }}></div>
-            </div>
-            <span className="text-xs text-gray-500 ml-2">95% uptime</span>
           </div>
         </div>
 
@@ -1564,7 +2060,7 @@ export const AdminDashboard = () => {
               onClick={() => setActiveTab("dashboard")}
             >
               <BarChart3 className="h-5 w-5" />
-              <span className="font-medium">Dashboard</span>
+              <span className="font-medium">Bảng điều khiển</span>
             </div>
             <div 
               className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
@@ -1575,7 +2071,7 @@ export const AdminDashboard = () => {
               onClick={() => setActiveTab("vehicles")}
             >
               <Car className="h-5 w-5" />
-              <span>Vehicle Management</span>
+              <span>Quản lý phương tiện</span>
             </div>
             <div 
               className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
@@ -1586,7 +2082,18 @@ export const AdminDashboard = () => {
               onClick={() => setActiveTab("batteries")}
             >
               <Shield className="h-5 w-5" />
-              <span>Battery Management</span>
+              <span>Quản lý pin</span>
+            </div>
+            <div 
+              className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
+                activeTab === "users" 
+                  ? "bg-blue-50 text-blue-600" 
+                  : "text-gray-600 hover:bg-gray-50"
+              }`}
+              onClick={() => setActiveTab("users")}
+            >
+              <Users className="h-5 w-5" />
+              <span>Quản lý người dùng</span>
             </div>
             <div 
               className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
@@ -1597,172 +2104,54 @@ export const AdminDashboard = () => {
               onClick={() => setActiveTab("transactions")}
             >
               <DollarSign className="h-5 w-5" />
-              <span>Transaction Management</span>
+              <span>Quản lý giao dịch</span>
             </div>
-            <div className="flex items-center space-x-3 p-3 text-gray-600 hover:bg-gray-50 rounded-lg cursor-pointer">
-              <Users className="h-5 w-5" />
-              <span>User Management</span>
+            <div 
+              className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
+                activeTab === "reports" 
+                  ? "bg-blue-50 text-blue-600" 
+                  : "text-gray-600 hover:bg-gray-50"
+              }`}
+              onClick={() => setActiveTab("reports")}
+            >
+              <Flag className="h-5 w-5" />
+              <span>Báo cáo vi phạm</span>
             </div>
           </div>
         </nav>
-
-        {/* Tips Section */}
-        <div className="absolute bottom-20 left-4 right-4">
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-            <div className="flex items-start space-x-3">
-              <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
-                <span className="text-yellow-600 text-sm">💡</span>
-              </div>
-              <div>
-                <p className="text-sm text-yellow-800 font-medium">Tips</p>
-                <p className="text-xs text-yellow-700">Quick responses can help improve customer satisfaction.</p>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Main Content */}
-      <div className="ml-64 p-8">
+      <div className="ml-64 p-8 overflow-x-hidden">
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-900 mb-2">
-                {activeTab === "dashboard" && "Administration Dashboard"}
-                {activeTab === "vehicles" && "Vehicle Management"}
-                {activeTab === "batteries" && "Battery Management"}
-                {activeTab === "transactions" && "Transaction Management"}
+                {activeTab === "dashboard" && "Bảng điều khiển quản trị"}
+                {activeTab === "vehicles" && "Quản lý phương tiện"}
+                {activeTab === "batteries" && "Quản lý pin"}
+                {activeTab === "transactions" && "Quản lý giao dịch"}
+                {activeTab === "reports" && "Báo cáo vi phạm"}
               </h1>
               <p className="text-gray-600">
-                {activeTab === "dashboard" && "EV Market system overview • Realtime update"}
-                {activeTab === "vehicles" && "Manage all vehicle listings and approvals"}
-                {activeTab === "batteries" && "Manage all battery listings and approvals"}
-                {activeTab === "transactions" && "Manage completed transactions and seller confirmations"}
+                {activeTab === "dashboard" && "Tổng quan hệ thống EV Market • Cập nhật theo thời gian thực"}
+                {activeTab === "vehicles" && "Quản lý bài đăng xe và phê duyệt"}
+                {activeTab === "batteries" && "Quản lý bài đăng pin và phê duyệt"}
+                {activeTab === "transactions" && "Quản lý giao dịch hoàn tất và xác nhận từ người bán"}
+                {activeTab === "reports" && "Xem xét và xử lý các báo cáo vi phạm từ người dùng"}
               </p>
             </div>
-            <div className="flex items-center space-x-2">
-              {/* Notification Bell */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowNotifications(!showNotifications)}
-                  className="relative p-2 text-gray-600 hover:text-blue-600 transition-colors"
-                  title="Thông báo"
-                >
-                  <Bell className="h-5 w-5" />
-                  {unreadNotificationCount > 0 && (
-                    <div className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full min-w-[16px] h-[16px] flex items-center justify-center">
-                      {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
-                    </div>
-                  )}
-                </button>
-                
-                {/* Notification Dropdown */}
-                {showNotifications && (
-                  <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-lg shadow-lg border border-gray-200 z-50 max-h-96 overflow-y-auto">
-                    <div className="p-4 border-b border-gray-200">
-                      <h3 className="text-lg font-semibold text-gray-900">Thông báo</h3>
-                      <p className="text-sm text-gray-500">{notifications.length} thông báo</p>
-                    </div>
-                    
-                    <div className="max-h-64 overflow-y-auto">
-                      {notifications.length === 0 ? (
-                        <div className="p-4 text-center text-gray-500">
-                          <Bell className="h-8 w-8 mx-auto mb-2 text-gray-300" />
-                          <p>Không có thông báo nào</p>
-                        </div>
-                      ) : (
-                        notifications.map((notification) => (
-                          <div
-                            key={notification.id || notification.notificationId}
-                            className={`p-4 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
-                              !notification.isRead ? 'bg-blue-50' : ''
-                            }`}
-                            onClick={() => {
-                              // Handle notification click
-                              if (notification.notificationType === 'verification_payment_success' && notification.metadata?.productId) {
-                                // Find the product and show inspection modal
-                                const product = allListings.find(p => getId(p) === notification.metadata.productId);
-                                if (product) {
-                                  setCurrentInspectionProduct(product);
-                                  setShowInspectionModal(true);
-                                  setShowNotifications(false);
-                                }
-                              }
-                            }}
-                          >
-                            <div className="flex items-start space-x-3">
-                              <div className={`w-2 h-2 rounded-full mt-2 ${
-                                !notification.isRead ? 'bg-blue-500' : 'bg-gray-300'
-                              }`} />
-                              <div className="flex-1">
-                                <h4 className="text-sm font-medium text-gray-900">
-                                  {notification.title}
-                                </h4>
-                                <p className="text-sm text-gray-600 mt-1">
-                                  {notification.content}
-                                </p>
-                                <p className="text-xs text-gray-400 mt-2">
-                                  {notification.metadata?.formattedDate || 
-                                   formatDate(notification.createdAt || notification.created_date)}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                    
-                    <div className="p-4 border-t border-gray-200">
-                      <button
-                        onClick={() => {
-                          setShowNotifications(false);
-                          // Navigate to full notifications page if needed
-                        }}
-                        className="w-full text-center text-sm text-blue-600 hover:text-blue-800"
-                      >
-                        Xem tất cả thông báo
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Auto-send notifications button - hidden as it's now automatic */}
-              {/* <button
-                onClick={handleForceSendNotifications}
-                className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                title="Gửi thông báo cho thanh toán kiểm định thành công"
-              >
-                <Bell className="h-4 w-4" />
-                <span>Gửi thông báo</span>
-              </button> */}
-
-              <button
-                onClick={refreshData}
-                disabled={loading}
-                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {loading ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Activity className="h-4 w-4" />
-                )}
-                <span>Làm mới</span>
-              </button>
-              
-              {skipImageLoading && (
-              <button
-                  onClick={() => {
-                    setSkipImageLoading(false);
-                    refreshData();
-                  }}
-                  className="flex items-center space-x-2 px-3 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors text-sm"
-                >
-                  <span>Bật tải hình ảnh</span>
-              </button>
-              )}
-            </div>
+            <button
+              onClick={() => {
+                signOut();
+                navigate("/");
+              }}
+              className="flex items-center space-x-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors duration-200 shadow-md hover:shadow-lg"
+            >
+              <LogOut className="h-5 w-5" />
+              <span>Đăng xuất</span>
+            </button>
           </div>
         </div>
 
@@ -1773,19 +2162,16 @@ export const AdminDashboard = () => {
           <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">TOTAL VALUE</p>
+                  <p className="text-gray-500 text-sm font-medium">TỔNG GIÁ TRỊ</p>
                 <p className="text-3xl font-bold text-gray-900 mt-2">
                     {formatPrice(stats.totalRevenue)}
                 </p>
-                  <p className="text-xs text-gray-600 mt-1">Approved Products</p>
-              </div>
-                <div className="bg-gray-100 p-4 rounded-xl">
-                  <DollarSign className="h-8 w-8 text-gray-600" />
+                  <p className="text-xs text-gray-600 mt-1">Sản phẩm đã duyệt</p>
               </div>
             </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">This Year: {formatPrice(stats.thisYearRevenue)}</p>
-                <p className="text-xs text-gray-500">This Month: {formatPrice(stats.thisMonthRevenue)}</p>
+                <p className="text-xs text-gray-500">Năm nay: {formatPrice(stats.thisYearRevenue)}</p>
+                <p className="text-xs text-gray-500">Tháng này: {formatPrice(stats.thisMonthRevenue)}</p>
             </div>
           </div>
 
@@ -1793,19 +2179,19 @@ export const AdminDashboard = () => {
           <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">TODAY'S VALUE</p>
+                  <p className="text-gray-500 text-sm font-medium">GIÁ TRỊ HÔM NAY</p>
                   <p className="text-3xl font-bold text-gray-900 mt-2">
                     {formatPrice(stats.todaysRevenue)}
                   </p>
-                  <p className="text-xs text-gray-600 mt-1">Approved Today</p>
+                  <p className="text-xs text-gray-600 mt-1">Đã duyệt hôm nay</p>
               </div>
                 <div className="bg-green-100 p-4 rounded-xl">
                   <TrendingUp className="h-8 w-8 text-green-600" />
               </div>
             </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Average/Month: {formatPrice(stats.thisYearRevenue / 12)}</p>
-                <p className="text-xs text-gray-500">Products Approved: {stats.approvedListings}</p>
+                <p className="text-xs text-gray-500">Trung bình/Tháng: {formatPrice(stats.thisYearRevenue / 12)}</p>
+                <p className="text-xs text-gray-500">Sản phẩm đã duyệt: {stats.approvedListings}</p>
             </div>
           </div>
 
@@ -1813,19 +2199,19 @@ export const AdminDashboard = () => {
           <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">TOTAL ORDERS</p>
+                  <p className="text-gray-500 text-sm font-medium">TỔNG ĐƠN HÀNG</p>
                   <p className="text-3xl font-bold text-gray-900 mt-2">
                     {stats.totalOrders}
                   </p>
-                  <p className="text-xs text-gray-600 mt-1">All Time</p>
+                  <p className="text-xs text-gray-600 mt-1">Tổng cộng</p>
               </div>
                 <div className="bg-blue-100 p-4 rounded-xl">
                   <Package className="h-8 w-8 text-blue-600" />
               </div>
             </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Completed: {stats.completedOrders}</p>
-                <p className="text-xs text-gray-500">Active: {stats.activeOrders}</p>
+                <p className="text-xs text-gray-500">Hoàn tất: {stats.completedOrders}</p>
+                <p className="text-xs text-gray-500">Đang hoạt động: {stats.activeOrders}</p>
             </div>
           </div>
 
@@ -1833,19 +2219,19 @@ export const AdminDashboard = () => {
           <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">AVERAGE VALUE/PRODUCT</p>
+                  <p className="text-gray-500 text-sm font-medium">GIÁ TRỊ TB/MỖI SẢN PHẨM</p>
                 <p className="text-3xl font-bold text-gray-900 mt-2">
                     {formatPrice(stats.averageOrderValue)}
                 </p>
-                  <p className="text-xs text-gray-600 mt-1">Per Product</p>
+                  <p className="text-xs text-gray-600 mt-1">Mỗi sản phẩm</p>
               </div>
                 <div className="bg-blue-100 p-4 rounded-xl">
                   <Activity className="h-8 w-8 text-blue-600" />
               </div>
             </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Highest: {formatPrice(stats.averageOrderValue * 1.5)}</p>
-                <p className="text-xs text-gray-500">Lowest: {formatPrice(stats.averageOrderValue * 0.5)}</p>
+                <p className="text-xs text-gray-500">Cao nhất: {formatPrice(stats.averageOrderValue * 1.5)}</p>
+                <p className="text-xs text-gray-500">Thấp nhất: {formatPrice(stats.averageOrderValue * 0.5)}</p>
           </div>
         </div>
           </div>
@@ -1858,19 +2244,19 @@ export const AdminDashboard = () => {
             <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">COMPLETED ORDERS</p>
+                  <p className="text-gray-500 text-sm font-medium">ĐƠN HÀNG HOÀN TẤT</p>
                   <p className="text-3xl font-bold text-gray-900 mt-2">
                     {stats.completedOrders}
                   </p>
-                  <p className="text-xs text-gray-600 mt-1">{stats.completionRate.toFixed(1)}% Completion Rate</p>
+                  <p className="text-xs text-gray-600 mt-1">Tỉ lệ hoàn tất {stats.completionRate.toFixed(1)}%</p>
               </div>
                 <div className="bg-green-100 p-4 rounded-xl">
                   <CheckCircle className="h-8 w-8 text-green-600" />
                 </div>
               </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Active Orders: {stats.activeOrders}</p>
-                <p className="text-xs text-gray-500">Total Value: {formatPrice(stats.totalRevenue)}</p>
+                <p className="text-xs text-gray-500">Đơn đang hoạt động: {stats.activeOrders}</p>
+                <p className="text-xs text-gray-500">Tổng giá trị: {formatPrice(stats.totalRevenue)}</p>
             </div>
           </div>
 
@@ -1878,19 +2264,19 @@ export const AdminDashboard = () => {
             <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">THIS MONTH</p>
+                  <p className="text-gray-500 text-sm font-medium">THÁNG NÀY</p>
                   <p className="text-3xl font-bold text-gray-900 mt-2">
                     {formatPrice(stats.thisMonthRevenue)}
                 </p>
-                  <p className="text-xs text-gray-600 mt-1">Month {new Date().getMonth() + 1}/{new Date().getFullYear()}</p>
+                  <p className="text-xs text-gray-600 mt-1">Tháng {new Date().getMonth() + 1}/{new Date().getFullYear()}</p>
               </div>
                 <div className="bg-purple-100 p-4 rounded-xl">
                   <Calendar className="h-8 w-8 text-purple-600" />
                 </div>
               </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Average/Day: {formatPrice(stats.thisMonthRevenue / new Date().getDate())}</p>
-                <p className="text-xs text-gray-500">Total Orders: {stats.totalOrders}</p>
+                <p className="text-xs text-gray-500">Trung bình/Ngày: {formatPrice(stats.thisMonthRevenue / new Date().getDate())}</p>
+                <p className="text-xs text-gray-500">Tổng đơn hàng: {stats.totalOrders}</p>
             </div>
           </div>
 
@@ -1898,19 +2284,19 @@ export const AdminDashboard = () => {
             <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">VEHICLES & BATTERIES</p>
+                  <p className="text-gray-500 text-sm font-medium">XE & PIN</p>
                   <p className="text-2xl font-bold text-gray-900 mt-2">
                     {stats.totalVehicles + stats.totalBatteries}
                   </p>
-                  <p className="text-xs text-gray-600 mt-1">Total Products</p>
+                  <p className="text-xs text-gray-600 mt-1">Tổng sản phẩm</p>
               </div>
                 <div className="bg-orange-100 p-4 rounded-xl">
                   <Car className="h-8 w-8 text-orange-600" />
             </div>
           </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Vehicles: {stats.totalVehicles}</p>
-                <p className="text-xs text-gray-500">Batteries: {stats.totalBatteries}</p>
+                <p className="text-xs text-gray-500">Xe: {stats.totalVehicles}</p>
+                <p className="text-xs text-gray-500">Pin: {stats.totalBatteries}</p>
         </div>
             </div>
           </div>
@@ -1923,19 +2309,19 @@ export const AdminDashboard = () => {
             <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">PENDING INSPECTIONS</p>
+                  <p className="text-gray-500 text-sm font-medium">KIỂM ĐỊNH ĐANG CHỜ</p>
                   <p className="text-3xl font-bold text-gray-900 mt-2">
                     {allListings.filter(l => l.verificationStatus === "Requested").length}
-                  </p>
-                  <p className="text-xs text-gray-600 mt-1">Awaiting Admin Action</p>
+                </p>
+                  <p className="text-xs text-gray-600 mt-1">Chờ quản trị viên xử lý</p>
               </div>
                 <div className="bg-yellow-100 p-4 rounded-xl">
                   <Camera className="h-8 w-8 text-yellow-600" />
                 </div>
               </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">In Progress: {allListings.filter(l => l.verificationStatus === "InProgress").length}</p>
-                <p className="text-xs text-gray-500">Completed: {allListings.filter(l => l.verificationStatus === "Verified").length}</p>
+                <p className="text-xs text-gray-500">Đang thực hiện: {allListings.filter(l => l.verificationStatus === "InProgress").length}</p>
+                <p className="text-xs text-gray-500">Đã hoàn thành: {allListings.filter(l => l.verificationStatus === "Verified").length}</p>
             </div>
           </div>
 
@@ -1943,25 +2329,371 @@ export const AdminDashboard = () => {
             <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">RECENT NOTIFICATIONS</p>
+                  <p className="text-gray-500 text-sm font-medium">THÔNG BÁO GẦN ĐÂY</p>
                   <p className="text-3xl font-bold text-gray-900 mt-2">
                     {unreadNotificationCount}
                   </p>
-                  <p className="text-xs text-gray-600 mt-1">Unread Messages</p>
+                  <p className="text-xs text-gray-600 mt-1">Tin chưa đọc</p>
               </div>
                 <div className="bg-blue-100 p-4 rounded-xl">
                   <Bell className="h-8 w-8 text-blue-600" />
-                </div>
-              </div>
-              <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Total: {notifications.length}</p>
-                <p className="text-xs text-gray-500">Verification: {notifications.filter(n => n.notificationType === 'verification_payment_success').length}</p>
             </div>
+          </div>
+              <div className="mt-4 space-y-1">
+                <p className="text-xs text-gray-500">Tổng: {notifications.length}</p>
+                <p className="text-xs text-gray-500">Kiểm định: {notifications.filter(n => n.notificationType === 'verification_payment_success').length}</p>
+        </div>
           </div>
         </div>
         )}
 
-            {/* Filters and Search */}
+        {/* Users Management */}
+        {activeTab === 'users' && (
+          <div className="bg-white rounded-2xl shadow-lg p-6 mb-8 border border-gray-100">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
+              <div className="flex-1">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+                  <input
+                    type="text"
+                    placeholder="Tìm theo tên, email, số điện thoại"
+                    value={usersSearch}
+                    onChange={(e) => setUsersSearch(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') loadUsers({ page: 1, search: e.target.value }); }}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <select
+                  value={usersRole}
+                  onChange={(e) => { setUsersRole(e.target.value); loadUsers({ page: 1, role: e.target.value }); }}
+                  className="px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="">Tất cả vai trò</option>
+                  <option value="admin">Quản trị viên</option>
+                  <option value="user">Người dùng</option>
+                </select>
+                <select
+                  value={usersStatus}
+                  onChange={(e) => { setUsersStatus(e.target.value); loadUsers({ page: 1, status: e.target.value }); }}
+                  className="px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="">Tất cả trạng thái</option>
+                  <option value="active">Đang hoạt động</option>
+                  <option value="suspended">Đã tạm khóa</option>
+                  <option value="deleted">Đã xóa</option>
+                </select>
+                <button
+                  onClick={() => loadUsers({ page: 1 })}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  disabled={usersLoading}
+                >
+                  {usersLoading ? 'Đang tải...' : 'Làm mới'}
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <h3 className="text-base font-semibold text-gray-900 mb-3">Tài khoản đang hoạt động</h3>
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Họ tên</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Email</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Vai trò</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Trạng thái</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Ngày tạo</th>
+                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500">Chi tiết</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-100">
+                  {(() => {
+                    const activeUsersList = users.filter(u => {
+                      const st = (u.status || u.Status || 'active').toString().toLowerCase();
+                      return st === 'active' || st === '';
+                    });
+                    return activeUsersList.map((u) => (
+                    <tr key={u.id || u.Id}>
+                      <td className="px-4 py-3 text-sm text-gray-900">{u.fullName || u.FullName || '-'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{u.email || u.Email}</td>
+                      <td className="px-4 py-3 text-sm">
+                        {(() => {
+                          const role = (u.role || u.Role || 'user').toString().toLowerCase();
+                          // Map sub_admin to user, only show 2 roles: admin and user
+                          const normalizedRole = role === 'admin' ? 'admin' : 'user';
+                          const label = normalizedRole === 'admin' ? 'Quản trị viên' : 'Người dùng';
+                          const cls = normalizedRole === 'admin' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800';
+                          return <span className={`px-2 py-1 text-xs font-medium rounded-full ${cls}`}>{label}</span>;
+                        })()}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <select
+                          title={getReasonTextForUser(u) || undefined}
+                          defaultValue={(u.status || u.Status || 'active').toLowerCase()}
+                          onChange={(e) => {
+                            const id = u.id || u.Id;
+                            const next = e.target.value;
+                            if (next === 'suspended' || next === 'deleted') {
+                              setPendingStatusUserId(id);
+                              setPendingStatus(next);
+                              setPendingStatusReason('');
+                              setShowStatusModal(true);
+                              // revert UI select until confirmed
+                              e.target.value = (u.status || u.Status || 'active').toLowerCase();
+                            } else if (next === 'active') {
+                              // When restoring to active, clear the reason but keep status update
+                              updateUserStatus(id, next);
+                            } else {
+                              updateUserStatus(id, next);
+                            }
+                          }}
+                          className="px-2 py-1 border border-gray-300 rounded"
+                        >
+                          <option value="active">Đang hoạt động</option>
+                          <option value="suspended">Đã tạm khóa</option>
+                          <option value="deleted">Đã xóa</option>
+                        </select>
+                        {(() => {
+                          const txt = getReasonTextForUser(u);
+                          const st = (u.status || u.Status || '').toString().toLowerCase();
+                          if (!txt || (st !== 'suspended' && st !== 'deleted')) return null;
+                          return (
+                            <div className="mt-1 text-xs text-gray-500 truncate" title={txt}>{txt}</div>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {u.createdAt || u.CreatedAt ? new Date(u.createdAt || u.CreatedAt).toLocaleDateString() : '-'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right">
+                        <button
+                          className="inline-flex items-center justify-center p-2 rounded hover:bg-gray-100 text-blue-600"
+                          title="Xem hồ sơ"
+                          onClick={() => {
+                            const id = u.id || u.Id;
+                            if (id) {
+                              navigate(`/seller/${id}`);
+                            } else {
+                              showToast({ title: 'Lỗi', description: 'Không xác định được ID người dùng', type: 'error' });
+                            }
+                          }}
+                        >
+                          <Eye className="h-5 w-5" />
+                        </button>
+                      </td>
+                    </tr>
+                    ));
+                  })()}
+                  {(() => {
+                    const activeUsersList = users.filter(u => {
+                      const st = (u.status || u.Status || 'active').toString().toLowerCase();
+                      return st === 'active' || st === '';
+                    });
+                    return activeUsersList.length === 0 && !usersLoading && (
+                      <tr>
+                        <td className="px-4 py-6 text-center text-sm text-gray-500" colSpan={6}>Không có tài khoản đang hoạt động</td>
+                      </tr>
+                    );
+                  })()}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Restricted accounts table */}
+            {(() => {
+              const restrictedUsersList = users.filter(u => {
+                const st = (u.status || u.Status || '').toString().toLowerCase();
+                return st === 'suspended' || st === 'deleted';
+              });
+              return (
+                <div className="overflow-x-auto mt-8">
+                  <h3 className="text-base font-semibold text-gray-900 mb-3">Các tài khoản bị hạn chế</h3>
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Họ tên</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Email</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Vai trò</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Trạng thái</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Lý do</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Ngày tạo</th>
+                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500">Chi tiết</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-100">
+                      {restrictedUsersList.map((u) => (
+                        <tr key={u.id || u.Id}>
+                          <td className="px-4 py-3 text-sm text-gray-900">{u.fullName || u.FullName || '-'}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{u.email || u.Email}</td>
+                          <td className="px-4 py-3 text-sm">
+                            {(() => {
+                              const role = (u.role || u.Role || 'user').toString().toLowerCase();
+                              // Map sub_admin to user, only show 2 roles: admin and user
+                              const normalizedRole = role === 'admin' ? 'admin' : 'user';
+                              const label = normalizedRole === 'admin' ? 'Quản trị viên' : 'Người dùng';
+                              const cls = normalizedRole === 'admin' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800';
+                              return <span className={`px-2 py-1 text-xs font-medium rounded-full ${cls}`}>{label}</span>;
+                            })()}
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            <select
+                              title={getReasonTextForUser(u) || undefined}
+                              defaultValue={(u.status || u.Status || 'suspended').toLowerCase()}
+                              onChange={(e) => {
+                                const id = u.id || u.Id;
+                                const next = e.target.value;
+                                if (next === 'suspended' || next === 'deleted') {
+                                  setPendingStatusUserId(id);
+                                  setPendingStatus(next);
+                                  setPendingStatusReason('');
+                                  setPendingStatusReasonCode('');
+                                  setPendingStatusReasonNote('');
+                                  setShowStatusModal(true);
+                                  e.target.value = (u.status || u.Status || 'suspended').toLowerCase();
+                                } else {
+                                  updateUserStatus(id, next);
+                                }
+                              }}
+                              className="px-2 py-1 border border-gray-300 rounded"
+                            >
+                              <option value="active">Khôi phục hoạt động</option>
+                              <option value="suspended">Đã tạm khóa</option>
+                              <option value="deleted">Đã xóa</option>
+                            </select>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            {(() => {
+                              const txt = getReasonTextForUser(u);
+                              // Debug log for restricted accounts
+                              if ((u.status || u.Status || '').toString().toLowerCase() === 'suspended' || 
+                                  (u.status || u.Status || '').toString().toLowerCase() === 'deleted') {
+                                console.log('🔍 Restricted user reason:', {
+                                  id: u.id || u.Id,
+                                  email: u.email || u.Email,
+                                  status: u.status || u.Status,
+                                  accountStatusReason: u.accountStatusReason || u.AccountStatusReason,
+                                  reason: u.reason || u.Reason,
+                                  reasonCode: u.reasonCode || u.ReasonCode,
+                                  reasonNote: u.reasonNote || u.ReasonNote,
+                                  result: txt
+                                });
+                              }
+                              return txt ? <span className="line-clamp-2" title={txt}>{txt}</span> : '-';
+                            })()}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{u.createdAt || u.CreatedAt ? new Date(u.createdAt || u.CreatedAt).toLocaleDateString() : '-'}</td>
+                          <td className="px-4 py-3 text-sm text-right">
+                            <button
+                              className="inline-flex items-center justify-center p-2 rounded hover:bg-gray-100 text-blue-600"
+                              title="Xem hồ sơ"
+                              onClick={() => {
+                                const id = u.id || u.Id;
+                                if (id) {
+                                  navigate(`/seller/${id}`);
+                                } else {
+                                  showToast({ title: 'Lỗi', description: 'Không xác định được ID người dùng', type: 'error' });
+                                }
+                              }}
+                            >
+                              <Eye className="h-5 w-5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {restrictedUsersList.length === 0 && !usersLoading && (
+                        <tr>
+                          <td className="px-4 py-6 text-center text-sm text-gray-500" colSpan={7}>Không có tài khoản bị hạn chế</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
+
+            <div className="mt-4 flex items-center justify-between">
+              <div className="text-sm text-gray-600">Trang {usersPage} / {usersTotalPages}</div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="px-3 py-2 border rounded disabled:opacity-50"
+                  disabled={usersPage <= 1 || usersLoading}
+                  onClick={() => { const p = usersPage - 1; setUsersPage(p); loadUsers({ page: p }); }}
+                >
+                  Trước
+                </button>
+                <button
+                  className="px-3 py-2 border rounded disabled:opacity-50"
+                  disabled={usersPage >= usersTotalPages || usersLoading}
+                  onClick={() => { const p = usersPage + 1; setUsersPage(p); loadUsers({ page: p }); }}
+                >
+                  Sau
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* No inline modal; using seller profile page in new tab */}
+        {showStatusModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black bg-opacity-40" onClick={() => setShowStatusModal(false)} />
+            <div className="relative bg-white w-full max-w-md rounded-2xl shadow-xl p-6 z-10">
+              <h3 className="text-lg font-semibold text-gray-900 mb-3">{pendingStatus === 'suspended' ? 'Chọn lý do tạm khóa' : 'Chọn lý do xóa'}</h3>
+              <div className="space-y-3">
+                <select
+                  value={pendingStatusReasonCode}
+                  onChange={(e) => setPendingStatusReasonCode(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg p-3"
+                >
+                  <option value="">-- Chọn lý do --</option>
+                  {(pendingStatus === 'deleted' ? deletedReasonOptions : suspendedReasonOptions).map(opt => (
+                    <option key={opt.code} value={opt.code}>{opt.label}</option>
+                  ))}
+                </select>
+                {(pendingStatusReasonCode === 'OTHER') && (
+                  <textarea
+                    value={pendingStatusReasonNote}
+                    onChange={(e) => setPendingStatusReasonNote(e.target.value)}
+                    placeholder="Nhập ghi chú bổ sung..."
+                    className="w-full border border-gray-300 rounded-lg p-3 h-24 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                )}
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button className="px-4 py-2 rounded-lg border" onClick={() => setShowStatusModal(false)}>Hủy</button>
+                <button
+                  className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                  disabled={!pendingStatusUserId || !pendingStatusReasonCode || (pendingStatusReasonCode === 'OTHER' && pendingStatusReasonNote.trim().length === 0)}
+                  onClick={async () => {
+                    const uid = pendingStatusUserId;
+                    const st = pendingStatus;
+                    // Debug: Log before updating
+                    console.log('🔍 Submitting status change from modal:', {
+                      userId: uid,
+                      status: st,
+                      reasonCode: pendingStatusReasonCode,
+                      reasonNote: pendingStatusReasonNote,
+                    });
+                    setShowStatusModal(false);
+                    await updateUserStatus(uid, st);
+                    // Reset pending status fields after update
+                    setPendingStatusUserId(null);
+                    setPendingStatus('');
+                    setPendingStatusReason('');
+                    setPendingStatusReasonCode('');
+                    setPendingStatusReasonNote('');
+                  }}
+                >
+                  Xác nhận
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+            {/* Filters and Search - Hide on reports and users tabs */}
+            {activeTab !== "reports" && activeTab !== "users" && (
             <div className="bg-white rounded-2xl shadow-lg p-6 mb-8 border border-gray-100">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0 lg:space-x-6">
             <div className="flex-1">
@@ -2013,9 +2745,10 @@ export const AdminDashboard = () => {
             </div>
           </div>
         </div>
+        )}
 
-        {/* Listings Table - Hide on inspections and transactions tabs */}
-        {activeTab !== "inspections" && activeTab !== "transactions" && (
+        {/* Listings Table - Hide on inspections, transactions, reports and users tabs */}
+        {activeTab !== "inspections" && activeTab !== "transactions" && activeTab !== "reports" && activeTab !== "users" && (
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200">
             <h2 className="text-xl font-semibold text-gray-900">
@@ -2123,7 +2856,7 @@ export const AdminDashboard = () => {
                       
                       {/* Inspection button for products with Requested or InProgress verification status */}
                       {(listing.verificationStatus === "Requested" || listing.verificationStatus === "InProgress") && (
-                        <button
+                      <button
                           onClick={() => handleStartInspection(listing.id)}
                           className={`px-3 py-1 rounded-lg text-xs flex items-center space-x-1 ${
                             listing.verificationStatus === "InProgress" 
@@ -2134,7 +2867,7 @@ export const AdminDashboard = () => {
                         >
                           <Camera className="h-3 w-3" />
                           <span>{listing.verificationStatus === "InProgress" ? "Tiếp tục" : "Kiểm định"}</span>
-                        </button>
+                      </button>
                       )}
                         
                         {(listing.status === "pending" || listing.status === "Đang chờ duyệt" || listing.status === "Re-submit" || listing.status === "Draft") && listing.status !== "reserved" && (
@@ -2196,29 +2929,29 @@ export const AdminDashboard = () => {
                       <div className="flex items-center space-x-3">
                         <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
                           <Package className="h-6 w-6 text-white" />
-              </div>
+                </div>
                         <div>
                           <h3 className="text-xl font-bold text-gray-900">{product.title}</h3>
                           <p className="text-sm text-gray-600">Chi tiết sản phẩm</p>
-                            </div>
-                          </div>
+              </div>
+            </div>
                         <button
                         onClick={() => setExpandedDetails(false)}
                         className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                 >
                         <XCircle className="h-6 w-6 text-gray-500" />
                         </button>
-      </div>
+              </div>
 
                     {/* Content */}
-            <div className="p-6">
+              <div className="p-6">
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         {/* Images */}
                 <div>
                           <h4 className="text-lg font-semibold text-gray-900 mb-4">Hình ảnh</h4>
                           {product.images && product.images.length > 0 ? (
                     <div className="space-y-4">
-                      <div className="relative">
+                        <div className="relative">
                         <img
                                   src={product.images[currentImageIndex]}
                                   alt={product.title}
@@ -2248,8 +2981,8 @@ export const AdminDashboard = () => {
                   ) : (
                             <div className="w-full h-64 bg-gray-200 rounded-lg flex items-center justify-center">
                               <Package className="h-16 w-16 text-gray-400" />
-                    </div>
-                  )}
+                            </div>
+                          )}
                 </div>
 
                         {/* Details */}
@@ -2264,8 +2997,8 @@ export const AdminDashboard = () => {
                       <div>
                                 <p className="text-sm text-gray-500">Trạng thái</p>
                                 <p className="font-medium">{getStatusBadge(product.status)}</p>
-                      </div>
-                  </div>
+                          </div>
+                        </div>
 
                     <div className="grid grid-cols-2 gap-4">
                       <div>
@@ -2282,7 +3015,7 @@ export const AdminDashboard = () => {
                         <div>
                                 <p className="text-sm text-gray-500">Năm sản xuất</p>
                                 <p className="font-medium">{product.year}</p>
-                        </div>
+                            </div>
                       <div>
                                 <p className="text-sm text-gray-500">Giá</p>
                                 <p className="font-medium text-green-600">{formatPrice(product.price)}</p>
@@ -2335,8 +3068,8 @@ export const AdminDashboard = () => {
                                   <p className="text-sm text-gray-500">Email</p>
                                   <p className="font-medium">{product.sellerEmail}</p>
                               </div>
-                              )}
-                              </div>
+                            )}
+                          </div>
 
                             {product.rejectionReason && (
                             <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -2344,21 +3077,21 @@ export const AdminDashboard = () => {
                                 <p className="text-sm text-red-700 mt-1">{product.rejectionReason}</p>
                               </div>
                     )}
-                              </div>
-                              </div>
-              </div>
+                          </div>
+                        </div>
+                      </div>
 
                       {/* Actions */}
                       <div className="mt-6 flex items-center justify-end space-x-3">
-                      <button
+                        <button
                           onClick={() => setExpandedDetails(false)}
                           className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-                      >
+                        >
                           Đóng
-                      </button>
+                        </button>
                         {(product.status === "pending" || product.status === "Re-submit" || product.status === "Draft") && (
                           <>
-                      <button
+                          <button
                               onClick={() => {
                                 setExpandedDetails(false);
                                 handleApprove(product.id);
@@ -2372,7 +3105,7 @@ export const AdminDashboard = () => {
                                 <CheckCircle className="h-4 w-4" />
                               )}
                               <span>Duyệt</span>
-                      </button>
+                          </button>
                             <button
                               onClick={() => {
                                 setExpandedDetails(false);
@@ -2386,14 +3119,14 @@ export const AdminDashboard = () => {
                             </button>
                           </>
                         )}
+                      </div>
                     </div>
-                  </div>
                   </>
                 );
               })()}
-                            </div>
-                          </div>
-                        )}
+                </div>
+              </div>
+            )}
 
 
         {/* Reject Modal */}
@@ -2411,22 +3144,22 @@ export const AdminDashboard = () => {
             <div className="p-6">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold text-gray-900">Chi tiết sản phẩm</h2>
-                      <button
+                <button
                   onClick={() => setShowModal(false)}
                   className="text-gray-400 hover:text-gray-600"
                 >
                   <XCircle className="h-6 w-6" />
-                      </button>
-                    </div>
+                </button>
+            </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Images */}
                 <div>
                   <div className="relative h-64 bg-gray-100 rounded-lg overflow-hidden">
                     {selectedListing.images && selectedListing.images.length > 0 ? (
-                      <img
-                        src={selectedListing.images[currentImageIndex]}
-                        alt={selectedListing.title}
+                        <img
+                          src={selectedListing.images[currentImageIndex]}
+                          alt={selectedListing.title}
                         className="w-full h-full object-cover"
                       />
                     ) : (
@@ -2499,19 +3232,19 @@ export const AdminDashboard = () => {
                     
                     {/* Show inspection button only for products with Requested verification status */}
                     {selectedListing.verificationStatus === "Requested" && (
-                      <button
+                            <button
                         onClick={() => handleStartInspection(selectedListing.id)}
                         className="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                       >
                         <Camera className="h-5 w-5" />
                         <span>Bắt đầu kiểm định</span>
-                      </button>
+                            </button>
                     )}
-                    
+
                     {/* Show button for testing - temporarily show for all products */}
                     {selectedListing.verificationStatus !== "Requested" && selectedListing.verificationStatus !== "InProgress" && selectedListing.verificationStatus !== "Verified" && (
-                      <button
-                        onClick={() => {
+                            <button
+                              onClick={() => {
                           // Temporarily change verification status to Requested for testing
                           const updatedListing = {...selectedListing, verificationStatus: "Requested"};
                           setSelectedListing(updatedListing);
@@ -2532,7 +3265,7 @@ export const AdminDashboard = () => {
                       >
                         <CheckCircle className="h-5 w-5" />
                         <span>Hoàn thành kiểm định</span>
-                      </button>
+                            </button>
                     )}
                     
                     {/* Show status for verified products */}
@@ -2540,15 +3273,15 @@ export const AdminDashboard = () => {
                       <div className="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-green-100 text-green-800 rounded-lg">
                         <CheckCircle className="h-5 w-5" />
                         <span>Đã kiểm định</span>
+                          </div>
+                        )}
                       </div>
-                    )}
-                </div>
-                </div>
+                    </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+                    </div>
+                  )}
 
       {/* Inspection Modal */}
       {showInspectionModal && currentInspectionProduct && (
@@ -2565,30 +3298,169 @@ export const AdminDashboard = () => {
                 >
                   <XCircle className="h-6 w-6" />
                 </button>
-              </div>
-
-              <div className="space-y-6">
-                {/* Product Info */}
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <h3 className="text-lg font-semibold mb-2">Thông tin xe</h3>
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="font-medium">Thương hiệu:</span> {currentInspectionProduct.brand}
-                    </div>
-                    <div>
-                      <span className="font-medium">Model:</span> {currentInspectionProduct.model}
-                    </div>
-                    <div>
-                      <span className="font-medium">Biển số:</span> {currentInspectionProduct.licensePlate || "N/A"}
-                    </div>
-                    <div>
-                      <span className="font-medium">Số km:</span> {currentInspectionProduct.mileage || "N/A"}
-                    </div>
-                  </div>
                 </div>
 
+                <div className="space-y-6">
+                {/* Editable Product Info Form */}
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold">Thông tin xe - Kiểm tra & Chỉnh sửa</h3>
+                  </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                    {/* Title */}
+                    <div className="col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Tiêu đề
+                      </label>
+                      <input
+                        type="text"
+                        value={currentInspectionProduct.title || ''}
+                        onChange={(e) => setCurrentInspectionProduct({...currentInspectionProduct, title: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+
+                    {/* Brand */}
+                      <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Thương hiệu
+                      </label>
+                      <input
+                        type="text"
+                        value={currentInspectionProduct.brand || ''}
+                        onChange={(e) => setCurrentInspectionProduct({...currentInspectionProduct, brand: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                      </div>
+
+                    {/* Model */}
+                      <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Model
+                      </label>
+                      <input
+                        type="text"
+                        value={currentInspectionProduct.model || ''}
+                        onChange={(e) => setCurrentInspectionProduct({...currentInspectionProduct, model: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                      </div>
+
+                    {/* License Plate */}
+                        <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Biển số xe
+                      </label>
+                      <input
+                        type="text"
+                        value={currentInspectionProduct.licensePlate || ''}
+                        onChange={(e) => setCurrentInspectionProduct({...currentInspectionProduct, licensePlate: e.target.value})}
+                        placeholder="VD: 30A-12345"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                        </div>
+
+                    {/* Mileage */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Số km đã đi
+                      </label>
+                      <input
+                        type="number"
+                        value={
+                          currentInspectionProduct.mileage && 
+                          currentInspectionProduct.mileage !== 'N/A' && 
+                          currentInspectionProduct.mileage !== 0
+                            ? currentInspectionProduct.mileage 
+                            : ''
+                        }
+                        onChange={(e) => setCurrentInspectionProduct({...currentInspectionProduct, mileage: e.target.value ? parseInt(e.target.value) : ''})}
+                        placeholder="VD: 50000"
+                        min="0"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+
+                    {/* Manufacture Year */}
+                              <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Năm sản xuất
+                      </label>
+                      <input
+                        type="number"
+                        value={
+                          currentInspectionProduct.manufactureYear && 
+                          currentInspectionProduct.manufactureYear !== 'N/A' && 
+                          currentInspectionProduct.manufactureYear !== 0
+                            ? currentInspectionProduct.manufactureYear 
+                            : currentInspectionProduct.year && 
+                              currentInspectionProduct.year !== 'N/A' && 
+                              currentInspectionProduct.year !== 0
+                              ? currentInspectionProduct.year 
+                              : ''
+                        }
+                        onChange={(e) => setCurrentInspectionProduct({...currentInspectionProduct, manufactureYear: e.target.value ? parseInt(e.target.value) : ''})}
+                        placeholder="VD: 2023"
+                        min="2000"
+                        max="2030"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                              </div>
+
+                    {/* Condition */}
+                              <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Tình trạng
+                      </label>
+                      <select
+                        value={currentInspectionProduct.condition || ''}
+                        onChange={(e) => setCurrentInspectionProduct({...currentInspectionProduct, condition: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      >
+                        <option value="excellent">Xuất sắc</option>
+                        <option value="good">Tốt</option>
+                        <option value="fair">Khá</option>
+                        <option value="poor">Kém</option>
+                      </select>
+                              </div>
+
+                    {/* Price */}
+                              <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Giá (VNĐ)
+                      </label>
+                      <input
+                        type="number"
+                        value={currentInspectionProduct.price || ''}
+                        onChange={(e) => setCurrentInspectionProduct({...currentInspectionProduct, price: parseFloat(e.target.value) || 0})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                              </div>
+
+                    {/* Description */}
+                    <div className="col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Mô tả
+                      </label>
+                      <textarea
+                        value={currentInspectionProduct.description || ''}
+                        onChange={(e) => setCurrentInspectionProduct({...currentInspectionProduct, description: e.target.value})}
+                        rows={3}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                              </div>
+                              </div>
+
+                  <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <p className="text-sm text-blue-800">
+                      💡 <strong>Hướng dẫn:</strong> Kiểm tra và chỉnh sửa thông tin xe nếu cần. Thông tin sẽ được cập nhật khi bạn hoàn thành kiểm định.
+                                </p>
+                              </div>
+                              </div>
+
                 {/* Image Upload Section */}
-                <div>
+                              <div>
                   <h3 className="text-lg font-semibold mb-4">Upload hình ảnh kiểm định</h3>
                   <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
                     <Camera className="h-12 w-12 text-gray-400 mx-auto mb-4" />
@@ -2632,7 +3504,7 @@ export const AdminDashboard = () => {
                     >
                       Chọn hình ảnh
                     </label>
-                  </div>
+                              </div>
 
                   {/* Display uploaded images */}
                   {inspectionImages.length > 0 && (
@@ -2655,11 +3527,11 @@ export const AdminDashboard = () => {
                             >
                               ×
                             </button>
-                          </div>
+                              </div>
                         ))}
-                      </div>
-                    </div>
-                  )}
+                            </div>
+                          </div>
+                        )}
                 </div>
 
                 {/* Action Buttons */}
@@ -2704,9 +3576,9 @@ export const AdminDashboard = () => {
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+                            </div>
+                          </div>
+                        )}
 
       {/* Transaction Management Tab */}
       {activeTab === "transactions" && (
@@ -2724,35 +3596,35 @@ export const AdminDashboard = () => {
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                 <div className="flex items-center">
                   <Clock className="h-8 w-8 text-yellow-600 mr-3" />
-                  <div>
+                            <div>
                     <p className="text-sm font-medium text-yellow-900">Đang trong quá trình thanh toán</p>
                     <p className="text-2xl font-bold text-yellow-600">
                       {allListings.filter(product => product.status === 'reserved').length}
-                    </p>
-                  </div>
-                </div>
+                              </p>
+                            </div>
+                            </div>
               </div>
               <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
                 <div className="flex items-center">
                   <CheckCircle className="h-8 w-8 text-orange-600 mr-3" />
-                  <div>
+                            <div>
                     <p className="text-sm font-medium text-orange-900">Chờ admin duyệt</p>
                     <p className="text-2xl font-bold text-orange-600">0</p>
-                  </div>
-                </div>
-              </div>
+                            </div>
+                          </div>
+                        </div>
               <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                 <div className="flex items-center">
                   <DollarSign className="h-8 w-8 text-green-600 mr-3" />
-                  <div>
+                            <div>
                     <p className="text-sm font-medium text-green-900">Đã hoàn tất</p>
                     <p className="text-2xl font-bold text-green-600">
                       {allListings.filter(product => product.status === 'sold').length}
-                    </p>
+                              </p>
+                            </div>
+                            </div>
+                      </div>
                   </div>
-                </div>
-              </div>
-            </div>
 
             {/* Reserved and Sold Products List */}
             <div className="space-y-4">
@@ -2839,6 +3711,11 @@ export const AdminDashboard = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Reports Management Tab */}
+      {activeTab === "reports" && (
+        <AdminReports />
       )}
 
       </div>
