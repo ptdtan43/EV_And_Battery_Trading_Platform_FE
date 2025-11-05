@@ -121,13 +121,49 @@ export const AdminDashboard = () => {
   ];
 
   const getReasonTextForUser = (user) => {
+    if (!user) return '';
+    
     const status = (user.status || user.Status || '').toString().toLowerCase();
-    const code = user.reasonCode || user.ReasonCode;
-    const note = user.reasonNote || user.ReasonNote || user.reason || user.Reason || user.accountStatusReason || user.AccountStatusReason;
-    if (!status) return note || '';
-    const list = status === 'deleted' ? deletedReasonOptions : suspendedReasonOptions;
-    const found = list.find(x => x.code === code);
-    return note || (found ? found.label : '');
+    
+    // Priority 1: AccountStatusReason/Reason from backend (most reliable)
+    // Check explicitly for both camelCase and PascalCase, and handle empty string vs null
+    const accountStatusReason = user.accountStatusReason ?? user.AccountStatusReason ?? user.reason ?? user.Reason;
+    
+    // Debug for restricted accounts
+    if ((status === 'suspended' || status === 'deleted') && !accountStatusReason) {
+      console.warn('⚠️ Restricted user missing reason:', {
+        id: user.id || user.Id,
+        email: user.email || user.Email,
+        status: status,
+        accountStatusReason: user.accountStatusReason,
+        AccountStatusReason: user.AccountStatusReason,
+        reason: user.reason,
+        Reason: user.Reason,
+        allKeys: Object.keys(user),
+      });
+    }
+    
+    if (accountStatusReason && typeof accountStatusReason === 'string' && accountStatusReason.trim()) {
+      return accountStatusReason.trim();
+    }
+    
+    // Priority 2: reasonNote (if user manually entered custom reason)
+    const reasonNote = user.reasonNote ?? user.ReasonNote;
+    if (reasonNote && typeof reasonNote === 'string' && reasonNote.trim()) {
+      return reasonNote.trim();
+    }
+    
+    // Priority 3: Map from reasonCode to label (if no custom text)
+    const code = user.reasonCode ?? user.ReasonCode;
+    if (code && status && (status === 'suspended' || status === 'deleted')) {
+      const list = status === 'deleted' ? deletedReasonOptions : suspendedReasonOptions;
+      const found = list.find(x => x.code === code);
+      if (found && found.label) {
+        return found.label;
+      }
+    }
+    
+    return '';
   };
 
   // Reject modal state
@@ -176,7 +212,154 @@ export const AdminDashboard = () => {
       params.set('pageSize', String(pageSize));
       params.set('sort', 'createdAt:desc');
       const res = await apiRequest(`/api/admin/users?${params.toString()}`);
-      setUsers(res.Items || res.items || []);
+      const usersData = res.Items || res.items || [];
+      
+      // Debug: Log raw response first
+      console.log('🔍 Raw API response sample:', usersData.length > 0 ? {
+        firstUser: usersData[0],
+        allKeys: Object.keys(usersData[0] || {}),
+        // Check specifically for AccountStatusReason fields
+        accountStatusReason: usersData[0].accountStatusReason,
+        AccountStatusReason: usersData[0].AccountStatusReason,
+        reason: usersData[0].reason,
+        Reason: usersData[0].Reason,
+        // Check ALL fields to see what backend actually returns
+        allFields: Object.keys(usersData[0] || {}).reduce((acc, key) => {
+          acc[key] = usersData[0][key];
+          return acc;
+        }, {}),
+      } : 'No users');
+      
+      // Find restricted user in raw data to debug
+      const restrictedRawUser = usersData.find(u => {
+        const st = (u.status ?? u.Status ?? '').toString().toLowerCase();
+        return st === 'suspended' || st === 'deleted';
+      });
+      if (restrictedRawUser) {
+        console.log('🔍 Raw restricted user from API:', {
+          id: restrictedRawUser.id ?? restrictedRawUser.Id,
+          email: restrictedRawUser.email ?? restrictedRawUser.Email,
+          status: restrictedRawUser.status ?? restrictedRawUser.Status,
+          accountStatusReason: restrictedRawUser.accountStatusReason,
+          AccountStatusReason: restrictedRawUser.AccountStatusReason,
+          reason: restrictedRawUser.reason,
+          Reason: restrictedRawUser.Reason,
+          allKeys: Object.keys(restrictedRawUser),
+          // Log ALL values to see what backend actually returns
+          allValues: Object.keys(restrictedRawUser).reduce((acc, key) => {
+            acc[key] = restrictedRawUser[key];
+            return acc;
+          }, {}),
+        });
+      }
+      
+      // Normalize field names to ensure consistent access (handle both camelCase and PascalCase)
+      const normalizedUsers = usersData.map(user => {
+        // Get raw values FIRST before any normalization
+        // IMPORTANT: Backend might return empty string '' for reason, so we need to check that too
+        // Check ALL possible field names case-insensitively
+        const rawAccountStatusReason = 
+          (user.accountStatusReason && user.accountStatusReason !== '') ? user.accountStatusReason :
+          (user.AccountStatusReason && user.AccountStatusReason !== '') ? user.AccountStatusReason :
+          (user.reason && user.reason !== '') ? user.reason :
+          (user.Reason && user.Reason !== '') ? user.Reason :
+          null;
+        
+        const rawReason = 
+          (user.reason && user.reason !== '') ? user.reason :
+          (user.Reason && user.Reason !== '') ? user.Reason :
+          rawAccountStatusReason;
+        
+        // Debug: Log what we found for restricted users
+        const st = (user.status ?? user.Status ?? '').toString().toLowerCase();
+        if (st === 'suspended' || st === 'deleted') {
+          console.log('🔍 Debug AccountStatusReason search for restricted user:', {
+            id: user.id ?? user.Id,
+            accountStatusReason_camelCase: user.accountStatusReason,
+            AccountStatusReason_PascalCase: user.AccountStatusReason,
+            reason: user.reason,
+            Reason: user.Reason,
+            allKeys: Object.keys(user),
+            foundValue: rawAccountStatusReason,
+            // Check all fields that might contain the reason
+            allFieldValues: Object.keys(user).reduce((acc, key) => {
+              if (key.toLowerCase().includes('reason') || key.toLowerCase().includes('account')) {
+                acc[key] = user[key];
+              }
+              return acc;
+            }, {}),
+          });
+        }
+        
+        // Create normalized object WITHOUT spreading user first to avoid override issues
+        const normalized = {
+          // Normalize common fields
+          id: user.id ?? user.Id,
+          Id: user.Id ?? user.id,
+          email: user.email ?? user.Email,
+          Email: user.Email ?? user.email,
+          fullName: user.fullName ?? user.FullName,
+          FullName: user.FullName ?? user.fullName,
+          status: user.status ?? user.Status,
+          Status: user.Status ?? user.status,
+          role: user.role ?? user.Role,
+          Role: user.Role ?? user.role,
+          createdAt: user.createdAt ?? user.CreatedAt,
+          CreatedAt: user.CreatedAt ?? user.createdAt,
+          // CRITICAL: Set AccountStatusReason fields - preserve the actual value
+          accountStatusReason: rawAccountStatusReason,
+          AccountStatusReason: rawAccountStatusReason,
+          reason: rawReason,
+          Reason: rawReason,
+          // Preserve reasonCode and reasonNote
+          reasonCode: user.reasonCode ?? user.ReasonCode ?? null,
+          ReasonCode: user.ReasonCode ?? user.reasonCode ?? null,
+          reasonNote: user.reasonNote ?? user.ReasonNote ?? null,
+          ReasonNote: user.ReasonNote ?? user.reasonNote ?? null,
+        };
+        
+        // Add any other fields from user that we haven't normalized yet
+        Object.keys(user).forEach(key => {
+          if (!normalized.hasOwnProperty(key) && !normalized.hasOwnProperty(key.charAt(0).toLowerCase() + key.slice(1))) {
+            normalized[key] = user[key];
+          }
+        });
+        
+        return normalized;
+      });
+      
+      // Debug: Log để kiểm tra AccountStatusReason có trong response không
+      if (normalizedUsers.length > 0) {
+        const restrictedUser = normalizedUsers.find(u => {
+          const st = (u.status ?? u.Status ?? '').toString().toLowerCase();
+          return st === 'suspended' || st === 'deleted';
+        });
+        if (restrictedUser) {
+          console.log('🔍 Restricted user data from API:', {
+            id: restrictedUser.id,
+            email: restrictedUser.email,
+            status: restrictedUser.status,
+            accountStatusReason: restrictedUser.accountStatusReason,
+            AccountStatusReason: restrictedUser.AccountStatusReason,
+            reason: restrictedUser.reason,
+            Reason: restrictedUser.Reason,
+            rawUser: usersData.find(u => (u.id ?? u.Id) === restrictedUser.id),
+            getReasonResult: getReasonTextForUser(restrictedUser),
+          });
+        }
+        const sampleUser = normalizedUsers[0];
+        console.log('🔍 Sample user data from API (normalized):', {
+          id: sampleUser.id,
+          email: sampleUser.email,
+          status: sampleUser.status,
+          accountStatusReason: sampleUser.accountStatusReason,
+          AccountStatusReason: sampleUser.AccountStatusReason,
+          reason: sampleUser.reason,
+          Reason: sampleUser.Reason,
+          rawData: usersData[0], // Log raw data để debug
+        });
+      }
+      setUsers(normalizedUsers);
       const meta = res.Meta || res.meta || {};
       setUsersPage(meta.Page || meta.page || page);
       setUsersPageSize(meta.PageSize || meta.pageSize || pageSize);
@@ -220,39 +403,82 @@ export const AdminDashboard = () => {
       return found ? found.label : '';
     })();
     
+    // Build the reason text that will be sent to backend
+    // CRITICAL: If status is suspended/deleted, we MUST have a reason
+    // Priority: reasonNote (custom text) > reasonLabel (from code) > existing reason
+    let reasonText = '';
+    if (status === 'suspended' || status === 'deleted') {
+      // For suspended/deleted, we need a reason - use note if provided, otherwise use label from code
+      reasonText = pendingStatusReasonNote?.trim() || reasonLabel || '';
+    } else {
+      // For active status, clear reason (optional)
+      reasonText = '';
+    }
+    
     const oldUsers = [...users];
     setUsers(prev => prev.map(u => {
       const id = u.id || u.Id;
       if (id === userId) {
+        // For suspended/deleted, always use the new reason text
+        // For active, clear the reason
+        const finalReasonText = (status === 'suspended' || status === 'deleted') 
+          ? reasonText 
+          : '';
+        
         return {
           ...u,
           status: status,
           Status: status,
-          reasonCode: pendingStatusReasonCode,
-          reasonNote: pendingStatusReasonNote,
-          reason: pendingStatusReasonNote || reasonLabel || pendingStatusReason,
-          ReasonCode: pendingStatusReasonCode,
-          ReasonNote: pendingStatusReasonNote,
-          Reason: pendingStatusReasonNote || reasonLabel || pendingStatusReason,
+          reasonCode: (status === 'suspended' || status === 'deleted') ? (pendingStatusReasonCode || u.reasonCode || u.ReasonCode) : null,
+          reasonNote: (status === 'suspended' || status === 'deleted') ? (pendingStatusReasonNote || u.reasonNote || u.ReasonNote) : null,
+          reason: finalReasonText,
+          ReasonCode: (status === 'suspended' || status === 'deleted') ? (pendingStatusReasonCode || u.ReasonCode || u.reasonCode) : null,
+          ReasonNote: (status === 'suspended' || status === 'deleted') ? (pendingStatusReasonNote || u.ReasonNote || u.reasonNote) : null,
+          Reason: finalReasonText,
+          // CRITICAL: Also update AccountStatusReason for consistency
+          accountStatusReason: finalReasonText,
+          AccountStatusReason: finalReasonText,
         };
       }
       return u;
     }));
     
     try {
+      // CRITICAL: Always send reason text for suspended/deleted status
+      const requestBody = {
+        status, 
+      };
+      
+      if (status === 'suspended' || status === 'deleted') {
+        // For suspended/deleted, always include reason fields
+        if (pendingStatusReasonCode) {
+          requestBody.reasonCode = pendingStatusReasonCode;
+        }
+        if (pendingStatusReasonNote?.trim()) {
+          requestBody.reasonNote = pendingStatusReasonNote.trim();
+        }
+        // Always send reason text (either from note or label)
+        if (reasonText) {
+          requestBody.reason = reasonText;
+        }
+      } else {
+        // For active status, clear reason fields
+        requestBody.reason = '';
+      }
+      
       await apiRequest(`/api/admin/users/${userId}/status`, { 
         method: 'PUT', 
-        body: { 
-          status, 
-          reasonCode: pendingStatusReasonCode || undefined, 
-          reasonNote: pendingStatusReasonNote || undefined,
-          // legacy compatibility
-          reason: pendingStatusReasonNote || reasonLabel || pendingStatusReason || undefined,
-        } 
+        body: requestBody
+      });
+      // Debug: Log successful update
+      console.log('✅ Status updated successfully:', {
+        userId,
+        status,
+        requestBody,
       });
       showToast({ title: 'Thành công', description: 'Đã cập nhật trạng thái', type: 'success' });
-      // Only reload if needed for server-synced data
-      // await loadUsers();
+      // Reload users to get AccountStatusReason from server and ensure data consistency
+      await loadUsers();
     } catch (e) {
       console.error('Update status failed', e);
       // Rollback on error
@@ -2203,6 +2429,9 @@ export const AdminDashboard = () => {
                               setShowStatusModal(true);
                               // revert UI select until confirmed
                               e.target.value = (u.status || u.Status || 'active').toLowerCase();
+                            } else if (next === 'active') {
+                              // When restoring to active, clear the reason but keep status update
+                              updateUserStatus(id, next);
                             } else {
                               updateUserStatus(id, next);
                             }
@@ -2324,6 +2553,20 @@ export const AdminDashboard = () => {
                           <td className="px-4 py-3 text-sm text-gray-600">
                             {(() => {
                               const txt = getReasonTextForUser(u);
+                              // Debug log for restricted accounts
+                              if ((u.status || u.Status || '').toString().toLowerCase() === 'suspended' || 
+                                  (u.status || u.Status || '').toString().toLowerCase() === 'deleted') {
+                                console.log('🔍 Restricted user reason:', {
+                                  id: u.id || u.Id,
+                                  email: u.email || u.Email,
+                                  status: u.status || u.Status,
+                                  accountStatusReason: u.accountStatusReason || u.AccountStatusReason,
+                                  reason: u.reason || u.Reason,
+                                  reasonCode: u.reasonCode || u.ReasonCode,
+                                  reasonNote: u.reasonNote || u.ReasonNote,
+                                  result: txt
+                                });
+                              }
                               return txt ? <span className="line-clamp-2" title={txt}>{txt}</span> : '-';
                             })()}
                           </td>
@@ -2413,8 +2656,21 @@ export const AdminDashboard = () => {
                   onClick={async () => {
                     const uid = pendingStatusUserId;
                     const st = pendingStatus;
+                    // Debug: Log before updating
+                    console.log('🔍 Submitting status change from modal:', {
+                      userId: uid,
+                      status: st,
+                      reasonCode: pendingStatusReasonCode,
+                      reasonNote: pendingStatusReasonNote,
+                    });
                     setShowStatusModal(false);
                     await updateUserStatus(uid, st);
+                    // Reset pending status fields after update
+                    setPendingStatusUserId(null);
+                    setPendingStatus('');
+                    setPendingStatusReason('');
+                    setPendingStatusReasonCode('');
+                    setPendingStatusReasonNote('');
                   }}
                 >
                   Xác nhận
