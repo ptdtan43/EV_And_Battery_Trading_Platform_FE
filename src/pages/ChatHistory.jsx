@@ -12,9 +12,7 @@ import {
   Send,
   Phone,
   Mail,
-  MoreVertical,
-  Wifi,
-  WifiOff
+  MoreVertical
 } from "lucide-react";
 import { format } from "date-fns";
 import { vi } from "date-fns/locale";
@@ -487,26 +485,6 @@ export const ChatHistory = () => {
                 <ArrowLeft className="h-5 w-5" />
               </button>
               <h1 className="text-xl font-semibold text-gray-900">Tin nhắn</h1>
-            </div>
-            
-            {/* Connection Status */}
-            <div className="flex items-center space-x-2">
-              {isConnected ? (
-                <div className="flex items-center space-x-1 text-green-600 text-sm" title="Real-time connected">
-                  <Wifi className="h-4 w-4" />
-                  <span className="hidden sm:inline">Real-time</span>
-                </div>
-              ) : connectionError ? (
-                <div className="flex items-center space-x-1 text-red-600 text-sm" title={connectionError}>
-                  <WifiOff className="h-4 w-4" />
-                  <span className="hidden sm:inline">Offline</span>
-                </div>
-              ) : (
-                <div className="flex items-center space-x-1 text-gray-400 text-sm" title="Connecting...">
-                  <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-                  <span className="hidden sm:inline">Đang kết nối...</span>
-                </div>
-              )}
             </div>
           </div>
         </div>

@@ -1,6 +1,7 @@
 using EVTB_Backend.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 
@@ -8,6 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container
 builder.Services.AddControllers();
+builder.Services.AddSignalR();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -41,9 +43,20 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ClockSkew = TimeSpan.Zero
         };
         
-        // Add event handlers for debugging
+        // Add event handlers for debugging and SignalR token from query
         options.Events = new JwtBearerEvents
         {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/chatHub"))
+                {
+                    context.Token = accessToken!;
+                }
+                return Task.CompletedTask;
+            },
             OnAuthenticationFailed = context =>
             {
                 Console.WriteLine($"JWT Authentication failed: {context.Exception.Message}");
@@ -120,5 +133,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+// SignalR hub endpoint
+app.MapHub<EVTB_Backend.RealTime.ChatHub>("/chatHub");
 
 app.Run();

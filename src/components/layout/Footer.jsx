@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { 
   Zap, 
   Facebook, 
@@ -33,6 +33,7 @@ import {
 export const Footer = () => {
   const [email, setEmail] = useState('');
   const [isSubscribed, setIsSubscribed] = useState(false);
+  const location = useLocation();
 
   const handleNewsletterSubmit = (e) => {
     e.preventDefault();
@@ -40,6 +41,13 @@ export const Footer = () => {
       setIsSubscribed(true);
       setEmail('');
       setTimeout(() => setIsSubscribed(false), 3000);
+    }
+  };
+
+  // Generic handler to scroll to top when clicking link to current page
+  const handleLinkClick = (targetPath) => {
+    if (location.pathname === targetPath) {
+      window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
     }
   };
 
@@ -58,7 +66,7 @@ export const Footer = () => {
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
             {/* Company Info */}
             <div className="lg:col-span-2">
-              <Link to="/" className="flex items-center space-x-3 mb-6 group">
+              <Link to="/" className="flex items-center space-x-3 mb-6 group" onClick={() => handleLinkClick("/")}>
                 <div className="bg-gradient-to-r from-blue-500 to-purple-600 p-3 rounded-xl group-hover:scale-110 transition-transform duration-300">
                   <Zap className="h-8 w-8 text-white" />
                 </div>
@@ -121,31 +129,31 @@ export const Footer = () => {
               </h3>
               <ul className="space-y-3">
                 <li>
-                  <Link to="/products" className="hover:text-blue-400 transition-colors flex items-center group">
+                  <Link to="/products" className="hover:text-blue-400 transition-colors flex items-center group" onClick={() => handleLinkClick("/products")}>
                     <ArrowRight className="h-4 w-4 mr-2 opacity-0 group-hover:opacity-100 transition-opacity" />
                     Sản phẩm
                   </Link>
                 </li>
                 <li>
-                  <Link to="/categories" className="hover:text-blue-400 transition-colors flex items-center group">
+                  <Link to="/categories" className="hover:text-blue-400 transition-colors flex items-center group" onClick={() => handleLinkClick("/categories")}>
                     <ArrowRight className="h-4 w-4 mr-2 opacity-0 group-hover:opacity-100 transition-opacity" />
                     Danh mục
                   </Link>
                 </li>
                 <li>
-                  <Link to="/brands" className="hover:text-blue-400 transition-colors flex items-center group">
+                  <Link to="/brands" className="hover:text-blue-400 transition-colors flex items-center group" onClick={() => handleLinkClick("/brands")}>
                     <ArrowRight className="h-4 w-4 mr-2 opacity-0 group-hover:opacity-100 transition-opacity" />
                     Thương hiệu
                   </Link>
                 </li>
                 <li>
-                  <Link to="/deals" className="hover:text-blue-400 transition-colors flex items-center group">
+                  <Link to="/deals" className="hover:text-blue-400 transition-colors flex items-center group" onClick={() => handleLinkClick("/deals")}>
                     <ArrowRight className="h-4 w-4 mr-2 opacity-0 group-hover:opacity-100 transition-opacity" />
                     Ưu đãi
                   </Link>
                 </li>
                 <li>
-                  <Link to="/reviews" className="hover:text-blue-400 transition-colors flex items-center group">
+                  <Link to="/reviews" className="hover:text-blue-400 transition-colors flex items-center group" onClick={() => handleLinkClick("/reviews")}>
                     <ArrowRight className="h-4 w-4 mr-2 opacity-0 group-hover:opacity-100 transition-opacity" />
                     Đánh giá
                   </Link>
@@ -161,31 +169,31 @@ export const Footer = () => {
               </h3>
               <ul className="space-y-3">
                 <li>
-                  <Link to="/help" className="hover:text-blue-400 transition-colors flex items-center group">
+                  <Link to="/help" className="hover:text-blue-400 transition-colors flex items-center group" onClick={() => handleLinkClick("/help")}>
                     <HelpCircle className="h-4 w-4 mr-2 opacity-0 group-hover:opacity-100 transition-opacity" />
                     Trung tâm trợ giúp
                   </Link>
                 </li>
                 <li>
-                  <Link to="/faq" className="hover:text-blue-400 transition-colors flex items-center group">
+                  <Link to="/faq" className="hover:text-blue-400 transition-colors flex items-center group" onClick={() => handleLinkClick("/faq")}>
                     <MessageCircle className="h-4 w-4 mr-2 opacity-0 group-hover:opacity-100 transition-opacity" />
                     FAQ
                   </Link>
                 </li>
                 <li>
-                  <Link to="/contact" className="hover:text-blue-400 transition-colors flex items-center group">
+                  <Link to="/contact" className="hover:text-blue-400 transition-colors flex items-center group" onClick={() => handleLinkClick("/contact")}>
                     <Mail className="h-4 w-4 mr-2 opacity-0 group-hover:opacity-100 transition-opacity" />
                     Liên hệ
                   </Link>
                 </li>
                 <li>
-                  <Link to="/shipping" className="hover:text-blue-400 transition-colors flex items-center group">
+                  <Link to="/shipping" className="hover:text-blue-400 transition-colors flex items-center group" onClick={() => handleLinkClick("/shipping")}>
                     <Truck className="h-4 w-4 mr-2 opacity-0 group-hover:opacity-100 transition-opacity" />
                     Vận chuyển
                   </Link>
                 </li>
                 <li>
-                  <Link to="/returns" className="hover:text-blue-400 transition-colors flex items-center group">
+                  <Link to="/returns" className="hover:text-blue-400 transition-colors flex items-center group" onClick={() => handleLinkClick("/returns")}>
                     <ArrowRight className="h-4 w-4 mr-2 opacity-0 group-hover:opacity-100 transition-opacity" />
                     Đổi trả
                   </Link>
@@ -268,13 +276,13 @@ export const Footer = () => {
             </div>
             
             <div className="flex items-center space-x-6 text-sm">
-              <Link to="/terms" className="hover:text-blue-400 transition-colors">
+              <Link to="/terms" className="hover:text-blue-400 transition-colors" onClick={() => handleLinkClick("/terms")}>
                 Điều khoản sử dụng
               </Link>
-              <Link to="/privacy" className="hover:text-blue-400 transition-colors">
+              <Link to="/privacy" className="hover:text-blue-400 transition-colors" onClick={() => handleLinkClick("/privacy")}>
                 Chính sách bảo mật
               </Link>
-              <Link to="/cookies" className="hover:text-blue-400 transition-colors">
+              <Link to="/cookies" className="hover:text-blue-400 transition-colors" onClick={() => handleLinkClick("/cookies")}>
                 Cookie Policy
               </Link>
             </div>
