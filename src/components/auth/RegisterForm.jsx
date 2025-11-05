@@ -62,7 +62,7 @@ export const RegisterForm = () => {
 
     try {
       console.log("🚀 Starting registration process...");
-      await signUp(
+      const session = await signUp(
         formData.email,
         formData.password,
         formData.fullName,
@@ -70,26 +70,44 @@ export const RegisterForm = () => {
       );
 
       console.log("✅ Registration successful!");
-      console.log("🚪 Signing out current user...");
 
-      // Sign out current user (if any) to clear any existing session
-      signOut();
+      // If registration succeeded with token, user is already logged in
+      if (session?.token && session?.user) {
+        console.log("✅ User is logged in after registration, redirecting to home...");
+        
+        // Show success message and redirect to home
+        setError("");
+        showToast({
+          title: "🎉 Đăng ký thành công!",
+          description: "Chào mừng bạn đến với EV Market!",
+          type: "success",
+        });
 
-      console.log("🧭 Redirecting to login page...");
+        // Redirect to home page after a short delay
+        setTimeout(() => {
+          navigate("/");
+        }, 1500);
+      } else {
+        // If no token, redirect to login page
+        console.log("⚠️ No token after registration, redirecting to login...");
+        
+        // Sign out any existing session
+        signOut();
 
-      // Show success message and redirect to login
-      setError("");
-      showToast({
-        title: "🎉 Đăng ký thành công!",
-        description:
-          "Tài khoản của bạn đã được tạo. Vui lòng đăng nhập để tiếp tục.",
-        type: "success",
-      });
+        // Show success message and redirect to login
+        setError("");
+        showToast({
+          title: "🎉 Đăng ký thành công!",
+          description:
+            "Tài khoản của bạn đã được tạo. Vui lòng đăng nhập để tiếp tục.",
+          type: "success",
+        });
 
-      // Redirect to login page after a short delay
-      setTimeout(() => {
-        navigate("/login");
-      }, 1500);
+        // Redirect to login page after a short delay
+        setTimeout(() => {
+          navigate("/login");
+        }, 1500);
+      }
     } catch (err) {
       console.error("Register form error:", err);
 

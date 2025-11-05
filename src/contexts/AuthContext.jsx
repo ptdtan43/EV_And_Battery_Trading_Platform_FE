@@ -288,72 +288,75 @@ export const AuthProvider = ({ children }) => {
       full_name: fullName,
     });
 
-    // Try FormData first since it seems to work (gets past validation)
+    // Backend expects JSON with [FromBody], so try JSON first
     let data;
     let lastError;
 
-    try {
-      console.log("Trying FormData first (seems to work for validation)...");
-      const form = new FormData();
-      form.append("Email", email);
-      form.append("Password", password);
-      form.append("FullName", fullName);
-      form.append("Phone", phone);
-      form.append("RoleId", "2");
-      form.append("AccountStatus", "Active");
+    // Try JSON formats first (backend uses [FromBody] which expects JSON)
+    const possibleFormats = [
+      // Format 1: PascalCase with RoleId and AccountStatus (matches backend RegisterRequest)
+      {
+        Email: email,
+        Password: password,
+        FullName: fullName,
+        Phone: phone || "",
+        RoleId: 2,
+        AccountStatus: "Active",
+      },
+      // Format 2: PascalCase without RoleId and AccountStatus
+      {
+        Email: email,
+        Password: password,
+        FullName: fullName,
+        Phone: phone || "",
+      },
+      // Format 3: camelCase
+      {
+        email: email,
+        password: password,
+        fullName: fullName,
+        phone: phone || "",
+        roleId: 2,
+        accountStatus: "Active",
+      },
+    ];
 
-      data = await apiRequest("/api/User/register", {
-        method: "POST",
-        body: form,
-      });
-      console.log("FormData succeeded:", data);
-    } catch (formError) {
-      console.log("FormData failed:", formError.message);
-      lastError = formError;
+    // Try each JSON format
+    for (let i = 0; i < possibleFormats.length; i++) {
+      try {
+        console.log(`Trying JSON format ${i + 1}:`, possibleFormats[i]);
+        data = await apiRequest("/api/User/register", {
+          method: "POST",
+          body: possibleFormats[i],
+        });
+        console.log(`JSON format ${i + 1} succeeded:`, data);
+        break; // Success, exit loop
+      } catch (error) {
+        console.log(`JSON format ${i + 1} failed:`, error.message);
+        lastError = error;
+      }
+    }
 
-      // If FormData failed, try JSON formats
-      const possibleFormats = [
-        // Format 1: Direct PascalCase with Password
-        {
-          Email: email,
-          Password: password,
-          FullName: fullName,
-          Phone: phone,
-        },
-        // Format 2: With RoleId and AccountStatus
-        {
-          Email: email,
-          Password: password,
-          FullName: fullName,
-          Phone: phone,
-          RoleId: 2,
-          AccountStatus: "Active",
-        },
-        // Format 3: camelCase
-        {
-          email: email,
-          password: password,
-          fullName: fullName,
-          phone: phone,
-          roleId: 2,
-          accountStatus: "Active",
-        },
-      ];
+    // If all JSON formats failed, try FormData as fallback
+    if (!data) {
+      try {
+        console.log("All JSON formats failed, trying FormData as fallback...");
+        const form = new FormData();
+        form.append("Email", email);
+        form.append("Password", password);
+        form.append("FullName", fullName);
+        form.append("Phone", phone || "");
+        form.append("RoleId", "2");
+        form.append("AccountStatus", "Active");
 
-      // Try each JSON format
-      for (let i = 0; i < possibleFormats.length; i++) {
-        try {
-          console.log(`Trying JSON format ${i + 1}:`, possibleFormats[i]);
-          data = await apiRequest("/api/User/register", {
-            method: "POST",
-            body: possibleFormats[i],
-          });
-          console.log(`JSON format ${i + 1} succeeded:`, data);
-          break; // Success, exit loop
-        } catch (error) {
-          console.log(`JSON format ${i + 1} failed:`, error.message);
-          lastError = error;
-        }
+        data = await apiRequest("/api/User/register", {
+          method: "POST",
+          body: form,
+        });
+        console.log("FormData succeeded:", data);
+      } catch (formError) {
+        console.log("FormData also failed:", formError.message);
+        lastError = formError;
       }
     }
 
@@ -365,9 +368,12 @@ export const AuthProvider = ({ children }) => {
       );
     }
 
+    console.log("Register response:", data);
+
+    // Backend returns { token, user } directly
     // Try different response formats to find what backend returns
     const possibleResponseFormats = [
-      // Format 1: Direct response
+      // Format 1: Direct response { token, user }
       data,
       // Format 2: Nested in data
       data?.data,
@@ -377,38 +383,24 @@ export const AuthProvider = ({ children }) => {
       data?.data?.data,
       data?.data?.result,
       data?.result?.data,
-      // Format 5: Triple nested
-      data?.data?.data?.data,
-      data?.data?.data?.result,
-      data?.result?.result,
-      data?.result?.data?.data,
     ];
+
+    let session = null;
 
     for (const format of possibleResponseFormats) {
       if (!format) continue;
 
       console.log("Trying response format:", format);
 
-      // Check if this format has the expected structure
-      const hasToken =
-        format?.token ||
-        format?.accessToken ||
-        format?.jwt ||
-        format?.tokenString;
-      const hasUser =
-        format?.user || format?.userId || format?.id || format?.accountId;
+      // Check if this format has both token and user
+      const token = format?.token || format?.accessToken || format?.jwt || format?.tokenString;
+      const userData = format?.user;
 
-      if (hasToken || hasUser) {
-        console.log("Found valid response format:", format);
+      // Backend returns { token, user } format, so we need both
+      if (token && userData) {
+        console.log("Found valid response format with token and user:", format);
 
-        // Normalize possible backend shapes
-        const normalizedToken =
-          format?.token ||
-          format?.accessToken ||
-          format?.jwt ||
-          format?.tokenString;
-
-        const userData = format?.user || format;
+        // Normalize user data
         const normalizedUser = {
           ...userData,
           fullName: fixVietnameseEncoding(
@@ -422,16 +414,18 @@ export const AuthProvider = ({ children }) => {
           roleName: userData.roleName || userData.role || userData.roleName,
         };
 
-        const session = {
-          token: normalizedToken,
+        session = {
+          token: token,
           user: normalizedUser,
           profile: format?.profile || null,
         };
 
-        console.log("Register response:", data);
+        console.log("Created session:", session);
+        console.log("Session token:", session.token ? "Present" : "Missing", session.token?.length || 0);
+        console.log("Session user:", session.user);
 
         // Ensure we have both token and user before saving
-        if (session?.token && session?.user) {
+        if (session.token && session.user) {
           localStorage.setItem("evtb_auth", JSON.stringify(session));
           setUser(session.user);
           setProfile(session.profile || null);
@@ -442,7 +436,9 @@ export const AuthProvider = ({ children }) => {
           return session;
         } else {
           console.error("❌ Cannot save registration session - missing token or user");
-          throw new Error("Registration failed - missing authentication data");
+          console.error("Token present:", !!session.token);
+          console.error("User present:", !!session.user);
+          console.error("User data:", userData);
         }
       }
     }

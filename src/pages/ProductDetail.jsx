@@ -22,6 +22,7 @@ import {
   Package,
   X,
   XCircle,
+  AlertCircle,
   Clock,
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
@@ -487,9 +488,15 @@ export const ProductDetail = () => {
     setShowPaymentModal(true);
   };
 
-  // Calculate deposit amount based on product price
+  // Calculate deposit amount based on product type and price
   const getDepositAmount = () => {
     const price = product?.price || 0;
+    const isBattery = String(product?.productType || '').toLowerCase() === 'battery';
+    // Battery: fixed market-friendly deposit (1,000,000 VND)
+    if (isBattery) {
+      return 1000000;
+    }
+    // Vehicle: tiered deposit by price
     return price > 300000000 ? 10000000 : 5000000; // 10M if > 300M, else 5M
   };
 
@@ -1378,10 +1385,25 @@ export const ProductDetail = () => {
                     </span>
                   </div>
                   <p className="text-xs text-blue-600">
-                    {product.price > 300000000
-                      ? "Sản phẩm trên 300 triệu - cọc 10 triệu để gặp mặt trực tiếp"
-                      : "Sản phẩm dưới 300 triệu - cọc 5 triệu để gặp mặt trực tiếp"}
+                    {String(product.productType || '').toLowerCase() === 'battery'
+                      ? 'Sản phẩm Pin - cọc 1 triệu để giữ hàng và gặp mặt trực tiếp'
+                      : product.price > 300000000
+                        ? 'Sản phẩm trên 300 triệu - cọc 10 triệu để gặp mặt trực tiếp'
+                        : 'Sản phẩm dưới 300 triệu - cọc 5 triệu để gặp mặt trực tiếp'}
                   </p>
+                </div>
+              </div>
+
+              {/* Important Notice */}
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div className="flex items-start">
+                  <AlertCircle className="h-5 w-5 text-yellow-600 mr-2 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-semibold text-yellow-900 mb-1">Lưu ý quan trọng:</h4>
+                    <p className="text-sm text-yellow-800">
+                      Sau khi thanh toán cọc thành công, vui lòng liên hệ với người bán qua tính năng chat để thỏa thuận ngày giờ gặp mặt. Sau đó, xin hãy liên hệ với Admin qua số điện thoại <span className="font-semibold">0373111370</span> để Admin chốt lịch hẹn cho cả hai bên gặp mặt tại kho và tiến hành giao dịch trực tiếp.
+                    </p>
+                  </div>
                 </div>
               </div>
 
