@@ -839,10 +839,10 @@ export const CreateListing = () => {
       // Prepare success message with image upload status
       const imageStatus =
         images.length > 0
-          ? documentImages.length > 0
-            ? `Đã upload ${images.length} ảnh xe (Vehicle) và ${documentImages.length} ảnh giấy tờ xe (Document).`
-            : `Đã upload ${images.length} ảnh xe (Vehicle).`
-          : documentImages.length > 0
+          ? documentImages.length > 0 && formData.productType === "vehicle"
+            ? `Đã upload ${images.length} ảnh ${formData.productType === "vehicle" ? "xe (Vehicle)" : "pin (Battery)"} và ${documentImages.length} ảnh giấy tờ xe (Document).`
+            : `Đã upload ${images.length} ảnh ${formData.productType === "vehicle" ? "xe (Vehicle)" : "pin (Battery)"}.`
+          : documentImages.length > 0 && formData.productType === "vehicle"
           ? `Đã upload ${documentImages.length} ảnh giấy tờ xe (Document).`
           : "Chưa có ảnh nào được upload.";
 
@@ -965,7 +965,11 @@ export const CreateListing = () => {
             Quay lại
           </button>
           <h1 className="text-3xl font-bold text-gray-900">Đăng tin mới</h1>
-          <p className="text-gray-600 mt-2">Tạo bài đăng xe điện của bạn</p>
+          <p className="text-gray-600 mt-2">
+            {formData.productType === "vehicle"
+              ? "Tạo bài đăng xe điện của bạn"
+              : "Tạo bài đăng pin của bạn"}
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-8">
