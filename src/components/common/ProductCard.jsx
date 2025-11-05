@@ -231,6 +231,17 @@ export const ProductCard = ({ product, onToggleFavorite, isFavorite, user }) => 
           <p className="text-2xl font-bold text-blue-600 mb-2">
             {formatPrice(product.price)}
           </p>
+          
+          {/* Seller name - Always show with fallback */}
+          <div className="flex items-center text-sm text-gray-600 mb-1">
+            <svg className="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+            <span className="font-medium">
+              {product.sellerName || product.seller?.fullName || "Người bán"}
+            </span>
+          </div>
+          
           <div className="flex items-center text-sm text-gray-500">
             <Calendar className="h-4 w-4 mr-1" />
             <span>

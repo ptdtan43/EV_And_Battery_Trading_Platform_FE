@@ -351,6 +351,13 @@
   color: #dc2626;
 }
 
+/* Special style for reported products (orange/warning color) */
+.mylistings-status-reported {
+  background-color: #ffedd5 !important;
+  color: #ea580c !important;
+  border: 1px solid #fb923c;
+}
+
 .mylistings-status-sold {
   background-color: #f3f4f6;
   color: #374151;
@@ -359,6 +366,11 @@
 .mylistings-status-resubmit {
   background-color: #fef3c7;
   color: #d97706;
+}
+
+.mylistings-status-reserved {
+  background-color: #fed7aa;
+  color: #ea580c;
 }
 
 .mylistings-card-content {
@@ -425,6 +437,8 @@
   align-items: center;
   justify-content: center;
   text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 500;
 }
 
 .mylistings-view-button:hover {
@@ -448,10 +462,44 @@
   align-items: center;
   justify-content: center;
   text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 500;
 }
 
 .mylistings-edit-button:hover {
   background-color: #1d4ed8;
+}
+
+.mylistings-confirm-button {
+  flex: 1;
+  background-color: #059669;
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  transition: background-color 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.mylistings-waiting-text {
+  color: #ea580c;
+  font-weight: 500;
+  font-size: 0.875rem;
+  text-align: center;
+  padding: 0.5rem;
+}
+
+.mylistings-status-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .mylistings-edit-icon {
@@ -505,7 +553,7 @@
 
 @media (min-width: 768px) {
   .mylistings-stats-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 }
 

@@ -44,8 +44,16 @@ export const VerificationButton = ({
       if (payment?.paymentUrl) {
         console.log('🔗 Opening payment URL:', payment.paymentUrl);
         
-        // Open payment URL in new tab
-        window.open(payment.paymentUrl, '_blank');
+        // Open payment URL in new tab (same logic as deposit payment)
+        const paymentWindow = window.open(
+          payment.paymentUrl,
+          "_blank"
+        );
+        
+        // Try focusing the new tab (may be blocked by browser policies)
+        if (paymentWindow && typeof paymentWindow.focus === "function") {
+          paymentWindow.focus();
+        }
         
         show({
           title: '💰 Mở trang thanh toán',

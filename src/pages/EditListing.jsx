@@ -4,6 +4,7 @@ import { ArrowLeft, Upload, X } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { apiRequest } from "../lib/api";
 import { useToast } from "../contexts/ToastContext";
+import { notifyAdminProductUpdated } from "../lib/notificationApi";
 import {
   formatVietnamesePrice,
   parsePriceValue,
@@ -340,6 +341,7 @@ export const EditListing = () => {
           productImages: productImages.length,
           docImages: docImages.length,
         });
+        console.log("🔍 Image structure sample:", productImages[0]);
       } catch (imageError) {
         console.warn("Could not load existing images:", imageError);
         setExistingImages([]);
@@ -424,16 +426,39 @@ export const EditListing = () => {
     setDocumentImages(documentImages.filter((_, i) => i !== index));
   };
 
-  const removeExistingImage = (imageId) => {
-    setExistingImages(existingImages.filter((img) => img.id !== imageId));
-    setImagesToDelete([...imagesToDelete, imageId]);
+  // Helper function to get image ID
+  const getImageId = (image) => {
+    return image.imageId || image.id || image.Id;
   };
 
-  const removeExistingDocumentImage = (imageId) => {
-    setExistingDocumentImages(
-      existingDocumentImages.filter((img) => img.id !== imageId)
-    );
-    setDocumentImagesToDelete([...documentImagesToDelete, imageId]);
+  const removeExistingImage = (imageToRemove) => {
+    const imageId = getImageId(imageToRemove);
+    console.log('🗑️ Removing image:', { imageToRemove, imageId });
+    
+    setExistingImages(prev => {
+      const filtered = prev.filter((img) => getImageId(img) !== imageId);
+      console.log('🗑️ Images after removal:', { before: prev.length, after: filtered.length });
+      return filtered;
+    });
+    
+    if (imageId) {
+      setImagesToDelete(prev => [...prev, imageId]);
+    }
+  };
+
+  const removeExistingDocumentImage = (imageToRemove) => {
+    const imageId = getImageId(imageToRemove);
+    console.log('🗑️ Removing document image:', { imageToRemove, imageId });
+    
+    setExistingDocumentImages(prev => {
+      const filtered = prev.filter((img) => getImageId(img) !== imageId);
+      console.log('🗑️ Document images after removal:', { before: prev.length, after: filtered.length });
+      return filtered;
+    });
+    
+    if (imageId) {
+      setDocumentImagesToDelete(prev => [...prev, imageId]);
+    }
   };
 
   const fileToBase64 = (file) =>
@@ -458,9 +483,11 @@ export const EditListing = () => {
         price: formData.price ? parseFloat(formData.price) : undefined,
         condition: formData.condition || undefined,
         productType: formData.productType,
-        // Preserve existing status to avoid resetting to pending
-        status: formData.status || "pending",
-        verificationStatus: formData.verificationStatus || "pending",
+        // Force status back to pending when updated (requires admin re-approval)
+        status: "pending",
+        verificationStatus: formData.verificationStatus || "NotRequested",
+        // Add updatedDate to track when product was last updated
+        updatedDate: new Date().toISOString(),
         // Vehicle specific fields
         ...(formData.productType === "vehicle" && {
           vehicleType: formData.vehicleType || undefined,
@@ -662,9 +689,37 @@ export const EditListing = () => {
         }
       }
 
+      // Send notification to admin about product update
+      try {
+        // Get admin user ID
+        const users = await apiRequest('/api/User');
+        const adminUser = users.find(u => 
+          u.role === 'admin' || 
+          u.role === 'Admin' || 
+          u.isAdmin === true ||
+          u.email?.toLowerCase().includes('admin')
+        );
+        
+        if (adminUser) {
+          const adminUserId = adminUser.id || adminUser.userId || adminUser.accountId;
+          const sellerName = user?.fullName || user?.name || user?.email || "Người bán";
+          
+          await notifyAdminProductUpdated(
+            adminUserId,
+            formData.title,
+            pid,
+            sellerName
+          );
+          console.log('✅ Admin notified about product update');
+        }
+      } catch (notifError) {
+        console.warn('⚠️ Failed to notify admin about product update:', notifError);
+        // Don't block the flow if notification fails
+      }
+
       show({
         title: "Cập nhật thành công",
-        description: "Bài đăng đã được cập nhật",
+        description: "Bài đăng đã được cập nhật và thông báo đã được gửi tới admin",
         type: "success",
       });
       navigate("/my-listings");
@@ -1172,26 +1227,29 @@ export const EditListing = () => {
                 Hình ảnh sản phẩm hiện tại
               </h2>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                {existingImages.map((image, index) => (
-                  <div key={image.id || index} className="relative group">
-                    <img
-                      src={image.imageUrl || image.imageData || image.url}
-                      alt={`Existing ${index + 1}`}
-                      className="w-full h-24 object-cover rounded-lg"
-                      onError={(e) => {
-                        e.target.style.display = "none";
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeExistingImage(image.id)}
-                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Xóa ảnh này"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                ))}
+                {existingImages.map((image, index) => {
+                  const imageId = image.imageId || image.id || image.Id;
+                  return (
+                    <div key={imageId || index} className="relative group">
+                      <img
+                        src={image.imageUrl || image.imageData || image.url}
+                        alt={`Existing ${index + 1}`}
+                        className="w-full h-24 object-cover rounded-lg"
+                        onError={(e) => {
+                          e.target.style.display = "none";
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeExistingImage(image)}
+                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Xóa ảnh này"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
               <p className="text-sm text-gray-500 mt-4">
                 Nhấn vào nút X để xóa ảnh. Ảnh sẽ được xóa khi bạn lưu bài đăng.
@@ -1207,29 +1265,32 @@ export const EditListing = () => {
                   Hình ảnh giấy tờ hiện tại
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {existingDocumentImages.map((image, index) => (
-                    <div key={image.id || index} className="relative group">
-                      <img
-                        src={image.imageUrl || image.imageData || image.url}
-                        alt={`Document ${index + 1}`}
-                        className="w-full h-32 object-cover rounded-lg border-2 border-green-200"
-                        onError={(e) => {
-                          e.target.style.display = "none";
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeExistingDocumentImage(image.id)}
-                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Xóa ảnh giấy tờ này"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                      <div className="absolute bottom-2 left-2 bg-green-600 text-white px-2 py-1 rounded text-xs">
-                        Giấy tờ {index + 1}
+                  {existingDocumentImages.map((image, index) => {
+                    const imageId = image.imageId || image.id || image.Id;
+                    return (
+                      <div key={imageId || index} className="relative group">
+                        <img
+                          src={image.imageUrl || image.imageData || image.url}
+                          alt={`Document ${index + 1}`}
+                          className="w-full h-32 object-cover rounded-lg border-2 border-green-200"
+                          onError={(e) => {
+                            e.target.style.display = "none";
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeExistingDocumentImage(image)}
+                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Xóa ảnh giấy tờ này"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                        <div className="absolute bottom-2 left-2 bg-green-600 text-white px-2 py-1 rounded text-xs">
+                          Giấy tờ {index + 1}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 <p className="text-sm text-gray-500 mt-4">
                   Nhấn vào nút X để xóa ảnh giấy tờ. Ảnh sẽ được xóa khi bạn lưu

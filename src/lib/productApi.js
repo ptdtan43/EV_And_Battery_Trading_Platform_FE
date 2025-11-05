@@ -106,3 +106,79 @@ export const getRejectedProducts = async (sellerId) => {
   }
 };
 
+/**
+ * Search products by license plate
+ * @param {string} licensePlate - License plate number
+ * @returns {Promise<Array>} Products array matching the license plate
+ */
+export const searchProductsByLicensePlate = async (licensePlate) => {
+  console.log("🔍 Searching products by license plate:", licensePlate);
+  
+  if (!licensePlate || licensePlate.trim() === '') {
+    throw new Error("License plate is required");
+  }
+  
+  try {
+    const response = await apiRequest(`/api/Product/search/license-plate/${encodeURIComponent(licensePlate.trim())}`);
+    console.log("✅ Products found by license plate:", response);
+    return response;
+  } catch (error) {
+    console.error("❌ Error searching products by license plate:", error);
+    throw error;
+  }
+};
+
+/**
+ * Search products by brand, model, or license plate from existing products
+ * @param {string} searchQuery - Search query (brand, model, or license plate)
+ * @param {Array} allProducts - Array of all products to search from
+ * @returns {Array} Products array matching the search query
+ */
+export const searchProducts = (searchQuery, allProducts = []) => {
+  console.log("🔍 Searching products by query:", searchQuery);
+  
+  if (!searchQuery || searchQuery.trim() === '') {
+    return [];
+  }
+  
+  const query = searchQuery.trim().toLowerCase();
+  console.log("🔍 Search query normalized:", query);
+  
+  // Filter products that match the search query
+  const matchingProducts = allProducts.filter(product => {
+    const brand = (product.brand || product.Brand || '').toLowerCase();
+    const model = (product.model || product.Model || '').toLowerCase();
+    const licensePlate = (product.licensePlate || product.LicensePlate || '').toLowerCase();
+    const title = (product.title || product.Title || '').toLowerCase();
+    const description = (product.description || product.Description || '').toLowerCase();
+    
+    // Check if query matches any of these fields
+    const matchesBrand = brand.includes(query);
+    const matchesModel = model.includes(query);
+    const matchesLicensePlate = licensePlate.includes(query);
+    const matchesTitle = title.includes(query);
+    const matchesDescription = description.includes(query);
+    
+    const isMatch = matchesBrand || matchesModel || matchesLicensePlate || matchesTitle || matchesDescription;
+    
+    if (isMatch) {
+      console.log(`✅ Product ${product.productId || product.ProductId} matches:`, {
+        brand: brand,
+        model: model,
+        licensePlate: licensePlate,
+        title: title,
+        matchesBrand,
+        matchesModel,
+        matchesLicensePlate,
+        matchesTitle,
+        matchesDescription
+      });
+    }
+    
+    return isMatch;
+  });
+  
+  console.log(`✅ Found ${matchingProducts.length} products matching "${searchQuery}"`);
+  return matchingProducts;
+};
+

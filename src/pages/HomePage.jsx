@@ -1,54 +1,361 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Search, Zap, Shield, TrendingUp, CheckCircle } from "lucide-react";
+import { Search, Zap, Shield, TrendingUp, CheckCircle, Filter } from "lucide-react";
 import { apiRequest } from "../lib/api";
 import { ProductCard } from "../components/molecules/ProductCard";
+import { searchProductsByLicensePlate, searchProducts } from "../lib/productApi";
+import { advancedSearchProducts } from "../lib/advancedSearchApi";
+import { AdvancedSearchFilter } from "../components/common/AdvancedSearchFilter";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
-import { toggleFavorite, isProductFavorited } from "../lib/favoriteApi";
+import { toggleFavorite } from "../lib/favoriteApi";
+import { handleVerificationPaymentSuccess } from "../lib/verificationNotificationService";
 import "../styles/homepage.css";
 
 export const HomePage = () => {
   const { user } = useAuth();
   const { show: showToast } = useToast();
   const location = useLocation();
+  const [showPaymentBanner, setShowPaymentBanner] = useState(false);
+  const [paymentBannerInfo, setPaymentBannerInfo] = useState({ amount: null, type: 'Deposit' });
+  const [showRefundBanner, setShowRefundBanner] = useState(false);
+  const [refundBannerInfo, setRefundBannerInfo] = useState({ amount: null, productTitle: null });
   const [searchQuery, setSearchQuery] = useState("");
   const [productType, setProductType] = useState("");
-  const [locationFilter, setLocationFilter] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all"); // all, vehicle, battery
   const [featuredProducts, setFeaturedProducts] = useState([]);
+  const [allProducts, setAllProducts] = useState([]); // Store all products for search
   const [loading, setLoading] = useState(true);
   const [featuredError, setFeaturedError] = useState("");
   const [favorites, setFavorites] = useState(new Set());
-  const [showAllProducts, setShowAllProducts] = useState(false);
+  const [isSearchMode, setIsSearchMode] = useState(false);
+  const [showAdvancedFilter, setShowAdvancedFilter] = useState(false);
+  const [activeFilters, setActiveFilters] = useState({});
+  const [currentFilters, setCurrentFilters] = useState({
+    productType: "",
+    minPrice: "",
+    maxPrice: "",
+    condition: "",
+    brand: "",
+    model: "",
+    year: "",
+    vehicleType: "",
+    maxMileage: "",
+    fuelType: "",
+    batteryBrand: "",
+    batteryType: "",
+    minBatteryHealth: "",
+    maxBatteryHealth: "",
+    minCapacity: "",
+    maxCapacity: "",
+    voltage: "",
+    minCycleCount: "",
+    maxCycleCount: "",
+  });
+  
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(4); // 4 products per page
+
+  // Cache for seller names to prevent them from disappearing
+  // Load from localStorage on mount with size limit
+  const [sellerCache, setSellerCache] = useState(() => {
+    try {
+      const cached = localStorage.getItem('sellerNameCache');
+      if (cached) {
+        const parsedCache = JSON.parse(cached);
+        // ✅ Limit cache size to 50 sellers to prevent quota exceeded
+        const entries = Object.entries(parsedCache);
+        if (entries.length > 50) {
+          console.warn(`⚠️ Seller cache too large (${entries.length}), trimming to 50`);
+          const trimmedCache = Object.fromEntries(entries.slice(-50));
+          return trimmedCache;
+        }
+        return parsedCache;
+      }
+      return {};
+    } catch (error) {
+      console.warn('Failed to load seller cache from localStorage:', error);
+      // ✅ If error, clear the corrupt cache
+      try {
+        localStorage.removeItem('sellerNameCache');
+      } catch (e) {
+        console.warn('Failed to clear seller cache:', e);
+      }
+      return {};
+    }
+  });
+
+  // Extract stable user ID to prevent unnecessary reloads
+  const userId = user?.id || user?.userId || user?.accountId;
+
+  // Persist seller cache to localStorage whenever it changes with quota handling
+  useEffect(() => {
+    try {
+      // ✅ Limit cache size before saving
+      const entries = Object.entries(sellerCache);
+      let cacheToSave = sellerCache;
+      
+      if (entries.length > 50) {
+        console.warn(`⚠️ Seller cache too large (${entries.length}), trimming to 50`);
+        cacheToSave = Object.fromEntries(entries.slice(-50));
+        setSellerCache(cacheToSave); // Update state with trimmed cache
+      }
+      
+      localStorage.setItem('sellerNameCache', JSON.stringify(cacheToSave));
+    } catch (error) {
+      if (error.name === 'QuotaExceededError' || error.message.includes('quota')) {
+        console.error('❌ localStorage quota exceeded! Clearing seller cache...');
+        // ✅ Clear seller cache if quota exceeded
+        try {
+          localStorage.removeItem('sellerNameCache');
+          setSellerCache({}); // Reset cache in state
+        } catch (e) {
+          console.error('Failed to clear seller cache:', e);
+        }
+      } else {
+        console.warn('Failed to save seller cache to localStorage:', error);
+      }
+    }
+  }, [sellerCache]);
 
   useEffect(() => {
     loadFeaturedProducts();
-    if (user) {
+    if (userId) {
       loadFavorites();
     }
     
     // Check for payment success parameters
     checkPaymentSuccess();
-  }, [user]);
+    
+    // ✅ Check localStorage for payment success (backup method)
+    const checkLocalStoragePayment = () => {
+      try {
+        const paymentDataStr = localStorage.getItem('evtb_payment_success');
+        if (paymentDataStr) {
+          const paymentData = JSON.parse(paymentDataStr);
+          
+          // Check if it's recent (within last 10 seconds) and not processed
+          const isRecent = (Date.now() - paymentData.timestamp) < 10000;
+          if (isRecent && !paymentData.processed) {
+            console.log('[HomePage] Found payment success in localStorage:', paymentData);
+            
+            const formattedAmount = paymentData.amount ? (parseInt(paymentData.amount) / 100).toLocaleString('vi-VN') : 'N/A';
+            const isVerification = (paymentData.paymentType || '').toLowerCase() === 'verification';
+            
+            // Show toast
+            showToast({
+              type: 'success',
+              title: isVerification ? '✅ Thanh toán kiểm định thành công!' : '🎉 Thanh toán đặt cọc thành công!',
+              message: isVerification 
+                ? `Yêu cầu kiểm định đã được thanh toán (${formattedAmount} VND).`
+                : `Bạn đã đặt cọc thành công (${formattedAmount} VND).`,
+              duration: 8000
+            });
+            
+            // Show banner
+            setPaymentBannerInfo({ amount: formattedAmount, type: paymentData.paymentType || 'Deposit' });
+            setShowPaymentBanner(true);
+            
+            // Mark as processed
+            paymentData.processed = true;
+            localStorage.setItem('evtb_payment_success', JSON.stringify(paymentData));
+            
+            // Clean up after 30 seconds
+            setTimeout(() => {
+              localStorage.removeItem('evtb_payment_success');
+            }, 30000);
+          }
+        }
+      } catch (error) {
+        console.error('[HomePage] Error checking localStorage:', error);
+      }
+    };
+    
+    // Check immediately
+    checkLocalStoragePayment();
+    
+    // ✅ Check for refund success in localStorage
+    const checkRefundSuccess = () => {
+      try {
+        const refundDataStr = localStorage.getItem('evtb_refund_success');
+        if (refundDataStr) {
+          const refundData = JSON.parse(refundDataStr);
+          
+          // Check if it's recent (within last 10 seconds)
+          const isRecent = (Date.now() - refundData.timestamp) < 10000;
+          if (isRecent) {
+            console.log('[HomePage] Found refund success in localStorage:', refundData);
+            
+            showToast({
+              type: 'success',
+              title: '💰 Đã hoàn tiền thành công!',
+              message: `Số tiền ${refundData.amount} đã được hoàn lại vào tài khoản của bạn.`,
+              duration: 8000
+            });
+            
+            setRefundBannerInfo({ 
+              amount: refundData.amount, 
+              productTitle: refundData.productTitle 
+            });
+            setShowRefundBanner(true);
+            
+            // Clean up after 30 seconds
+            setTimeout(() => {
+              localStorage.removeItem('evtb_refund_success');
+            }, 30000);
+          }
+        }
+      } catch (error) {
+        console.error('[HomePage] Error checking refund localStorage:', error);
+      }
+    };
+    
+    checkRefundSuccess();
+    
+    // Listen for storage events from other tabs
+    const handleStorageChange = (e) => {
+      if (e.key === 'evtb_payment_success') {
+        checkLocalStoragePayment();
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    
+    // Listen for postMessage from PaymentSuccess page (opened via window.open)
+    const onMessage = (event) => {
+      try {
+        const data = event.data || {};
+        
+        // Filter out messages from browser extensions
+        if (data.posdMessageId || data.type === 'VIDEO_XHR_CANDIDATE' || data.from === 'detector') {
+          return; // Ignore extension messages
+        }
+        
+        console.log('[HomePage] Received message:', data);
+        
+        // Handle redirect message
+        if (data.type === 'EVTB_REDIRECT' && data.url) {
+          console.log('[HomePage] Redirecting to:', data.url);
+          window.location.replace(data.url);
+          return;
+        }
+        
+        if (data.type === 'EVTB_PAYMENT_SUCCESS' && data.payload) {
+          console.log('[HomePage] Payment success message received:', data.payload);
+          const { paymentId, amount, paymentType } = data.payload;
+          const formattedAmount = amount ? (parseInt(amount) / 100).toLocaleString('vi-VN') : 'N/A';
+          const isVerification = (paymentType || '').toLowerCase() === 'verification';
+          
+          console.log('[HomePage] Showing success toast...');
+          showToast({
+            type: 'success',
+            title: isVerification ? '✅ Thanh toán kiểm định thành công!' : '🎉 Thanh toán đặt cọc thành công!',
+            message: isVerification 
+              ? `Yêu cầu kiểm định đã được thanh toán (${formattedAmount} VND).`
+              : `Bạn đã đặt cọc thành công (${formattedAmount} VND).`,
+            duration: 8000
+          });
+          
+          // Also show persistent banner as a fallback UI
+          setPaymentBannerInfo({ amount: formattedAmount, type: paymentType || 'Deposit' });
+          setShowPaymentBanner(true);
+          
+          console.log('[HomePage] Toast shown');
+        }
+      } catch (error) {
+        console.error('[HomePage] Error handling message:', error);
+      }
+    };
+    
+    console.log('[HomePage] Setting up message listener');
+    window.addEventListener('message', onMessage);
+    
+    return () => {
+      console.log('[HomePage] Cleaning up listeners');
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('message', onMessage);
+    };
+  }, [userId, showToast]); // Include showToast in dependencies
 
-  const checkPaymentSuccess = () => {
+  const checkPaymentSuccess = async () => {
     const urlParams = new URLSearchParams(location.search);
     const paymentSuccess = urlParams.get('payment_success');
     const paymentError = urlParams.get('payment_error');
     const paymentId = urlParams.get('payment_id');
-    const amount = urlParams.get('amount');
+    let amount = urlParams.get('amount');
     const transactionNo = urlParams.get('transaction_no');
+    const paymentType = urlParams.get('payment_type'); // ✅ Get payment type from URL
+
+    // ✅ If amount not in URL, try to get from localStorage
+    if (!amount || amount === '0') {
+      try {
+        const storageData = localStorage.getItem('evtb_payment_success');
+        if (storageData) {
+          const parsed = JSON.parse(storageData);
+          amount = parsed.amount;
+          console.log('[HomePage] Got amount from localStorage:', amount);
+        }
+      } catch (e) {
+        console.error('[HomePage] Could not read amount from localStorage:', e);
+      }
+    }
+    
+    // ✅ Debug: Log all payment data
+    console.log('[HomePage] Payment success data:', {
+      paymentId,
+      amountFromUrl: urlParams.get('amount'),
+      amountFromStorage: amount,
+      transactionNo,
+      paymentType
+    });
 
     if (paymentSuccess === 'true' && paymentId) {
       const formattedAmount = amount ? (parseInt(amount) / 100).toLocaleString('vi-VN') : 'N/A';
       
-      showToast({
-        type: 'success',
-        title: '🎉 Thanh toán thành công!',
-        message: `Giao dịch ${paymentId} đã được xử lý thành công. Số tiền: ${formattedAmount} VND`,
-        duration: 8000
-      });
+      // ✅ Determine payment type (from URL or API)
+      let finalPaymentType = paymentType || 'Deposit';
+      
+      // Check if this is a verification payment and notify admin
+      try {
+        const payment = await apiRequest(`/api/Payment/${paymentId}`);
+        
+        if (payment) {
+          finalPaymentType = payment.PaymentType || payment.paymentType || finalPaymentType;
+          
+          if (finalPaymentType === 'Verification' && payment.ProductId) {
+            // Notify admin about successful verification payment
+            await handleVerificationPaymentSuccess(
+              paymentId,
+              payment.ProductId,
+              payment.UserId, // Seller ID
+              payment.Amount
+            );
+          }
+        }
+      } catch (error) {
+        // Silently fail - don't show error to user
+      }
+      
+      // ✅ Show specific notification based on payment type
+      if (finalPaymentType === 'Verification') {
+        showToast({
+          type: 'success',
+          title: '✅ Thanh toán kiểm định thành công!',
+          message: `Yêu cầu kiểm định đã được thanh toán (${formattedAmount} VND). Admin sẽ xác nhận trong thời gian sớm nhất.`,
+          duration: 10000
+        });
+      } else {
+        showToast({
+          type: 'success',
+          title: '🎉 Thanh toán đặt cọc thành công!',
+          message: `Bạn đã đặt cọc thành công (${formattedAmount} VND). Vui lòng liên hệ người bán để hoàn tất giao dịch.`,
+          duration: 10000
+        });
+      }
+
+      // ✅ Also show a persistent banner at top of HomePage
+      setPaymentBannerInfo({ amount: formattedAmount, type: finalPaymentType });
+      setShowPaymentBanner(true);
 
       // Clear URL parameters after showing notification
       const newUrl = window.location.pathname;
@@ -69,44 +376,22 @@ export const HomePage = () => {
 
   const loadFeaturedProducts = async () => {
     try {
-      console.log("🔄 Loading featured products for homepage...");
       let approvedProducts = [];
 
       // Use the main Product API endpoint
       const data = await apiRequest("/api/Product");
       const allProducts = Array.isArray(data) ? data : data?.items || [];
 
-      console.log("📦 Total products from API:", allProducts.length);
-      console.log("📦 Sample product:", allProducts[0]);
-      console.log("📦 All products status check:", allProducts.map(p => ({
-        id: p.productId || p.id || p.ProductId,
-        status: p.status || p.Status,
-        title: p.title || p.Title
-      })));
-      
-      // Debug: Check specific products that should be approved
-      const approvedProductsDebug = allProducts.filter(p => {
-        const status = String(p.status || p.Status || "").toLowerCase();
-        return status === "approved" || status === "active" || status === "verified";
-      });
-      console.log("✅ Products that should be approved:", approvedProductsDebug.length);
-      console.log("✅ Approved products details:", approvedProductsDebug.map(p => ({
-        id: p.productId || p.id || p.ProductId,
-        status: p.status || p.Status,
-        title: p.title || p.Title
-      })));
-      
-      console.log("🔍 Starting product filtering...");
-
       // Filter approved products and classify by type
       approvedProducts = allProducts
         .filter((x) => {
           const status = String(x.status || x.Status || "").toLowerCase().trim();
           const isApproved = status === "approved" || status === "active" || status === "verified";
-          console.log(
-            `Product ${x.productId || x.id || x.ProductId}: status="${status}", isApproved=${isApproved}`
-          );
-          return isApproved;
+          const isNotSold = status !== "sold";
+          const isNotRejected = status !== "rejected";
+          const isNotReserved = status !== "reserved"; // Filter out reserved products
+          const shouldShow = isApproved && isNotSold && isNotRejected && isNotReserved;
+          return shouldShow;
         })
         .map((x) => {
           // Determine product type based on available fields
@@ -120,58 +405,110 @@ export const HomePage = () => {
             productType = "battery";
           }
 
-          console.log(`Product ${x.id}: classified as ${productType}`);
           return { ...x, productType };
-        })
-        // .slice(0, 8); // Tạm thời bỏ giới hạn để test
+        });
 
-      console.log("✅ Filtered approved products:", approvedProducts.length);
-      console.log("🎯 Final approved products details:", approvedProducts.map(p => ({
-        id: p.id || p.productId || p.Id,
-        title: p.title || p.Title,
-        status: p.status || p.Status,
-        productType: p.productType
-      })));
-
-      // Load images for each approved product with delay to avoid DbContext conflicts
+      // ✅ OPTIMIZED: Load images and seller info without delays
       const productsWithImages = await Promise.all(
         approvedProducts.map(async (product, index) => {
+          // ✅ DECLARE sellerName OUTSIDE try block so it's accessible in catch block
+          let sellerName = null;
+          
           try {
-            // Add delay to avoid DbContext conflicts
-            if (index > 0) {
-              await new Promise((resolve) => setTimeout(resolve, 500 * index));
+            // ✅ Get seller info - try COMPREHENSIVE approaches
+            sellerName = product.sellerName || 
+                           product.seller?.fullName || 
+                           product.seller?.name ||
+                           product.seller?.userName ||
+                           product.sellerFullName ||
+                           product.seller_name ||
+                           product.ownerName ||
+                           product.userName;
+            
+            // If no seller name but has sellerId, try to load from API or cache
+            // Try MANY possible field names for seller ID
+            const possibleSellerIdFields = [
+              'sellerId', 'seller_id', 'SellerId', 'SellerID', 
+              'userId', 'user_id', 'UserId', 'UserID',
+              'createdBy', 'created_by', 'CreatedBy', 'CreatedByUserId',
+              'ownerId', 'owner_id', 'OwnerId'
+            ];
+            
+            let sellerId = null;
+            for (const field of possibleSellerIdFields) {
+              if (product[field]) {
+                sellerId = product[field];
+                break;
+              }
+            }
+            
+            if (!sellerName && sellerId) {
+              // ✅ CHECK CACHE FIRST before making API call
+              if (sellerCache[sellerId]) {
+                sellerName = sellerCache[sellerId];
+              } else {
+                // Only call API if not in cache
+                try {
+                  const sellerPromise = apiRequest(`/api/User/${sellerId}`);
+                  const timeoutPromise = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Timeout')), 8000) // Increased timeout to 8 seconds
+                  );
+                  const sellerData = await Promise.race([sellerPromise, timeoutPromise]);
+                  sellerName = sellerData?.fullName || 
+                             sellerData?.full_name || 
+                             sellerData?.name || 
+                             sellerData?.userName || 
+                             sellerData?.user_name ||
+                             sellerData?.UserName;
+                  
+                  // ✅ SAVE TO CACHE for future use
+                  if (sellerName) {
+                    setSellerCache(prev => ({
+                      ...prev,
+                      [sellerId]: sellerName
+                    }));
+                  }
+                } catch (sellerError) {
+                  // Silently fail - seller name will use fallback
+                }
+              }
+            }
+            
+            // Final fallback
+            if (!sellerName) {
+              sellerName = "Người bán";
             }
 
-            const imagesData = await apiRequest(
-              `/api/ProductImage/product/${
-                product.id || product.productId || product.Id
-              }`
-            );
+            // ✅ Try to load images from API (with timeout to prevent hanging)
+            let imagesData = null;
+            try {
+              const imagePromise = apiRequest(
+                `/api/ProductImage/product/${product.id || product.productId || product.Id}`
+              );
+              const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Timeout')), 3000)
+              );
+              imagesData = await Promise.race([imagePromise, timeoutPromise]);
+            } catch (imageError) {
+              imagesData = null;
+            }
             
-            console.log(`🖼️ Product ${product.id} images data:`, {
-              rawData: imagesData,
-              isArray: Array.isArray(imagesData),
-              hasItems: !!imagesData?.items,
-              imageDataField: imagesData?.imageData
-            });
-
             // Handle different response formats
             let images = [];
-            if (Array.isArray(imagesData)) {
-              images = imagesData;
-            } else if (imagesData?.items && Array.isArray(imagesData.items)) {
-              images = imagesData.items;
-            } else if (imagesData && typeof imagesData === 'object') {
-              // Single object response - wrap in array
-              images = [imagesData];
+            if (imagesData) {
+              if (Array.isArray(imagesData)) {
+                images = imagesData;
+              } else if (imagesData?.items && Array.isArray(imagesData.items)) {
+                images = imagesData.items;
+              } else if (typeof imagesData === 'object') {
+                images = [imagesData];
+              }
             }
 
             // Map images - only use real product images
             const mappedImages = images.map(
               (img) => img.imageData || img.imageUrl || img.url
-            ).filter(img => img && img.trim() !== ''); // Filter out empty/null images
-
-            console.log(`🖼️ Product ${product.id} mapped images:`, mappedImages);
+            ).filter(Boolean);
 
             // If no images found from ProductImage API, try to get from product fields
             let finalImages = mappedImages;
@@ -185,14 +522,11 @@ export const HomePage = () => {
               for (const field of possibleImageFields) {
                 if (product[field]) {
                   if (Array.isArray(product[field])) {
-                    finalImages = product[field].filter(img => img && img.trim() !== '');
-                  } else if (typeof product[field] === 'string' && product[field].trim() !== '') {
+                    finalImages = product[field].filter(Boolean);
+                  } else if (typeof product[field] === 'string' && product[field].trim()) {
                     finalImages = [product[field]];
                   }
-                  if (finalImages.length > 0) {
-                    console.log(`🖼️ Found images in product.${field}:`, finalImages);
-                    break;
-                  }
+                  if (finalImages.length > 0) break;
                 }
               }
             }
@@ -200,24 +534,14 @@ export const HomePage = () => {
             return {
               ...product,
               images: finalImages, // Only real images, no placeholder
+              sellerName: sellerName, // Add seller name
             };
           } catch (error) {
-            console.warn(
-              `Failed to load images for product ${
-                product.id || product.productId
-              }:`,
-              error
-            );
-            console.warn(`Error details:`, {
-              message: error.message,
-              status: error.status,
-              data: error.data,
-              productId: product.id || product.productId || product.Id
-            });
             // Return product with no images if API fails
             return {
               ...product,
-              images: [], // No placeholder, only real images
+              images: [],
+              sellerName: sellerName || "Người bán",
             };
           }
         })
@@ -237,8 +561,8 @@ export const HomePage = () => {
         return bDate - aDate;
       });
 
-      console.log("Loaded approved products for homepage:", sortedProducts);
       setFeaturedProducts(sortedProducts);
+      setAllProducts(sortedProducts); // Store all products for search
     } catch (err) {
       console.error("❌ Error loading featured products:", err);
       console.error("❌ Error details:", {
@@ -294,12 +618,7 @@ export const HomePage = () => {
       return;
     }
 
-    // Debug user ID
     const userId = user.id || user.userId || user.accountId;
-    console.log("🔍 FAVORITE DEBUG:");
-    console.log("  User object:", user);
-    console.log("  Extracted userId:", userId);
-    console.log("  Product ID:", productId);
 
     try {
       const result = await toggleFavorite(userId, productId);
@@ -345,14 +664,280 @@ export const HomePage = () => {
     }
   };
 
-  const handleSearch = (e) => {
+  const handleSearch = async (e) => {
     e.preventDefault();
-    // TODO: implement search functionality
-    console.log("search clicked:", { searchQuery, productType, locationFilter });
+    
+    if (!searchQuery.trim()) {
+      showToast({
+        type: "warning",
+        title: "⚠️ Vui lòng nhập từ khóa tìm kiếm",
+        message: "Bạn cần nhập hãng xe, mẫu xe hoặc biển số để tìm kiếm",
+        duration: 3000
+      });
+      return;
+    }
+    
+    try {
+      
+      let results = [];
+      let searchType = "";
+      
+      if (productType === "license-plate") {
+        // Tìm kiếm chỉ theo biển số
+        try {
+          results = await searchProductsByLicensePlate(searchQuery.trim());
+          searchType = "biển số";
+        } catch (error) {
+          // Fallback to local search if API fails
+          results = searchProducts(searchQuery.trim(), allProducts);
+          searchType = "biển số (tìm kiếm cục bộ)";
+        }
+      } else {
+        // Tìm kiếm tổng quát theo hãng xe, mẫu xe hoặc biển số trong dữ liệu cục bộ
+        results = searchProducts(searchQuery.trim(), allProducts);
+        searchType = "hãng xe, mẫu xe hoặc biển số";
+      }
+      
+      // Lọc theo loại sản phẩm nếu được chọn
+      if (productType && productType !== "license-plate" && productType !== "") {
+        results = results.filter(product => {
+          const productTypeLower = (product.productType || product.ProductType || "").toLowerCase();
+          return productTypeLower === productType;
+        });
+      }
+      
+        if (results && results.length > 0) {
+          // Hiển thị kết quả tìm kiếm
+          setFeaturedProducts(results);
+          setIsSearchMode(true);
+          setCurrentPage(1); // Reset to first page when searching
+        
+        const searchDescription = productType === "license-plate" 
+          ? `biển số "${searchQuery}"`
+          : `${searchType} "${searchQuery}"`;
+          
+        showToast({
+          type: "success",
+          title: "✅ Tìm thấy kết quả",
+          message: `Tìm thấy ${results.length} xe với ${searchDescription}`,
+          duration: 4000
+        });
+      } else {
+        setFeaturedProducts([]);
+        setIsSearchMode(true);
+        
+        const searchDescription = productType === "license-plate" 
+          ? `biển số "${searchQuery}"`
+          : `${searchType} "${searchQuery}"`;
+          
+        showToast({
+          type: "info",
+          title: "🔍 Không tìm thấy kết quả",
+          message: `Không có xe nào với ${searchDescription}`,
+          duration: 4000
+        });
+      }
+    } catch (error) {
+      console.error("❌ Search error:", error);
+      showToast({
+        type: "error",
+        title: "❌ Lỗi tìm kiếm",
+        message: error.message || "Có lỗi xảy ra khi tìm kiếm",
+        duration: 5000
+      });
+    }
+  };
+
+  const showAllProductsAgain = async () => {
+    setIsSearchMode(false);
+    setProductType("");
+    setSearchQuery("");
+    setActiveFilters({});
+    setCurrentFilters({
+      productType: "",
+      minPrice: "",
+      maxPrice: "",
+      condition: "",
+      brand: "",
+      model: "",
+      year: "",
+      vehicleType: "",
+      maxMileage: "",
+      fuelType: "",
+      batteryBrand: "",
+      batteryType: "",
+      minBatteryHealth: "",
+      maxBatteryHealth: "",
+      minCapacity: "",
+      maxCapacity: "",
+      voltage: "",
+      minCycleCount: "",
+      maxCycleCount: "",
+    });
+    setShowAdvancedFilter(false);
+    setCurrentPage(1); // Reset to first page
+    // Use stored allProducts instead of reloading
+    setFeaturedProducts(allProducts);
+    showToast({
+      type: "success",
+      title: "🔄 Đã tải lại",
+      message: "Hiển thị tất cả sản phẩm",
+      duration: 3000
+    });
+  };
+
+  const handleAdvancedFilter = async (filters) => {
+    try {
+      setLoading(true);
+      setCurrentFilters(filters); // Save current filters
+      setActiveFilters(filters);
+      setShowAdvancedFilter(false);
+      
+      const results = await advancedSearchProducts(filters);
+      
+      // Load images for filtered products
+      const productsWithImages = await Promise.all(
+        results.map(async (product) => {
+          try {
+            const imagesData = await apiRequest(
+              `/api/ProductImage/product/${product.id || product.productId || product.Id}`
+            );
+            
+            let images = [];
+            if (imagesData) {
+              if (Array.isArray(imagesData)) {
+                images = imagesData;
+              } else if (imagesData?.items && Array.isArray(imagesData.items)) {
+                images = imagesData.items;
+              }
+            }
+            
+            const mappedImages = images.map(
+              (img) => img.imageData || img.imageUrl || img.url
+            ).filter(Boolean);
+            
+            return {
+              ...product,
+              images: mappedImages,
+              sellerName: product.sellerName || sellerCache[product.sellerId] || "Người bán"
+            };
+          } catch (error) {
+            return {
+              ...product,
+              images: [],
+              sellerName: product.sellerName || "Người bán"
+            };
+          }
+        })
+      );
+      
+      setFeaturedProducts(productsWithImages);
+      setIsSearchMode(true);
+      setCurrentPage(1);
+      
+      const filterCount = Object.keys(filters).length;
+      showToast({
+        type: "success",
+        title: "✅ Đã áp dụng bộ lọc",
+        message: `Tìm thấy ${results.length} sản phẩm với ${filterCount} tiêu chí lọc`,
+        duration: 4000
+      });
+    } catch (error) {
+      showToast({
+        type: "error",
+        title: "❌ Lỗi tìm kiếm",
+        message: error.message || "Có lỗi xảy ra khi lọc sản phẩm",
+        duration: 5000
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <div className="min-h-screen">
+      {showPaymentBanner && (
+        <div className="sticky top-0 z-50 shadow-2xl animate-slideDown">
+          <div className="bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500 text-white">
+            <div className="max-w-7xl mx-auto px-6 py-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  {/* Success Icon */}
+                  <div className="flex items-center justify-center w-16 h-16 bg-white/20 rounded-full backdrop-blur-sm">
+                    <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  
+                  {/* Message */}
+                  <div>
+                    <h3 className="text-2xl font-bold mb-1">
+                      {paymentBannerInfo.type === 'Verification' ? 'Đã thanh toán kiểm định thành công!' : 'Đã thanh toán đặt cọc thành công!'}
+                    </h3>
+                    <p className="text-green-50 text-base">
+                      {paymentBannerInfo.type === 'Verification' 
+                        ? 'Yêu cầu kiểm định của bạn đã được thanh toán thành công. Admin sẽ xác nhận sớm nhất.' 
+                        : 'Giao dịch đặt cọc đã hoàn tất. Vui lòng liên hệ người bán để hoàn tất giao dịch.'}
+                    </p>
+                  </div>
+                </div>
+                
+                {/* Close Button */}
+                <button
+                  onClick={() => setShowPaymentBanner(false)}
+                  className="bg-white/20 hover:bg-white/30 text-white rounded-full p-3 transition-all duration-200 hover:scale-110"
+                  aria-label="Đóng thông báo"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {showRefundBanner && (
+        <div className="sticky top-0 z-50 shadow-2xl animate-slideDown">
+          <div className="bg-gradient-to-r from-blue-500 via-cyan-500 to-teal-500 text-white">
+            <div className="max-w-7xl mx-auto px-6 py-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  {/* Refund Icon */}
+                  <div className="flex items-center justify-center w-16 h-16 bg-white/20 rounded-full backdrop-blur-sm">
+                    <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                    </svg>
+                  </div>
+                  
+                  {/* Message */}
+                  <div>
+                    <h3 className="text-2xl font-bold mb-1">
+                      💰 Đã hoàn tiền thành công!
+                    </h3>
+                    <p className="text-blue-50 text-base">
+                      Số tiền <strong>{refundBannerInfo.amount}</strong> đã được hoàn lại vào tài khoản của bạn vì giao dịch không thành công.
+                      {refundBannerInfo.productTitle && ` Sản phẩm "${refundBannerInfo.productTitle}" đã được trả về trang chủ.`}
+                    </p>
+                  </div>
+                </div>
+                
+                {/* Close Button */}
+                <button
+                  onClick={() => setShowRefundBanner(false)}
+                  className="bg-white/20 hover:bg-white/30 text-white rounded-full p-3 transition-all duration-200 hover:scale-110"
+                  aria-label="Đóng thông báo"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <section className="text-white py-20 relative overflow-hidden hero-bg">
         {/* Electric charging effects */}
         <div className="absolute inset-0 overflow-hidden">
@@ -422,47 +1007,66 @@ export const HomePage = () => {
             </p>
           </div>
 
-          <div className="search-form-container">
-            <form onSubmit={handleSearch} className="search-form">
-              <div className="md:col-span-1">
-                <select
-                  value={productType}
-                  onChange={(e) => setProductType(e.target.value)}
-                  className="search-input"
+          <div className="max-w-4xl mx-auto">
+            {/* Clean Modern Search Bar */}
+            <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-2xl p-3">
+              <form onSubmit={handleSearch} className="flex items-center gap-3">
+                {/* Search Input - Full Width */}
+                <div className="flex-1 relative">
+                  <Search className="absolute left-5 top-1/2 -translate-y-1/2 h-6 w-6 text-gray-400" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Tìm kiếm xe điện, pin theo hãng, mẫu xe, màu sắc, biển số..."
+                    className="w-full pl-14 pr-6 py-5 text-lg text-gray-900 bg-transparent border-0 focus:outline-none placeholder:text-gray-400"
+                  />
+                </div>
+
+                {/* Divider */}
+                <div className="h-12 w-px bg-gray-200"></div>
+
+                {/* Search Button */}
+                <button 
+                  type="submit" 
+                  className="px-8 py-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-bold rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all shadow-lg hover:shadow-xl hover:scale-105 flex items-center gap-2 whitespace-nowrap"
                 >
-                  <option value="">Tất cả</option>
-                  <option value="vehicle">Xe điện</option>
-                  <option value="battery">Pin</option>
-                </select>
-              </div>
-
-              <div className="md:col-span-1">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Hãng xe, mẫu xe..."
-                  className="search-input"
-                />
-              </div>
-
-              <div className="md:col-span-1">
-                <input
-                  type="text"
-                  value={locationFilter}
-                  onChange={(e) => setLocationFilter(e.target.value)}
-                  placeholder="Địa điểm (VD: HN)"
-                  className="search-input"
-                />
-              </div>
-
-              <div className="md:col-span-1">
-                <button type="submit" className="search-button">
-                  <Search className="h-5 w-5 mr-2" />
+                  <Search className="h-5 w-5" />
                   Tìm kiếm
                 </button>
+
+                {/* Filter Button with Badge */}
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedFilter(!showAdvancedFilter)}
+                  className={`relative px-6 py-4 rounded-xl font-bold transition-all shadow-lg hover:shadow-xl hover:scale-105 flex items-center gap-2 whitespace-nowrap ${
+                    showAdvancedFilter || Object.keys(activeFilters).length > 0
+                      ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white'
+                      : 'bg-gradient-to-r from-gray-700 to-gray-800 text-white hover:from-gray-800 hover:to-gray-900'
+                  }`}
+                  title="Bộ lọc nâng cao"
+                >
+                  <Filter className="h-5 w-5" />
+                  <span>Lọc</span>
+                  {Object.keys(activeFilters).length > 0 && (
+                    <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold rounded-full h-7 w-7 flex items-center justify-center shadow-lg animate-pulse">
+                      {Object.keys(activeFilters).length}
+                    </span>
+                  )}
+                </button>
+              </form>
+            </div>
+
+            {/* Advanced Filter Panel */}
+            {showAdvancedFilter && (
+              <div className="mt-4 animate-fade-in">
+                <AdvancedSearchFilter
+                  initialFilters={currentFilters}
+                  onFilterChange={handleAdvancedFilter}
+                  onClose={() => setShowAdvancedFilter(false)}
+                />
               </div>
-            </form>
+            )}
           </div>
 
           <div className="mt-12 features-grid">
@@ -496,51 +1100,65 @@ export const HomePage = () => {
           <div className="flex items-center justify-between mb-8">
             <div>
               <h2 className="text-3xl font-bold text-gray-900">
-                Sản phẩm nổi bật
+                {isSearchMode ? "Kết quả tìm kiếm" : "Sản phẩm nổi bật"}
               </h2>
               <p className="text-gray-600 mt-2">
-                Những sản phẩm được kiểm duyệt và giá cạnh tranh nhất
+                {isSearchMode 
+                  ? `Kết quả tìm kiếm theo ${productType === "license-plate" ? "biển số" : "từ khóa"}`
+                  : "Những sản phẩm được kiểm duyệt và giá cạnh tranh nhất"
+                }
               </p>
             </div>
             <div className="flex space-x-4">
-              <Link
-                to="/vehicles"
-                className="text-blue-600 hover:text-blue-700 font-medium flex items-center"
-              >
-                🚗 Xe điện
-                <svg
-                  className="w-5 h-5 ml-1"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+              {isSearchMode ? (
+                <button
+                  onClick={showAllProductsAgain}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 5l7 7-7 7"
-                  />
-                </svg>
-              </Link>
-              <Link
-                to="/batteries"
-                className="text-green-600 hover:text-green-700 font-medium flex items-center"
-              >
-                🔋 Pin
-                <svg
-                  className="w-5 h-5 ml-1"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 5l7 7-7 7"
-                  />
-                </svg>
-              </Link>
+                  🔄 Xem tất cả sản phẩm
+                </button>
+              ) : (
+                <>
+                  <Link
+                    to="/vehicles"
+                    className="text-blue-600 hover:text-blue-700 font-medium flex items-center"
+                  >
+                    🚗 Xe điện
+                    <svg
+                      className="w-5 h-5 ml-1"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                  </Link>
+                  <Link
+                    to="/batteries"
+                    className="text-green-600 hover:text-green-700 font-medium flex items-center"
+                  >
+                    🔋 Pin
+                    <svg
+                      className="w-5 h-5 ml-1"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                  </Link>
+                </>
+              )}
             </div>
           </div>
 
@@ -556,7 +1174,10 @@ export const HomePage = () => {
               <div className="mb-8">
                 <div className="flex flex-wrap gap-4 mb-6">
                   <button
-                    onClick={() => setSelectedCategory("all")}
+                    onClick={() => {
+                      setSelectedCategory("all");
+                      setCurrentPage(1);
+                    }}
                     className={`px-4 py-2 rounded-full font-medium transition-colors ${
                       selectedCategory === "all"
                         ? "bg-blue-600 text-white"
@@ -566,7 +1187,10 @@ export const HomePage = () => {
                     Tất cả ({featuredProducts.length})
                   </button>
                   <button
-                    onClick={() => setSelectedCategory("vehicle")}
+                    onClick={() => {
+                      setSelectedCategory("vehicle");
+                      setCurrentPage(1);
+                    }}
                     className={`px-4 py-2 rounded-full font-medium transition-colors ${
                       selectedCategory === "vehicle"
                         ? "bg-blue-600 text-white"
@@ -582,7 +1206,10 @@ export const HomePage = () => {
                     )
                   </button>
                   <button
-                    onClick={() => setSelectedCategory("battery")}
+                    onClick={() => {
+                      setSelectedCategory("battery");
+                      setCurrentPage(1);
+                    }}
                     className={`px-4 py-2 rounded-full font-medium transition-colors ${
                       selectedCategory === "battery"
                         ? "bg-green-600 text-white"
@@ -601,71 +1228,107 @@ export const HomePage = () => {
               </div>
 
               <div className="products-grid">
-                {(showAllProducts
-                  ? featuredProducts.filter((product) => {
-                      const matchesCategory =
-                        selectedCategory === "all" ||
-                        product.productType?.toLowerCase() === selectedCategory;
-                      const matchesType =
-                        !productType || product.productType === productType;
-                      return matchesCategory && matchesType;
-                    })
-                  : featuredProducts
-                      .filter((product) => {
-                        const matchesCategory =
-                          selectedCategory === "all" ||
-                          product.productType?.toLowerCase() ===
-                            selectedCategory;
-                        const matchesType =
-                          !productType || product.productType === productType;
-                        return matchesCategory && matchesType;
-                      })
-                      .slice(0, 8)
-                ).map((product, index) => (
-                  <ProductCard
-                    key={
-                      product.id ||
-                      product.productId ||
-                      product.Id ||
-                      `product-${index}`
-                    }
-                    product={product}
-                    onToggleFavorite={handleToggleFavorite}
-                    isFavorite={favorites.has(product.id || product.productId)}
-                    user={user}
-                  />
-                ))}
+                {(() => {
+                  // First filter products by category and type
+                  const filteredProducts = featuredProducts.filter((product) => {
+                    const matchesCategory =
+                      selectedCategory === "all" ||
+                      product.productType?.toLowerCase() === selectedCategory;
+                    const matchesType =
+                      !productType || product.productType === productType;
+                    return matchesCategory && matchesType;
+                  });
+                  
+                  // Calculate pagination
+                  const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
+                  const startIndex = (currentPage - 1) * itemsPerPage;
+                  const endIndex = startIndex + itemsPerPage;
+                  const paginatedProducts = filteredProducts.slice(startIndex, endIndex);
+                  
+                  return paginatedProducts.map((product, index) => (
+                    <ProductCard
+                      key={
+                        product.id ||
+                        product.productId ||
+                        product.Id ||
+                        `product-${index}`
+                      }
+                      product={product}
+                      onToggleFavorite={handleToggleFavorite}
+                      isFavorite={favorites.has(product.id || product.productId)}
+                      user={user}
+                    />
+                  ));
+                })()}
               </div>
 
-              {featuredProducts.length > 8 && (
-                <div className="text-center mt-8">
-                  <button
-                    onClick={() => setShowAllProducts(!showAllProducts)}
-                    className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors flex items-center mx-auto space-x-2"
-                  >
-                    <span>
-                      {showAllProducts
-                        ? "Thu gọn"
-                        : `Xem tất cả (${featuredProducts.length} sản phẩm)`}
-                    </span>
-                    <svg
-                      className={`w-5 h-5 transition-transform duration-200 ${
-                        showAllProducts ? "rotate-180" : ""
-                      }`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M19 9l-7 7-7-7"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              )}
+              {/* Pagination */}
+              {(() => {
+                const filteredProducts = featuredProducts.filter((product) => {
+                  const matchesCategory =
+                    selectedCategory === "all" ||
+                    product.productType?.toLowerCase() === selectedCategory;
+                  const matchesType =
+                    !productType || product.productType === productType;
+                  return matchesCategory && matchesType;
+                });
+                
+                const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
+                
+                if (totalPages <= 1) return null;
+                
+                return (
+                  <div className="text-center mt-8">
+                    <div className="flex justify-center items-center space-x-2">
+                      {/* Previous button */}
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={currentPage === 1}
+                        className={`px-3 py-2 rounded-lg font-medium transition-colors ${
+                          currentPage === 1
+                            ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                            : 'bg-blue-600 text-white hover:bg-blue-700'
+                        }`}
+                      >
+                        ← Trước
+                      </button>
+                      
+                      {/* Page numbers */}
+                      {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                        <button
+                          key={page}
+                          onClick={() => setCurrentPage(page)}
+                          className={`px-3 py-2 rounded-lg font-medium transition-colors ${
+                            currentPage === page
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      ))}
+                      
+                      {/* Next button */}
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                        disabled={currentPage === totalPages}
+                        className={`px-3 py-2 rounded-lg font-medium transition-colors ${
+                          currentPage === totalPages
+                            ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                            : 'bg-blue-600 text-white hover:bg-blue-700'
+                        }`}
+                      >
+                        Sau →
+                      </button>
+                    </div>
+                    
+                    {/* Page info */}
+                    <div className="mt-4 text-sm text-gray-600">
+                      Trang {currentPage} / {totalPages} - Hiển thị {Math.min(itemsPerPage, filteredProducts.length - (currentPage - 1) * itemsPerPage)} trong {filteredProducts.length} sản phẩm
+                    </div>
+                  </div>
+                );
+              })()}
             </>
           ) : (
             <div className="text-center py-12">

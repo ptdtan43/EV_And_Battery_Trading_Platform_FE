@@ -63,8 +63,15 @@ const PayWithVnPayButton = ({
         onSuccess(result);
       }
 
-      // Redirect to VNPay
-      window.location.href = result.paymentUrl;
+      // Redirect to VNPay in a new tab so the return page can self-close
+      // ✅ REMOVE noopener to allow window.opener to work
+      const paymentWindow = window.open(
+        result.paymentUrl,
+        "_blank"
+      );
+      if (paymentWindow && typeof paymentWindow.focus === "function") {
+        paymentWindow.focus();
+      }
 
     } catch (err) {
       console.error("Payment creation failed:", err);

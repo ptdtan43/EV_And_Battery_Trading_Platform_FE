@@ -62,6 +62,7 @@ export const MyListings = () => {
     )
       return "approved";
     if (raw.includes("reject") || raw.includes("từ chối")) return "rejected";
+    if (raw.includes("reserved") || raw.includes("thanh toán")) return "reserved";
     if (raw.includes("sold") || raw.includes("đã bán")) return "sold";
     return raw || "pending";
   };
@@ -77,19 +78,34 @@ export const MyListings = () => {
       // Use seller-specific API (now has productType field)
       console.log("🔄 Using seller-specific API (has productType)");
       const sellerData = await apiRequest(`/api/Product/seller/${sellerId}`);
-      console.log("✅ Seller API successful:", sellerData.length, "items");
-
       const sellerItems = Array.isArray(sellerData)
         ? sellerData
         : sellerData?.items || [];
+      console.log("✅ Seller API successful:", sellerItems.length, "items");
 
-      console.log("🔍 Seller data loaded:", sellerItems.length, "items");
+      // Fallback: if seller endpoint returns empty, fetch all and filter by sellerId
+      let sourceItems = sellerItems;
+      if (sellerId && sellerItems.length === 0) {
+        try {
+          console.log("🛠️ Fallback: fetching all products and filtering by sellerId", sellerId);
+          const allResponse = await apiRequest(`/api/Product`);
+          const allItems = Array.isArray(allResponse) ? allResponse : allResponse?.items || [];
+          sourceItems = allItems.filter(
+            (p) => (p.sellerId || p.SellerId || p.ownerId || p.createdBy) == sellerId
+          );
+          console.log("✅ Fallback filtered items:", sourceItems.length);
+        } catch (fallbackErr) {
+          console.warn("⚠️ Fallback fetch failed:", fallbackErr);
+        }
+      }
+
+      console.log("🔍 Seller data loaded:", sourceItems.length, "items");
 
       // Classify products - use single pass to avoid duplicates
       const vehiclesData = [];
       const batteriesData = [];
 
-      sellerItems.forEach((item) => {
+      sourceItems.forEach((item) => {
         // PRIORITY 1: Check productType field first (most reliable)
         if (item.productType === "vehicle" || item.productType === "Vehicle") {
           console.log(
@@ -213,6 +229,32 @@ export const MyListings = () => {
         })
         .map(async (l, index) => {
           let images = [];
+          let rejectionReason = l.rejectionReason || l.RejectionReason;
+
+          // ALWAYS fetch fresh rejection reason for rejected products to ensure we have the latest data
+          // This prevents stale data from causing "Bị báo cáo" to change to "Từ chối"
+          const status = getStatus(l);
+          if (status === "rejected") {
+            try {
+              console.log(`🔄 Fetching fresh rejection reason for product ${l.id || l.productId}`);
+              const detailedProduct = await apiRequest(
+                `/api/Product/${l.id || l.productId || l.Id}`
+              );
+              rejectionReason = 
+                detailedProduct?.rejectionReason || 
+                detailedProduct?.RejectionReason || 
+                detailedProduct?.rejection_reason;
+              
+              console.log(`✅ Fresh rejection reason for ${l.id || l.productId}:`, {
+                reason: rejectionReason,
+                hasPrefix: rejectionReason?.startsWith("[BÁO CÁO]")
+              });
+            } catch (error) {
+              console.warn(`⚠️ Failed to fetch rejection reason for product ${l.id || l.productId}:`, error);
+              // Fallback to existing value if fetch fails
+              rejectionReason = l.rejectionReason || l.RejectionReason;
+            }
+          }
 
           // Check if images are stored directly in the product object first
           if (l.images && Array.isArray(l.images)) {
@@ -298,8 +340,9 @@ export const MyListings = () => {
 
           return {
             ...l,
-            status: getStatus(l),
+            status: status,
             images: images,
+            rejectionReason: rejectionReason,
           };
         });
 
@@ -398,8 +441,13 @@ export const MyListings = () => {
     setShowRejectionModal(true);
   };
 
-  const getStatusBadge = (status) => {
+
+  const getStatusBadge = (status, rejectionReason = null) => {
     const s = status ? status : "pending";
+    
+    // Check if this is a reported product (rejected due to report)
+    const isReported = s === "rejected" && rejectionReason && rejectionReason.startsWith("[BÁO CÁO]");
+    
     const statusConfig = {
       pending: {
         className: "mylistings-status-badge mylistings-status-pending",
@@ -414,8 +462,12 @@ export const MyListings = () => {
         label: "Đã duyệt",
       },
       rejected: {
-        className: "mylistings-status-badge mylistings-status-rejected",
-        label: "Từ chối",
+        className: isReported ? "mylistings-status-badge mylistings-status-rejected" : "mylistings-status-badge mylistings-status-rejected",
+        label: isReported ? "Bị báo cáo" : "Từ chối",
+      },
+      reserved: {
+        className: "mylistings-status-badge mylistings-status-reserved",
+        label: "Đang trong quá trình thanh toán",
       },
       sold: {
         className: "mylistings-status-badge mylistings-status-sold",
@@ -533,6 +585,7 @@ export const MyListings = () => {
                   <option value="all">Tất cả trạng thái</option>
                   <option value="pending">Chờ duyệt</option>
                   <option value="approved">Đã duyệt</option>
+                  <option value="reserved">Đang thanh toán</option>
                   <option value="rejected">Từ chối</option>
                   <option value="sold">Đã bán</option>
                 </select>
@@ -607,7 +660,7 @@ export const MyListings = () => {
                         <Package className="mylistings-image-placeholder-icon" />
                       </div>
                       <div className="mylistings-status-badge-container">
-                        {getStatusBadge(getStatus(listing))}
+                        {getStatusBadge(getStatus(listing), listing.rejectionReason)}
                       </div>
 
                       {/* Rejection reason button on image - LEFT SIDE */}
@@ -615,11 +668,11 @@ export const MyListings = () => {
                         <button
                           onClick={() => handleShowRejectionReason(listing)}
                           className="mylistings-rejection-overlay-button"
-                          title="Xem lý do từ chối"
+                          title={listing.rejectionReason && listing.rejectionReason.startsWith("[BÁO CÁO]") ? "Xem lý do báo cáo" : "Xem lý do từ chối"}
                         >
                           <AlertTriangle className="mylistings-rejection-overlay-icon" />
                           <span className="mylistings-rejection-overlay-text">
-                            Lý do từ chối
+                            {listing.rejectionReason && listing.rejectionReason.startsWith("[BÁO CÁO]") ? "Lý do báo cáo" : "Lý do từ chối"}
                           </span>
                         </button>
                       )}
@@ -658,13 +711,23 @@ export const MyListings = () => {
                           <Eye className="mylistings-view-icon" />
                           Xem
                         </Link>
-                        <Link
-                          to={`/listing/${getListingId(listing)}/edit`}
-                          className="mylistings-edit-button"
-                        >
-                          <Edit className="mylistings-edit-icon" />
-                          Chỉnh sửa
-                        </Link>
+                        
+                        {/* Show different buttons based on status */}
+                        {getStatus(listing) === "reserved" ? (
+                          <div className="mylistings-status-info">
+                            <span className="mylistings-waiting-text">
+                              Đang chờ Admin xác nhận
+                            </span>
+                          </div>
+                        ) : (
+                          <Link
+                            to={`/listing/${getListingId(listing)}/edit`}
+                            className="mylistings-edit-button"
+                          >
+                            <Edit className="mylistings-edit-icon" />
+                            Chỉnh sửa
+                          </Link>
+                        )}
                         
                         {/* Verification Button - Only show for vehicle owners with NotRequested status */}
                         {(listing.productType === "vehicle" || listing.productType === "Vehicle") && 
@@ -738,6 +801,12 @@ export const MyListings = () => {
                     {listings.filter((l) => getStatus(l) === "pending").length}
                   </p>
                   <p className="mylistings-stat-label">Chờ duyệt</p>
+                </div>
+                <div className="mylistings-stat-item">
+                  <p className="mylistings-stat-value" style={{color: '#ea580c'}}>
+                    {listings.filter((l) => getStatus(l) === "reserved").length}
+                  </p>
+                  <p className="mylistings-stat-label">Đang thanh toán</p>
                 </div>
                 <div className="mylistings-stat-item">
                   <p className="mylistings-stat-value mylistings-stat-value-gray">

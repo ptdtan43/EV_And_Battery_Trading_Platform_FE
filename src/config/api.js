@@ -2,13 +2,13 @@
 export const API_CONFIG = {
   // Production API URL
   PRODUCTION_URL: 'https://ev-and-battery-trading-platform-be.onrender.com',
-  
+
   // Development API URL
   DEVELOPMENT_URL: 'http://localhost:5044',
-  
+
   // Current API URL based on environment
-  BASE_URL: import.meta.env.VITE_API_BASE || 'https://ev-and-battery-trading-platform-be.onrender.com',
-  
+  BASE_URL: (import.meta.env.VITE_API_BASE || 'http://localhost:5044').replace(/\/+$/, ''),
+
   // API Endpoints
   ENDPOINTS: {
     // Authentication
@@ -19,7 +19,7 @@ export const API_CONFIG = {
       FORGOT_PASSWORD: '/api/Auth/forgot-password',
       RESET_PASSWORD: '/api/Auth/reset-password'
     },
-    
+
     // Users
     USERS: {
       BASE: '/api/User',
@@ -27,7 +27,7 @@ export const API_CONFIG = {
       UPDATE: (id) => `/api/User/${id}`,
       DELETE: (id) => `/api/User/${id}`
     },
-    
+
     // Products
     PRODUCTS: {
       BASE: '/api/Product',
@@ -36,7 +36,7 @@ export const API_CONFIG = {
       APPROVE: (id) => `/api/Product/${id}/approve`,
       REJECT: (id) => `/api/Product/${id}/reject`
     },
-    
+
     // Product Images
     PRODUCT_IMAGES: {
       BASE: '/api/ProductImage',
@@ -44,13 +44,13 @@ export const API_CONFIG = {
       MULTIPLE: '/api/ProductImage/multiple',
       BY_ID: (id) => `/api/ProductImage/${id}`
     },
-    
+
     // Categories
     CATEGORIES: {
       BASE: '/api/Category',
       BY_ID: (id) => `/api/Category/${id}`
     },
-    
+
     // Orders
     ORDERS: {
       BASE: '/api/Order',
@@ -59,7 +59,7 @@ export const API_CONFIG = {
       STATUS: (id) => `/api/Order/${id}/status`,
       CANCEL: (id) => `/api/Order/${id}/cancel`
     },
-    
+
     // Payments
     PAYMENTS: {
       BASE: '/api/payment',
@@ -67,14 +67,14 @@ export const API_CONFIG = {
       BY_USER: (userId) => `/api/payment/user/${userId}`,
       STATUS: (id) => `/api/payment/${id}/status`
     },
-    
+
     // Favorites
     FAVORITES: {
       BASE: '/api/Favorite',
       BY_USER: (userId) => `/api/Favorite/user/${userId}`,
       TOGGLE: '/api/Favorite/toggle'
     },
-    
+
     // Notifications
     NOTIFICATIONS: {
       BASE: '/api/Notification',
@@ -82,21 +82,20 @@ export const API_CONFIG = {
       READ: (id) => `/api/Notification/${id}/read`,
       READ_ALL: (userId) => `/api/Notification/user/${userId}/read-all`
     },
-    
+
     // Verification
     VERIFICATION: {
       BASE: '/api/Verification',
       STATUS: (id) => `/api/Verification/${id}/status`
     },
-    
-    // Chat
+
+    // Chat - DEPRECATED
+    // Use chatService from services/chatService.js instead
+    // New endpoints: /api/Chat (rooms) and /api/Message (messages)
     CHAT: {
-      HISTORY: (userId) => `/api/Chat/history/${userId}`,
-      MESSAGES: (conversationId) => `/api/Chat/messages/${conversationId}`,
-      SEND: '/api/Chat/send',
-      CONVERSATION: '/api/Chat/conversation'
+      // Legacy endpoints removed - use chatService
     },
-    
+
     // Reviews
     REVIEWS: {
       BASE: '/api/Review',
@@ -104,7 +103,7 @@ export const API_CONFIG = {
       BY_USER: (userId) => `/api/Review/user/${userId}`,
       BY_ID: (id) => `/api/Review/${id}`
     },
-    
+
     // Statistics
     STATISTICS: {
       DASHBOARD: (userId) => `/api/Statistics/dashboard/${userId}`,
@@ -112,13 +111,13 @@ export const API_CONFIG = {
       PRODUCT: (productId) => `/api/Statistics/product/${productId}`,
       SALES: (sellerId) => `/api/Statistics/sales/${sellerId}`
     },
-    
+
     // Search
     SEARCH: {
       PRODUCTS: '/api/Search/products',
       USERS: '/api/Search/users'
     },
-    
+
     // System
     SYSTEM: {
       HEALTH: '/api/Health',

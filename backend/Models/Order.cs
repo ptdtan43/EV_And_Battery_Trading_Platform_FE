@@ -32,6 +32,13 @@ namespace EVTB_Backend.Models
 
         public DateTime? CompletedDate { get; set; }
 
+        // Transaction confirmation fields
+        public bool SellerConfirmed { get; set; } = false;
+        public DateTime? SellerConfirmedDate { get; set; }
+        public bool AdminConfirmed { get; set; } = false;
+        public DateTime? AdminConfirmedDate { get; set; }
+        public string? AdminNotes { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
@@ -41,5 +48,8 @@ namespace EVTB_Backend.Models
 
         [ForeignKey("SellerId")]
         public virtual User? Seller { get; set; }
+
+        [ForeignKey("ProductId")]
+        public virtual Product Product { get; set; } = null!;
     }
 }

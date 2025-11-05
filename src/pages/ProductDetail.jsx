@@ -12,7 +12,6 @@ import {
   Battery,
   Car,
   Shield,
-  Star,
   ChevronLeft,
   ChevronRight,
   CheckCircle,
@@ -22,6 +21,10 @@ import {
   Users,
   Package,
   X,
+  XCircle,
+  Clock,
+  Flag,
+  AlertCircle,
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
 import { createOrder } from "../lib/orderApi";
@@ -32,6 +35,7 @@ import { useToast } from "../contexts/ToastContext";
 import { toggleFavorite, isProductFavorited } from "../lib/favoriteApi";
 import { VerificationButton } from "../components/common/VerificationButton";
 import { ChatModal } from "../components/common/ChatModal";
+import { ReportModal } from "../components/common/ReportModal";
 
 // Helper function to fix Vietnamese character encoding
 const fixVietnameseEncoding = (str) => {
@@ -78,6 +82,7 @@ export const ProductDetail = () => {
   const [seller, setSeller] = useState(null);
   const [images, setImages] = useState([]);
   const [documentImages, setDocumentImages] = useState([]);
+  const [inspectedSet, setInspectedSet] = useState(new Set());
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [isFavorite, setIsFavorite] = useState(false);
@@ -85,6 +90,7 @@ export const ProductDetail = () => {
   const [showChatModal, setShowChatModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showDocumentModal, setShowDocumentModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   const [paying, setPaying] = useState(false);
   const [currentOrderId, setCurrentOrderId] = useState(null);
 
@@ -97,6 +103,71 @@ export const ProductDetail = () => {
       setLoading(false);
     }
   }, [id]);
+
+  // ✅ Listen for payment success and redirect to homepage
+  useEffect(() => {
+    const handlePaymentSuccess = (event) => {
+      try {
+        const data = event.data || {};
+        
+        // Filter out extension messages
+        if (data.posdMessageId || data.type === 'VIDEO_XHR_CANDIDATE' || data.from === 'detector') {
+          return;
+        }
+        
+        if (data.type === 'EVTB_PAYMENT_SUCCESS' && data.payload) {
+          console.log('[ProductDetail] Payment success received, redirecting to homepage');
+          
+          const { paymentId, amount, paymentType } = data.payload;
+          const frontendUrl = window.location.origin;
+          const redirectUrl = `${frontendUrl}/?payment_success=true&payment_id=${paymentId}&amount=${amount}&transaction_no=${data.payload.transactionNo}`;
+          
+          // Redirect to homepage
+          window.location.replace(redirectUrl);
+        }
+        
+        // Also handle redirect message
+        if (data.type === 'EVTB_REDIRECT' && data.url) {
+          console.log('[ProductDetail] Redirect message received, going to:', data.url);
+          window.location.replace(data.url);
+        }
+      } catch (error) {
+        console.error('[ProductDetail] Error handling payment message:', error);
+      }
+    };
+    
+    // Also check localStorage periodically
+    const checkLocalStorage = () => {
+      try {
+        const paymentDataStr = localStorage.getItem('evtb_payment_success');
+        if (paymentDataStr) {
+          const paymentData = JSON.parse(paymentDataStr);
+          const isRecent = (Date.now() - paymentData.timestamp) < 10000;
+          
+          if (isRecent && !paymentData.processed) {
+            console.log('[ProductDetail] Found recent payment in localStorage, redirecting...');
+            const frontendUrl = window.location.origin;
+            const redirectUrl = `${frontendUrl}/?payment_success=true&payment_id=${paymentData.paymentId}&amount=${paymentData.amount}&transaction_no=${paymentData.transactionNo}`;
+            window.location.replace(redirectUrl);
+          }
+        }
+      } catch (error) {
+        console.error('[ProductDetail] Error checking localStorage:', error);
+      }
+    };
+    
+    window.addEventListener('message', handlePaymentSuccess);
+    
+    // Check localStorage every 500ms for first 10 seconds
+    const interval = setInterval(checkLocalStorage, 500);
+    const timeout = setTimeout(() => clearInterval(interval), 10000);
+    
+    return () => {
+      window.removeEventListener('message', handlePaymentSuccess);
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [navigate]);
 
   const loadProduct = async () => {
     try {
@@ -119,6 +190,22 @@ export const ProductDetail = () => {
 
       console.log("[ProductDetail] Raw product data:", productData);
       console.log("[ProductDetail] Normalized product:", normalizedProduct);
+
+      // Check if product is sold or reserved
+      const productStatus = String(normalizedProduct.status || "").toLowerCase();
+      if (productStatus === "sold") {
+        console.log("[ProductDetail] Product is sold, showing sold message");
+        // Set product with sold status
+        setProduct({ ...normalizedProduct, status: "Sold" });
+        setLoading(false);
+        return;
+      } else if (productStatus === "reserved") {
+        console.log("[ProductDetail] Product is reserved, showing reserved message");
+        // Set product with reserved status
+        setProduct({ ...normalizedProduct, status: "Reserved" });
+        setLoading(false);
+        return;
+      }
 
       setProduct(normalizedProduct);
 
@@ -159,11 +246,11 @@ export const ProductDetail = () => {
 
         // Separate product images from document images based on Name field
         const productImages = allImages.filter((img) => {
-          const imageName = img.name || img.Name;
+          const imageName = (img.name || img.Name || "").toLowerCase();
           console.log(`🔍 Image name for ${img.id || "unknown"}:`, imageName);
 
-          // Check if this is a product image based on Name field
-          if (imageName === "Vehicle" || imageName === "Battery") {
+          // Check if this is a product image based on Name field (case insensitive)
+          if (imageName === "vehicle" || imageName === "battery" || imageName === "car" || imageName === "product") {
             console.log(
               `🔍 Image ${img.id}: treating as PRODUCT (${imageName})`
             );
@@ -187,11 +274,11 @@ export const ProductDetail = () => {
         });
 
         const docImages = allImages.filter((img) => {
-          const imageName = img.name || img.Name;
+          const imageName = (img.name || img.Name || "").toLowerCase();
           console.log(`🔍 Image name for ${img.id || "unknown"}:`, imageName);
 
-          // Check if this is a document image based on Name field
-          if (imageName === "Document") {
+          // Check if this is a document image based on Name field (case insensitive)
+          if (imageName === "document" || imageName === "doc" || imageName === "paperwork") {
             console.log(
               `🔍 Image ${img.id}: treating as DOCUMENT (${imageName})`
             );
@@ -218,16 +305,57 @@ export const ProductDetail = () => {
         console.log("🔍 Product images:", productImages.length);
         console.log("🔍 Document images:", docImages.length);
 
-        setImages(
-          productImages.map((img) => img.imageData || img.imageUrl || img.url)
-        );
-        setDocumentImages(
-          docImages.map((img) => img.imageData || img.imageUrl || img.url)
-        );
+        // Detect inspected images (uploaded by admin verification)
+        const getStr = (v) => (typeof v === "string" ? v.toLowerCase() : "");
+        const isInspected = (img) => {
+          const tag = getStr(img.tag || img.Tag || img.label || img.Label);
+          const type = getStr(img.imageType || img.type || img.image_type || img.category);
+          const name = getStr(img.name || img.Name);
+          const imageUrl = getStr(img.imageData || img.ImageData || img.url || img.imageUrl);
+          
+          // ✅ Check if filename contains ADMIN-INSPECTION prefix
+          if (imageUrl.includes("admin-inspection")) {
+            console.log(`🔍 Image ${img.id}: ADMIN INSPECTION detected (filename)`);
+            return true;
+          }
+          
+          return (
+            tag.includes("kiểm định") ||
+            tag.includes("admin") ||
+            type.includes("kiểm định") ||
+            type.includes("admin") ||
+            name.includes("kiểm định")
+          );
+        };
+
+        const urlOf = (img) => img.imageData || img.imageUrl || img.url;
+        const productUrls = productImages.map(urlOf).filter(Boolean);
+        const docUrls = docImages.map(urlOf).filter(Boolean);
+
+        // ✅ Remove duplicates based on URL
+        const uniqueProductUrls = [...new Set(productUrls)];
+        const uniqueDocUrls = [...new Set(docUrls)];
+
+        // Put inspected images first in the gallery
+        const inspectedUrls = productImages.filter(isInspected).map(urlOf).filter(Boolean);
+        // ✅ Remove duplicates from inspected URLs
+        const uniqueInspectedUrls = [...new Set(inspectedUrls)];
+        const inspectedUrlSet = new Set(uniqueInspectedUrls);
+        const otherUrls = uniqueProductUrls.filter((u) => !inspectedUrlSet.has(u));
+
+        console.log("🔍 Before deduplication - Product URLs:", productUrls.length);
+        console.log("🔍 After deduplication - Unique Product URLs:", uniqueProductUrls.length);
+        console.log("🔍 Before deduplication - Inspected URLs:", inspectedUrls.length);
+        console.log("🔍 After deduplication - Unique Inspected URLs:", uniqueInspectedUrls.length);
+
+        setImages([...uniqueInspectedUrls, ...otherUrls]);
+        setInspectedSet(new Set(uniqueInspectedUrls));
+        setDocumentImages(uniqueDocUrls);
       } catch (imageError) {
         console.log("No images found for product");
         setImages([]);
         setDocumentImages([]);
+        setInspectedSet(new Set());
       }
 
       // Check if product is favorited by current user
@@ -504,8 +632,16 @@ export const ProductDetail = () => {
         type: "success",
       });
 
-      // Redirect to VNPay
-      window.location.href = res.paymentUrl;
+      // Redirect to VNPay in a new tab so the return page can self-close
+      // ✅ REMOVE noopener to allow window.opener to work
+      const paymentWindow = window.open(
+        res.paymentUrl,
+        "_blank"
+      );
+      // Try focusing the new tab (may be blocked by browser policies)
+      if (paymentWindow && typeof paymentWindow.focus === "function") {
+        paymentWindow.focus();
+      }
     } catch (err) {
       console.error("[VNPay] createPayment error:", err);
 
@@ -591,14 +727,27 @@ export const ProductDetail = () => {
                     ? "bg-red-50 text-red-600"
                     : "hover:bg-gray-100 text-gray-600"
                 }`}
+                title="Yêu thích"
               >
                 <Heart
                   className={`h-5 w-5 ${isFavorite ? "fill-current" : ""}`}
                 />
               </button>
-              <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-600">
+              <button 
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-600"
+                title="Chia sẻ"
+              >
                 <Share2 className="h-5 w-5" />
               </button>
+              {user && (
+                <button 
+                  onClick={() => setShowReportModal(true)}
+                  className="p-2 hover:bg-red-50 rounded-lg transition-colors text-gray-600 hover:text-red-600"
+                  title="Báo cáo vi phạm"
+                >
+                  <Flag className="h-5 w-5" />
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -621,6 +770,12 @@ export const ProductDetail = () => {
               ) : (
                 <div className="w-full h-96 bg-gray-200 flex items-center justify-center">
                   <Car className="h-16 w-16 text-gray-400" />
+                </div>
+              )}
+
+              {currentImage && inspectedSet.has(currentImage) && (
+                <div className="absolute top-4 left-4 bg-blue-600 text-white px-3 py-1 rounded-full text-xs shadow-lg font-medium">
+                  ✓ Ảnh do Admin kiểm định
                 </div>
               )}
 
@@ -647,7 +802,7 @@ export const ProductDetail = () => {
             </div>
 
             {/* Thumbnail Gallery */}
-            {images.length > 1 && (
+              {images.length > 1 && (
               <div className="flex space-x-2 overflow-x-auto pb-2">
                 {images.map((image, index) => (
                   <button
@@ -667,6 +822,11 @@ export const ProductDetail = () => {
                         e.target.style.display = "none";
                       }}
                     />
+                      {inspectedSet.has(image) && (
+                        <div className="absolute top-1 left-1 bg-blue-600 text-white px-2 py-0.5 rounded text-[10px] font-medium">
+                          ✓ Admin
+                        </div>
+                      )}
                   </button>
                 ))}
               </div>
@@ -702,14 +862,22 @@ export const ProductDetail = () => {
                   </h1>
 
                   {/* Verification Status Badge */}
-                  {product.verificationStatus === "Verified" && (
-                    <div className="mb-3">
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    {product.verificationStatus === "Verified" && (
                       <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800 border border-green-200">
                         <CheckCircle className="h-4 w-4 mr-1" />
                         Đã kiểm định
                       </span>
-                    </div>
-                  )}
+                    )}
+                    
+                    {/* Admin Inspection Images Badge */}
+                    {inspectedSet.size > 0 && (
+                      <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800 border border-blue-200">
+                        <CheckCircle className="h-4 w-4 mr-1" />
+                        Có {inspectedSet.size} ảnh do Admin kiểm định
+                      </span>
+                    )}
+                  </div>
 
                   <p className="text-gray-600">
                     {product.licensePlate ||
@@ -796,37 +964,60 @@ export const ProductDetail = () => {
 
               {/* Action Buttons */}
               <div className="space-y-3">
-                {/* ✅ Only show payment button if user is not the seller */}
-                {(() => {
-                  const currentUserId =
-                    user?.id || user?.userId || user?.accountId;
-                  const productSellerId =
-                    product?.sellerId || product?.seller_id;
-                  const isOwnProduct =
-                    currentUserId &&
-                    productSellerId &&
-                    currentUserId == productSellerId;
+                {/* Show sold message if product is sold */}
+                {product.status === "Sold" || product.status === "sold" ? (
+                  <div className="w-full bg-red-50 border border-red-200 text-red-800 py-4 px-6 rounded-lg text-center">
+                    <div className="flex items-center justify-center space-x-2 mb-2">
+                      <XCircle className="h-6 w-6" />
+                      <span className="font-semibold text-lg">Sản phẩm đã được bán</span>
+                    </div>
+                    <p className="text-sm">
+                      Sản phẩm này không còn khả dụng.
+                    </p>
+                  </div>
+                ) : product.status === "Reserved" || product.status === "reserved" ? (
+                  <div className="w-full bg-yellow-50 border border-yellow-200 text-yellow-800 py-4 px-6 rounded-lg text-center">
+                    <div className="flex items-center justify-center space-x-2 mb-2">
+                      <Clock className="h-6 w-6" />
+                      <span className="font-semibold text-lg">Sản phẩm đang trong quá trình thanh toán</span>
+                    </div>
+                    <p className="text-sm">
+                      Sản phẩm này đã được khách hàng đặt cọc thành công và đang chờ seller xác nhận.
+                    </p>
+                  </div>
+                ) : (
+                  /* ✅ Only show payment button if user is not the seller */
+                  (() => {
+                    const currentUserId =
+                      user?.id || user?.userId || user?.accountId;
+                    const productSellerId =
+                      product?.sellerId || product?.seller_id;
+                    const isOwnProduct =
+                      currentUserId &&
+                      productSellerId &&
+                      currentUserId == productSellerId;
 
-                  if (isOwnProduct) {
+                    if (isOwnProduct) {
+                      return (
+                        <div className="w-full bg-gray-100 text-gray-500 py-3 px-6 rounded-lg font-medium text-center">
+                          <CreditCard className="h-5 w-5 mr-2 inline" />
+                          Sản phẩm của bạn
+                        </div>
+                      );
+                    }
+
                     return (
-                      <div className="w-full bg-gray-100 text-gray-500 py-3 px-6 rounded-lg font-medium text-center">
-                        <CreditCard className="h-5 w-5 mr-2 inline" />
-                        Sản phẩm của bạn
-                      </div>
+                      <button
+                        onClick={handleCreateOrder}
+                        disabled={product.status === "sold"}
+                        className="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
+                      >
+                        <CreditCard className="h-5 w-5 mr-2" />
+                        Tạo đơn hàng
+                      </button>
                     );
-                  }
-
-                  return (
-                    <button
-                      onClick={handleCreateOrder}
-                      disabled={product.status === "sold"}
-                      className="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
-                    >
-                      <CreditCard className="h-5 w-5 mr-2" />
-                      Tạo đơn hàng
-                    </button>
-                  );
-                })()}
+                  })()
+                )}
 
                 {/* ✅ Only show contact button if user is not the seller */}
                 {(() => {
@@ -880,12 +1071,6 @@ export const ProductDetail = () => {
                     <MapPin className="h-4 w-4 inline mr-1" />
                     {product.location || "Hà Nội"}
                   </p>
-                  <div className="flex items-center mt-1">
-                    <Star className="h-4 w-4 text-yellow-400 fill-current" />
-                    <span className="text-sm text-gray-600 ml-1">
-                      4.8 (120 đánh giá)
-                    </span>
-                  </div>
                 </div>
                 <div className="flex flex-col space-y-2">
                   <button
@@ -963,6 +1148,26 @@ export const ProductDetail = () => {
                     </span>
                     <span className="font-semibold text-gray-900">
                       {product.model}
+                    </span>
+                  </div>
+                )}
+                {product.condition && (
+                  <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
+                    <span className="text-gray-600 font-medium">Tình trạng</span>
+                    <span className={`font-semibold ${
+                      product.condition === "excellent" || product.condition === "Xuất sắc" 
+                        ? "text-green-600" 
+                        : product.condition === "good" || product.condition === "Tốt"
+                        ? "text-blue-600"
+                        : product.condition === "fair" || product.condition === "Khá"
+                        ? "text-yellow-600"
+                        : "text-orange-600"
+                    }`}>
+                      {product.condition === "excellent" ? "Xuất sắc" :
+                       product.condition === "good" ? "Tốt" :
+                       product.condition === "fair" ? "Khá" :
+                       product.condition === "poor" ? "Cần sửa chữa" :
+                       product.condition}
                     </span>
                   </div>
                 )}
@@ -1159,6 +1364,13 @@ export const ProductDetail = () => {
         onSendMessage={handleSendMessage}
       />
 
+      {/* Report Modal */}
+      <ReportModal
+        isOpen={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        product={product}
+      />
+
       {/* Payment Modal */}
       {showPaymentModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -1194,6 +1406,21 @@ export const ProductDetail = () => {
                       ? "Sản phẩm trên 300 triệu - cọc 10 triệu để gặp mặt trực tiếp"
                       : "Sản phẩm dưới 300 triệu - cọc 5 triệu để gặp mặt trực tiếp"}
                   </p>
+                </div>
+              </div>
+
+              {/* Important Notice */}
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <div className="flex items-start">
+                  <AlertCircle className="h-5 w-5 text-amber-600 mr-2 mt-0.5 flex-shrink-0" />
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-amber-900 mb-1">
+                      Lưu ý quan trọng:
+                    </p>
+                    <p className="text-xs text-amber-800 leading-relaxed">
+                      Sau khi thanh toán cọc thành công, vui lòng liên hệ với người bán qua tính năng chat để thỏa thuận ngày giờ gặp mặt. Sau đó, xin hãy liên hệ với Admin qua số điện thoại <span className="font-semibold">0373111370</span> để Admin chốt lịch hẹn cho cả hai bên gặp mặt tại kho và tiến hành giao dịch trực tiếp.
+                    </p>
+                  </div>
                 </div>
               </div>
 

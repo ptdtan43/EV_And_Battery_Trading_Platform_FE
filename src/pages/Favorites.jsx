@@ -60,15 +60,16 @@ export const Favorites = () => {
         return;
       }
 
-      // Get product details for each favorite (with delay to avoid DbContext conflicts)
+      // ✅ Get product details for each favorite in parallel
       const productPromises = favoriteIds.map(async (productId, index) => {
         try {
-          // Add small delay to avoid DbContext conflicts
-          if (index > 0) {
-            await new Promise((resolve) => setTimeout(resolve, 100 * index));
-          }
-
-          const productData = await apiRequest(`/api/Product/${productId}`);
+          // ✅ NO MORE DELAYS - Load all products in parallel with timeout
+          const productPromise = apiRequest(`/api/Product/${productId}`);
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Timeout')), 3000)
+          );
+          
+          const productData = await Promise.race([productPromise, timeoutPromise]);
 
           // Load product images
           let images = [];

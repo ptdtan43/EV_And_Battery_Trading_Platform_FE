@@ -109,6 +109,56 @@ namespace EVTB_Backend.Controllers
         }
 
         /// <summary>
+        /// Lấy danh sách orders của buyer (người mua)
+        /// </summary>
+        [HttpGet("buyer")]
+        [Authorize]
+        public async Task<ActionResult<IEnumerable<object>>> GetBuyerOrders()
+        {
+            try
+            {
+                // Get user ID from JWT token
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(new { message = "Không thể xác định người dùng" });
+                }
+
+                var orders = await _context.Orders
+                    .Include(o => o.Product)
+                    .Include(o => o.Seller)
+                    .Include(o => o.User)
+                    .Where(o => o.UserId == userId)
+                    .Select(o => new
+                    {
+                        orderId = o.OrderId,
+                        productId = o.ProductId,
+                        productTitle = o.Product?.Title ?? "Unknown",
+                        productImages = new string[0], // Empty array instead of null
+                        sellerId = o.SellerId ?? 0,
+                        sellerName = o.Seller?.FullName ?? "Unknown",
+                        sellerEmail = o.Seller?.Email ?? "Unknown",
+                        sellerPhone = o.Seller?.Phone ?? "Unknown",
+                        depositAmount = o.DepositAmount,
+                        totalAmount = o.TotalAmount,
+                        orderStatus = o.OrderStatus,
+                        completedDate = o.CompletedDate ?? DateTime.MinValue,
+                        createdAt = o.CreatedAt,
+                        hasRating = _context.Ratings.Any(r => r.OrderId == o.OrderId)
+                    })
+                    .OrderByDescending(o => o.createdAt)
+                    .ToListAsync();
+
+                return Ok(orders);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error getting buyer orders for user {userIdClaim?.Value}");
+                return StatusCode(500, new { message = "Có lỗi xảy ra khi lấy danh sách đơn hàng của người mua" });
+            }
+        }
+
+        /// <summary>
         /// Lấy danh sách orders của user
         /// </summary>
         [HttpGet]
@@ -146,6 +196,62 @@ namespace EVTB_Backend.Controllers
             {
                 _logger.LogError(ex, "Error getting user orders");
                 return StatusCode(500, new { message = "Có lỗi xảy ra khi lấy danh sách đơn hàng" });
+            }
+        }
+
+        /// <summary>
+        /// Lấy danh sách đơn hàng đã hoàn thành của user
+        /// </summary>
+        [HttpGet("user/{userId}/completed")]
+        [Authorize]
+        public async Task<ActionResult<IEnumerable<object>>> GetUserCompletedOrders(int userId)
+        {
+            try
+            {
+                // Get current user ID from JWT token
+                var currentUserIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+                if (currentUserIdClaim == null || !int.TryParse(currentUserIdClaim.Value, out int currentUserId))
+                {
+                    return Unauthorized(new { message = "Không thể xác định người dùng" });
+                }
+
+                // Check if user is admin or requesting their own orders
+                var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == currentUserId);
+                if (user == null || (user.RoleId != 1 && currentUserId != userId))
+                {
+                    return Forbid("Bạn chỉ có thể xem đơn hàng của mình");
+                }
+
+                var orders = await _context.Orders
+                    .Include(o => o.Product)
+                    .Include(o => o.Seller)
+                    .Include(o => o.User)
+                    .Where(o => o.UserId == userId && o.OrderStatus == "completed")
+                    .Select(o => new
+                    {
+                        orderId = o.OrderId,
+                        productId = o.ProductId,
+                        productTitle = o.Product?.Title ?? "Unknown",
+                        productImages = new string[0], // Empty array instead of null
+                        sellerId = o.SellerId ?? 0,
+                        sellerName = o.Seller?.FullName ?? "Unknown",
+                        sellerEmail = o.Seller?.Email ?? "Unknown",
+                        sellerPhone = o.Seller?.Phone ?? "Unknown",
+                        depositAmount = o.DepositAmount,
+                        totalAmount = o.TotalAmount,
+                        completedDate = o.CompletedDate ?? DateTime.MinValue,
+                        createdAt = o.CreatedAt,
+                        hasRating = _context.Ratings.Any(r => r.OrderId == o.OrderId)
+                    })
+                    .OrderByDescending(o => o.completedDate)
+                    .ToListAsync();
+
+                return Ok(orders);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error getting completed orders for user {userId}");
+                return StatusCode(500, new { message = "Có lỗi xảy ra khi lấy danh sách đơn hàng đã hoàn thành" });
             }
         }
 
@@ -250,6 +356,237 @@ namespace EVTB_Backend.Controllers
                 return StatusCode(500, new { message = "Có lỗi xảy ra khi cập nhật đơn hàng" });
             }
         }
+
+        /// <summary>
+        /// Seller confirms transaction completion
+        /// </summary>
+        [HttpPost("{id}/seller-confirm")]
+        [Authorize]
+        public async Task<ActionResult<object>> SellerConfirmTransaction(int id)
+        {
+            try
+            {
+                // Get user ID from JWT token
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(new { message = "Không thể xác định người dùng" });
+                }
+
+                var order = await _context.Orders
+                    .Include(o => o.Product)
+                    .FirstOrDefaultAsync(o => o.OrderId == id && o.SellerId == userId);
+
+                if (order == null)
+                {
+                    return NotFound(new { message = "Không tìm thấy đơn hàng hoặc bạn không có quyền xác nhận" });
+                }
+
+                if (order.OrderStatus != "DepositPaid")
+                {
+                    return BadRequest(new { message = "Chỉ có thể xác nhận giao dịch khi đã thanh toán cọc" });
+                }
+
+                // Update seller confirmation
+                order.SellerConfirmed = true;
+                order.SellerConfirmedDate = DateTime.UtcNow;
+                order.UpdatedAt = DateTime.UtcNow;
+
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation($"Order {id} confirmed by seller {userId}");
+
+                return Ok(new
+                {
+                    message = "Xác nhận giao dịch thành công",
+                    orderId = order.OrderId,
+                    sellerConfirmed = order.SellerConfirmed,
+                    sellerConfirmedDate = order.SellerConfirmedDate,
+                    nextStep = "Chờ admin duyệt để hoàn tất giao dịch"
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error confirming transaction for order {id}");
+                return StatusCode(500, new { message = "Có lỗi xảy ra khi xác nhận giao dịch" });
+            }
+        }
+
+        /// <summary>
+        /// Admin confirms transaction completion
+        /// </summary>
+        [HttpPost("{id}/admin-confirm")]
+        [Authorize]
+        public async Task<ActionResult<object>> AdminConfirmTransaction(int id, [FromBody] AdminConfirmRequest request)
+        {
+            try
+            {
+                // Get user ID from JWT token
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(new { message = "Không thể xác định người dùng" });
+                }
+
+                // Check if user is admin (roleId = 1)
+                var user = await _context.Users.FindAsync(userId);
+                if (user == null || user.RoleId != 1)
+                {
+                    return Forbid("Chỉ admin mới có quyền xác nhận giao dịch");
+                }
+
+                var order = await _context.Orders
+                    .Include(o => o.Product)
+                    .Include(o => o.User)
+                    .Include(o => o.Seller)
+                    .FirstOrDefaultAsync(o => o.OrderId == id);
+
+                if (order == null)
+                {
+                    return NotFound(new { message = "Không tìm thấy đơn hàng" });
+                }
+
+                if (!order.SellerConfirmed)
+                {
+                    return BadRequest(new { message = "Seller chưa xác nhận giao dịch" });
+                }
+
+                // Update admin confirmation
+                order.AdminConfirmed = true;
+                order.AdminConfirmedDate = DateTime.UtcNow;
+                order.AdminNotes = request.AdminNotes;
+                order.OrderStatus = "Completed";
+                order.CompletedDate = DateTime.UtcNow;
+                order.UpdatedAt = DateTime.UtcNow;
+
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation($"Order {id} confirmed by admin {userId}");
+
+                return Ok(new
+                {
+                    message = "Admin đã xác nhận giao dịch thành công",
+                    orderId = order.OrderId,
+                    adminConfirmed = order.AdminConfirmed,
+                    adminConfirmedDate = order.AdminConfirmedDate,
+                    orderStatus = order.OrderStatus,
+                    completedDate = order.CompletedDate
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error admin confirming transaction for order {id}");
+                return StatusCode(500, new { message = "Có lỗi xảy ra khi admin xác nhận giao dịch" });
+            }
+        }
+
+        /// <summary>
+        /// Get orders waiting for seller confirmation
+        /// </summary>
+        [HttpGet("seller-pending")]
+        [Authorize]
+        public async Task<ActionResult<IEnumerable<object>>> GetSellerPendingOrders()
+        {
+            try
+            {
+                // Get user ID from JWT token
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(new { message = "Không thể xác định người dùng" });
+                }
+
+                var orders = await _context.Orders
+                    .Include(o => o.Product)
+                    .Include(o => o.User)
+                    .Where(o => o.SellerId == userId && o.OrderStatus == "DepositPaid" && !o.SellerConfirmed)
+                    .Select(o => new
+                    {
+                        orderId = o.OrderId,
+                        productId = o.ProductId,
+                        productTitle = o.Product?.Title ?? "Unknown",
+                        buyerName = o.User?.FullName ?? "Unknown",
+                        buyerEmail = o.User?.Email ?? "Unknown",
+                        buyerPhone = o.User?.Phone ?? "Unknown",
+                        depositAmount = o.DepositAmount,
+                        totalAmount = o.TotalAmount,
+                        createdAt = o.CreatedAt,
+                        sellerConfirmed = o.SellerConfirmed,
+                        sellerConfirmedDate = o.SellerConfirmedDate ?? DateTime.MinValue
+                    })
+                    .OrderByDescending(o => o.createdAt)
+                    .ToListAsync();
+
+                return Ok(orders);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting seller pending orders");
+                return StatusCode(500, new { message = "Có lỗi xảy ra khi lấy danh sách đơn hàng chờ xác nhận" });
+            }
+        }
+
+        /// <summary>
+        /// Get orders waiting for admin confirmation
+        /// </summary>
+        [HttpGet("admin-pending")]
+        [Authorize]
+        public async Task<ActionResult<IEnumerable<object>>> GetAdminPendingOrders()
+        {
+            try
+            {
+                // Get user ID from JWT token
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(new { message = "Không thể xác định người dùng" });
+                }
+
+                // Check if user is admin (roleId = 1)
+                var user = await _context.Users.FindAsync(userId);
+                if (user == null || user.RoleId != 1)
+                {
+                    return Forbid("Chỉ admin mới có quyền xem danh sách này");
+                }
+
+                var orders = await _context.Orders
+                    .Include(o => o.Product)
+                    .Include(o => o.User)
+                    .Include(o => o.Seller)
+                    .Where(o => o.SellerConfirmed && !o.AdminConfirmed)
+                    .Select(o => new
+                    {
+                        orderId = o.OrderId,
+                        productId = o.ProductId,
+                        productTitle = o.Product?.Title ?? "Unknown",
+                        buyerName = o.User?.FullName ?? "Unknown",
+                        buyerEmail = o.User?.Email ?? "Unknown",
+                        buyerPhone = o.User?.Phone ?? "Unknown",
+                        sellerName = o.Seller?.FullName ?? "Unknown",
+                        sellerEmail = o.Seller?.Email ?? "Unknown",
+                        sellerPhone = o.Seller?.Phone ?? "Unknown",
+                        depositAmount = o.DepositAmount,
+                        totalAmount = o.TotalAmount,
+                        createdAt = o.CreatedAt,
+                        sellerConfirmed = o.SellerConfirmed,
+                        sellerConfirmedDate = o.SellerConfirmedDate ?? DateTime.MinValue,
+                        adminConfirmed = o.AdminConfirmed,
+                        adminConfirmedDate = o.AdminConfirmedDate ?? DateTime.MinValue
+                    })
+                    .OrderByDescending(o => o.sellerConfirmedDate)
+                    .ToListAsync();
+
+                return Ok(orders);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting admin pending orders");
+                return StatusCode(500, new { message = "Có lỗi xảy ra khi lấy danh sách đơn hàng chờ admin duyệt" });
+            }
+        }
+        /// <summary>
+        /// Lấy danh sách đơn hàng đã hoàn tất của user
+        /// </summary>
     }
 
     // DTOs
@@ -264,5 +601,10 @@ namespace EVTB_Backend.Controllers
     public class UpdateOrderRequest
     {
         public string? OrderStatus { get; set; }
+    }
+
+    public class AdminConfirmRequest
+    {
+        public string? AdminNotes { get; set; }
     }
 }

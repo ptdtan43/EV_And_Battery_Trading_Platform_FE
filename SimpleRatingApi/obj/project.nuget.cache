@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "Owgc4dzDajI=",
+  "success": true,
+  "projectFilePath": "D:\\Term 5\\SWP301\\SWP391_Topic2_Frontend_ver2\\SimpleRatingApi\\SimpleRatingApi.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Anh Duy\\.nuget\\packages\\microsoft.aspnetcore.openapi\\9.0.9\\microsoft.aspnetcore.openapi.9.0.9.nupkg.sha512",
+    "C:\\Users\\Anh Duy\\.nuget\\packages\\microsoft.openapi\\1.6.17\\microsoft.openapi.1.6.17.nupkg.sha512"
+  ],
+  "logs": []
+}

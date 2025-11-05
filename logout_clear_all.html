@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đăng xuất và Xóa dữ liệu</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+        }
+
+        h1 {
+            color: #333;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 30px;
+        }
+
+        .info-box {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: left;
+            border-radius: 8px;
+        }
+
+        .info-box h3 {
+            color: #667eea;
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+
+        .info-box ul {
+            list-style-position: inside;
+            color: #555;
+            line-height: 1.8;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 16px;
+            font-weight: 600;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            margin: 10px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .success {
+            background: #d4edda;
+            border-left-color: #28a745;
+            color: #155724;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .success.show {
+            display: block;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .icon {
+            font-size: 60px;
+            margin-bottom: 20px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .stat-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            border: 2px solid #e9ecef;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="icon">🚪</div>
+        <h1>Đăng xuất và Xóa dữ liệu</h1>
+        <p class="subtitle">Quản lý dữ liệu lưu trữ của bạn</p>
+
+        <div class="stats" id="stats">
+            <div class="stat-item">
+                <div class="stat-value" id="authStatus">❌</div>
+                <div class="stat-label">Trạng thái đăng nhập</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="storageSize">0 KB</div>
+                <div class="stat-label">Dung lượng đã dùng</div>
+            </div>
+        </div>
+
+        <div class="info-box">
+            <h3>📋 Dữ liệu sẽ bị xóa:</h3>
+            <ul>
+                <li>Thông tin đăng nhập (evtb_auth)</li>
+                <li>Cache tên người bán (sellerNameCache)</li>
+                <li>Tất cả token xác thực</li>
+                <li>Dữ liệu tạm thời khác</li>
+            </ul>
+        </div>
+
+        <button onclick="logoutAndClearAll()">
+            🗑️ Đăng xuất & Xóa tất cả
+        </button>
+
+        <button class="btn-secondary" onclick="checkStatus()">
+            🔍 Kiểm tra lại
+        </button>
+
+        <div class="success" id="successMessage">
+            <strong>✅ Thành công!</strong><br>
+            Đã xóa tất cả dữ liệu. Bạn có thể đóng trang này và quay lại website.
+        </div>
+    </div>
+
+    <script>
+        // Check current status on load
+        window.addEventListener('load', checkStatus);
+
+        function checkStatus() {
+            const hasAuth = localStorage.getItem('evtb_auth');
+            const hasCache = localStorage.getItem('sellerNameCache');
+
+            // Update auth status
+            const authStatus = document.getElementById('authStatus');
+            if (hasAuth) {
+                authStatus.textContent = '✅';
+                authStatus.style.color = '#28a745';
+            } else {
+                authStatus.textContent = '❌';
+                authStatus.style.color = '#dc3545';
+            }
+
+            // Calculate storage size
+            let totalSize = 0;
+            for (let key in localStorage) {
+                if (localStorage.hasOwnProperty(key)) {
+                    totalSize += localStorage[key].length + key.length;
+                }
+            }
+            const sizeKB = (totalSize / 1024).toFixed(2);
+            document.getElementById('storageSize').textContent = sizeKB + ' KB';
+        }
+
+        function logoutAndClearAll() {
+            try {
+                // List all items before clearing
+                const itemsCleared = [];
+                for (let key in localStorage) {
+                    if (localStorage.hasOwnProperty(key)) {
+                        itemsCleared.push(key);
+                    }
+                }
+
+                console.log('🗑️ Clearing localStorage items:', itemsCleared);
+
+                // Clear all localStorage
+                localStorage.clear();
+
+                // Also clear sessionStorage
+                sessionStorage.clear();
+
+                console.log('✅ Successfully cleared all storage');
+                console.log('Items cleared:', itemsCleared.length);
+
+                // Show success message
+                document.getElementById('successMessage').classList.add('show');
+
+                // Update status
+                setTimeout(checkStatus, 100);
+
+                // Optional: Redirect to home page after 2 seconds
+                setTimeout(() => {
+                    if (confirm('Đã xóa thành công! Bạn có muốn quay lại trang chủ không?')) {
+                        window.location.href = 'http://localhost:5173/';
+                    }
+                }, 2000);
+
+            } catch (error) {
+                console.error('❌ Error clearing storage:', error);
+                alert('Có lỗi xảy ra: ' + error.message);
+            }
+        }
+
+        // Add keyboard shortcut (Ctrl + L)
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'l') {
+                e.preventDefault();
+                logoutAndClearAll();
+            }
+        });
+    </script>
+</body>
+
+</html>

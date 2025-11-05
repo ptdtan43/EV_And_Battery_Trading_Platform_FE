@@ -13,8 +13,7 @@ namespace EVTB_Backend.Data
         public DbSet<Order> Orders { get; set; }
         public DbSet<Payment> Payments { get; set; }
         public DbSet<Product> Products { get; set; }
-        public DbSet<Chat> Chats { get; set; }
-        public DbSet<ChatMessage> ChatMessages { get; set; }
+        public DbSet<Rating> Ratings { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -125,55 +124,6 @@ namespace EVTB_Backend.Data
                     .OnDelete(DeleteBehavior.NoAction);
             });
 
-            // Configure Chat entity
-            modelBuilder.Entity<Chat>(entity =>
-            {
-                entity.HasKey(e => e.ChatId);
-                entity.Property(e => e.ProductId).IsRequired();
-                entity.Property(e => e.BuyerId).IsRequired();
-                entity.Property(e => e.SellerId).IsRequired();
-                entity.Property(e => e.Status).IsRequired().HasMaxLength(50);
-                
-                // Foreign key relationships
-                entity.HasOne(e => e.Product)
-                    .WithMany()
-                    .HasForeignKey(e => e.ProductId)
-                    .OnDelete(DeleteBehavior.NoAction);
-                    
-                entity.HasOne(e => e.Buyer)
-                    .WithMany()
-                    .HasForeignKey(e => e.BuyerId)
-                    .OnDelete(DeleteBehavior.NoAction);
-                    
-                entity.HasOne(e => e.Seller)
-                    .WithMany()
-                    .HasForeignKey(e => e.SellerId)
-                    .OnDelete(DeleteBehavior.NoAction);
-                    
-                // Create unique index on ProductId + BuyerId + SellerId to prevent duplicate chats
-                entity.HasIndex(e => new { e.ProductId, e.BuyerId, e.SellerId }).IsUnique();
-            });
-
-            // Configure ChatMessage entity
-            modelBuilder.Entity<ChatMessage>(entity =>
-            {
-                entity.HasKey(e => e.MessageId);
-                entity.Property(e => e.ChatId).IsRequired();
-                entity.Property(e => e.SenderId).IsRequired();
-                entity.Property(e => e.Content).IsRequired().HasMaxLength(2000);
-                entity.Property(e => e.IsRead).IsRequired();
-                
-                // Foreign key relationships
-                entity.HasOne(e => e.Chat)
-                    .WithMany(e => e.Messages)
-                    .HasForeignKey(e => e.ChatId)
-                    .OnDelete(DeleteBehavior.Cascade);
-                    
-                entity.HasOne(e => e.Sender)
-                    .WithMany()
-                    .HasForeignKey(e => e.SenderId)
-                    .OnDelete(DeleteBehavior.NoAction);
-            });
 
             // Seed data
             modelBuilder.Entity<User>().HasData(
@@ -190,6 +140,39 @@ namespace EVTB_Backend.Data
                     UpdatedAt = DateTime.UtcNow
                 }
             );
+
+            // Configure Rating entity
+            modelBuilder.Entity<Rating>(entity =>
+            {
+                entity.HasKey(e => e.RatingId);
+                entity.Property(e => e.OrderId).IsRequired();
+                entity.Property(e => e.ProductId).IsRequired();
+                entity.Property(e => e.BuyerId).IsRequired();
+                entity.Property(e => e.SellerId).IsRequired();
+                entity.Property(e => e.RatingValue).IsRequired();
+                entity.Property(e => e.Comment).HasMaxLength(1000);
+                
+                // Foreign key relationships
+                entity.HasOne(e => e.Order)
+                    .WithMany()
+                    .HasForeignKey(e => e.OrderId)
+                    .OnDelete(DeleteBehavior.NoAction);
+                    
+                entity.HasOne(e => e.Product)
+                    .WithMany()
+                    .HasForeignKey(e => e.ProductId)
+                    .OnDelete(DeleteBehavior.NoAction);
+                    
+                entity.HasOne(e => e.Buyer)
+                    .WithMany()
+                    .HasForeignKey(e => e.BuyerId)
+                    .OnDelete(DeleteBehavior.NoAction);
+                    
+                entity.HasOne(e => e.Seller)
+                    .WithMany()
+                    .HasForeignKey(e => e.SellerId)
+                    .OnDelete(DeleteBehavior.NoAction);
+            });
         }
     }
 }

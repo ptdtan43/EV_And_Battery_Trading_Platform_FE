@@ -4,10 +4,12 @@ import { apiRequest } from '../lib/api';
 import { useToast } from '../contexts/ToastContext';
 import { 
   Edit3, Save, X, User, Mail, Phone, Calendar, 
-  Package, Eye, Heart, Star, Award, Shield, 
+  Package, Eye, Heart, Award, Shield, 
   Settings, Camera, CheckCircle, AlertCircle,
-  TrendingUp, Users, MessageSquare, Clock
+  TrendingUp, Users, MessageSquare, Clock, Star
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { formatPrice } from '../utils/formatters';
 
 export const Profile = () => {
   const { user, profile, updateProfile } = useAuth();
@@ -24,11 +26,16 @@ export const Profile = () => {
   const [userStats, setUserStats] = useState({
     totalListings: 0,
     activeListings: 0,
+    reservedListings: 0,
+    soldListings: 0,
     totalViews: 0,
     memberSince: '',
-    responseRate: 95,
-    rating: 4.8
+    responseRate: 95
   });
+  const [userProducts, setUserProducts] = useState([]);
+  const [activeTab, setActiveTab] = useState("profile");
+  const [reviews, setReviews] = useState([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
 
   useEffect(() => {
     if (user || profile) {
@@ -48,6 +55,12 @@ export const Profile = () => {
       loadUserStats();
     }
   }, [user, profile]);
+
+  useEffect(() => {
+    if (activeTab === "reviews") {
+      loadReviews();
+    }
+  }, [activeTab]);
 
   const loadUserStats = async () => {
     try {
@@ -69,10 +82,23 @@ export const Profile = () => {
         const data = await apiRequest(`/api/Product/seller/${userId}`);
         const items = Array.isArray(data) ? data : data?.items || [];
         
+        // Store all products for display
+        setUserProducts(items);
+        
         const totalListings = items.length;
         const activeListings = items.filter(item => {
           const status = (item.status || item.Status || '').toLowerCase();
           return status === 'approved' || status === 'active';
+        }).length;
+        
+        const reservedListings = items.filter(item => {
+          const status = (item.status || item.Status || '').toLowerCase();
+          return status === 'reserved';
+        }).length;
+        
+        const soldListings = items.filter(item => {
+          const status = (item.status || item.Status || '').toLowerCase();
+          return status === 'sold';
         }).length;
         
         const totalViews = items.reduce((sum, item) => 
@@ -82,10 +108,11 @@ export const Profile = () => {
         setUserStats({
           totalListings,
           activeListings,
+          reservedListings,
+          soldListings,
           totalViews,
           memberSince: user?.createdAt || profile?.createdAt || new Date().toISOString().split('T')[0],
-          responseRate: 95,
-          rating: 4.8
+          responseRate: 95
         });
       }
     } catch (error) {
@@ -97,6 +124,55 @@ export const Profile = () => {
         localStorage.removeItem("evtb_auth");
         window.location.href = '/login';
       }
+    }
+  };
+
+  const loadReviews = async () => {
+    try {
+      setReviewsLoading(true);
+      const userId = user?.id || user?.userId || user?.accountId || profile?.id || profile?.userId;
+      console.log('🔍 Loading reviews for userId:', userId);
+      
+      if (userId) {
+        // Thử cả hai endpoint để đảm bảo
+        try {
+          const response = await apiRequest(`/api/Review/reviewee/${userId}`);
+          console.log('🔍 Reviews response:', response);
+          const reviewsArray = Array.isArray(response) ? response : (response.reviews || []);
+          
+          // ✅ Sort reviews by date (newest first)
+          const sortedReviews = reviewsArray.sort((a, b) => {
+            const dateA = new Date(a.createdDate || a.createdAt || a.created_at || 0);
+            const dateB = new Date(b.createdDate || b.createdAt || b.created_at || 0);
+            return dateB - dateA; // Descending order (newest first)
+          });
+          
+          console.log('🔍 Sorted reviews (newest first):', sortedReviews);
+          setReviews(sortedReviews);
+        } catch (revieweeError) {
+          console.log('🔍 Reviewee endpoint failed, trying all reviews:', revieweeError);
+          // Fallback: lấy tất cả review và filter
+          const allReviews = await apiRequest('/api/Review');
+          console.log('🔍 All reviews:', allReviews);
+          const userReviews = Array.isArray(allReviews) 
+            ? allReviews.filter(review => review.revieweeId === userId)
+            : [];
+          
+          // ✅ Sort reviews by date (newest first)
+          const sortedReviews = userReviews.sort((a, b) => {
+            const dateA = new Date(a.createdDate || a.createdAt || a.created_at || 0);
+            const dateB = new Date(b.createdDate || b.createdAt || b.created_at || 0);
+            return dateB - dateA; // Descending order (newest first)
+          });
+          
+          setReviews(sortedReviews);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading reviews:', error);
+      setReviews([]);
+    } finally {
+      setReviewsLoading(false);
     }
   };
 
@@ -211,10 +287,6 @@ export const Profile = () => {
                     <Calendar className="h-4 w-4 mr-1" />
                     Thành viên từ {new Date(userStats.memberSince).toLocaleDateString('vi-VN')}
                   </span>
-                  <span className="flex items-center">
-                    <Star className="h-4 w-4 mr-1 text-yellow-400" />
-                    {userStats.rating}/5
-                  </span>
                 </div>
               </div>
             </div>
@@ -233,7 +305,7 @@ export const Profile = () => {
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           <div className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-all duration-300 border border-gray-100">
             <div className="flex items-center justify-between">
               <div>
@@ -261,6 +333,30 @@ export const Profile = () => {
           <div className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-all duration-300 border border-gray-100">
             <div className="flex items-center justify-between">
               <div>
+                <p className="text-sm font-medium text-gray-600">Đang thanh toán</p>
+                <p className="text-2xl font-bold text-orange-600">{userStats.reservedListings}</p>
+              </div>
+              <div className="p-3 bg-orange-100 rounded-full">
+                <Clock className="h-6 w-6 text-orange-600" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-all duration-300 border border-gray-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Đã bán</p>
+                <p className="text-2xl font-bold text-blue-600">{userStats.soldListings}</p>
+              </div>
+              <div className="p-3 bg-blue-100 rounded-full">
+                <Award className="h-6 w-6 text-blue-600" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-all duration-300 border border-gray-100">
+            <div className="flex items-center justify-between">
+              <div>
                 <p className="text-sm font-medium text-gray-600">Lượt xem</p>
                 <p className="text-2xl font-bold text-purple-600">{userStats.totalViews}</p>
               </div>
@@ -269,30 +365,77 @@ export const Profile = () => {
               </div>
             </div>
           </div>
+        </div>
 
-          <div className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-all duration-300 border border-gray-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Đánh giá</p>
-                <p className="text-2xl font-bold text-yellow-600">{userStats.rating}/5</p>
-              </div>
-              <div className="p-3 bg-yellow-100 rounded-full">
-                <Star className="h-6 w-6 text-yellow-600" />
-              </div>
-            </div>
+        {/* Product Management Section */}
+        <div className="bg-white rounded-xl shadow-lg mb-8">
+          <div className="border-b border-gray-200">
+            <nav className="flex space-x-8 px-6">
+              <button
+                onClick={() => setActiveTab("profile")}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === "profile"
+                    ? "border-blue-500 text-blue-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Thông tin cá nhân
+              </button>
+              <button
+                onClick={() => setActiveTab("products")}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === "products"
+                    ? "border-blue-500 text-blue-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Sản phẩm đang bán ({userStats.activeListings})
+              </button>
+              <button
+                onClick={() => setActiveTab("reserved")}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === "reserved"
+                    ? "border-blue-500 text-blue-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Đang thanh toán ({userStats.reservedListings})
+              </button>
+              <button
+                onClick={() => setActiveTab("sold")}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === "sold"
+                    ? "border-blue-500 text-blue-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Đã bán ({userStats.soldListings})
+              </button>
+              <button
+                onClick={() => setActiveTab("reviews")}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === "reviews"
+                    ? "border-blue-500 text-blue-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Đánh giá của tôi
+              </button>
+            </nav>
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Profile Information */}
+          {/* Main Content */}
           <div className="lg:col-span-2">
-            <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-              <div className="px-6 py-4 bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
-                <h2 className="text-xl font-semibold text-gray-900 flex items-center">
-                  <User className="h-5 w-5 mr-2 text-blue-600" />
-                  Thông tin cá nhân
-                </h2>
-              </div>
+            {activeTab === "profile" && (
+              <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+                <div className="px-6 py-4 bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
+                  <h2 className="text-xl font-semibold text-gray-900 flex items-center">
+                    <User className="h-5 w-5 mr-2 text-blue-600" />
+                    Thông tin cá nhân
+                  </h2>
+                </div>
 
               <div className="p-6">
                 <form onSubmit={handleSubmit} className="space-y-6">
@@ -382,6 +525,265 @@ export const Profile = () => {
                 </form>
               </div>
             </div>
+            )}
+
+            {activeTab === "products" && (
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                  Sản phẩm đang bán ({userStats.activeListings})
+                </h3>
+                {userProducts.filter(item => {
+                  const status = (item.status || item.Status || '').toLowerCase();
+                  return status === 'approved' || status === 'active';
+                }).length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {userProducts.filter(item => {
+                      const status = (item.status || item.Status || '').toLowerCase();
+                      return status === 'approved' || status === 'active';
+                    }).map((product, index) => (
+                      <div key={product.id || product.productId || index} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                        <div className="flex items-start space-x-3">
+                          <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center">
+                            <Package className="h-6 w-6 text-gray-400" />
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="font-medium text-gray-900 line-clamp-2">
+                              {product.title || product.name}
+                            </h4>
+                            <p className="text-lg font-bold text-blue-600 mt-1">
+                              {formatPrice(product.price)}
+                            </p>
+                            <div className="flex items-center mt-2">
+                              <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
+                              <span className="text-sm text-green-600">Đang bán</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-3">
+                          <Link
+                            to={`/product/${product.id || product.productId}`}
+                            className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                          >
+                            Xem chi tiết →
+                          </Link>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600">Chưa có sản phẩm nào đang bán</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === "reserved" && (
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                  Sản phẩm đang trong quá trình thanh toán ({userStats.reservedListings})
+                </h3>
+                {userProducts.filter(item => {
+                  const status = (item.status || item.Status || '').toLowerCase();
+                  return status === 'reserved';
+                }).length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {userProducts.filter(item => {
+                      const status = (item.status || item.Status || '').toLowerCase();
+                      return status === 'reserved';
+                    }).map((product) => (
+                      <div key={product.id || product.productId} className="border border-orange-200 rounded-lg p-4 bg-orange-50">
+                        <div className="flex items-start space-x-3">
+                          <div className="w-16 h-16 bg-orange-200 rounded-lg flex items-center justify-center">
+                            <Clock className="h-6 w-6 text-orange-600" />
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="font-medium text-gray-900 line-clamp-2">
+                              {product.title || product.name}
+                            </h4>
+                            <p className="text-lg font-bold text-blue-600 mt-1">
+                              {formatPrice(product.price)}
+                            </p>
+                            <div className="flex items-center mt-2">
+                              <Clock className="h-4 w-4 text-orange-600 mr-1" />
+                              <span className="text-sm text-orange-600">Đang trong quá trình thanh toán</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-4">
+                          <Link
+                            to={`/product/${product.id || product.productId}`}
+                            className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium text-center block"
+                          >
+                            Xem chi tiết
+                          </Link>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <Clock className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600">Chưa có sản phẩm nào đang trong quá trình thanh toán</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === "sold" && (
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                  Sản phẩm đã bán ({userStats.soldListings})
+                </h3>
+                {userProducts.filter(item => {
+                  const status = (item.status || item.Status || '').toLowerCase();
+                  return status === 'sold';
+                }).length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {userProducts.filter(item => {
+                      const status = (item.status || item.Status || '').toLowerCase();
+                      return status === 'sold';
+                    }).map((product) => (
+                      <div key={product.id || product.productId} className="border border-gray-200 rounded-lg p-4">
+                        <div className="flex items-start space-x-3">
+                          <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center">
+                            <Package className="h-6 w-6 text-gray-400" />
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="font-medium text-gray-900 line-clamp-2">
+                              {product.title || product.name}
+                            </h4>
+                            <p className="text-lg font-bold text-green-600 mt-1">
+                              {formatPrice(product.price)}
+                            </p>
+                            <div className="flex items-center mt-2">
+                              <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
+                              <span className="text-sm text-green-600">Đã bán</span>
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              Cập nhật: {new Date(product.updatedAt || product.updated_at).toLocaleDateString('vi-VN')}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-3">
+                          <span className="text-gray-500 text-sm">
+                            Sản phẩm này đã được bán và không còn hiển thị công khai
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600">Chưa có sản phẩm nào đã bán</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === "reviews" && (
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                  <Star className="h-5 w-5 mr-2 text-yellow-600" />
+                  Đánh giá của tôi ({reviews.length})
+                </h3>
+                
+                {reviewsLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    <span className="ml-3 text-gray-600">Đang tải đánh giá...</span>
+                  </div>
+                ) : reviews.length > 0 ? (
+                  <div className="space-y-4">
+                    {/* Rating Summary */}
+                    <div className="bg-gray-50 rounded-lg p-4 mb-6">
+                      <div className="flex items-center space-x-6">
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-gray-900 mb-1">
+                        {(reviews.reduce((sum, review) => sum + (review.rating || review.ratingValue || 0), 0) / reviews.length).toFixed(1)}
+                      </div>
+                      <div className="flex items-center justify-center mb-2">
+                        {Array.from({ length: 5 }, (_, index) => (
+                          <Star
+                            key={index}
+                            className={`h-4 w-4 ${
+                              index < Math.round(reviews.reduce((sum, review) => sum + (review.rating || review.ratingValue || 0), 0) / reviews.length)
+                                ? "text-yellow-400 fill-current"
+                                : "text-gray-300"
+                            }`}
+                          />
+                        ))}
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        {reviews.length} đánh giá
+                      </div>
+                    </div>
+                      </div>
+                    </div>
+
+                    {/* Individual Reviews */}
+                    {reviews.map((review, index) => (
+                      <div key={review.reviewId || index} className="border border-gray-200 rounded-lg p-4">
+                        <div className="flex items-start space-x-3">
+                          <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center">
+                            <User className="h-5 w-5 text-gray-400" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-2 mb-2">
+                              <span className="font-medium text-gray-900">
+                                {review.reviewerName || review.buyerName || review.userName || 'Người dùng'}
+                              </span>
+                              <div className="flex items-center">
+                                {Array.from({ length: 5 }, (_, starIndex) => (
+                                  <Star
+                                    key={starIndex}
+                                    className={`h-4 w-4 ${
+                                      starIndex < (review.rating || review.ratingValue || 0)
+                                        ? "text-yellow-400 fill-current"
+                                        : "text-gray-300"
+                                    }`}
+                                  />
+                                ))}
+                              </div>
+                              <span className="text-sm text-gray-500">
+                                {new Date(review.createdDate || review.createdAt || review.created_at).toLocaleDateString('vi-VN')}
+                              </span>
+                            </div>
+                            
+                            {review.content && (
+                              <p className="text-gray-700 text-sm mb-2">
+                                {review.content}
+                              </p>
+                            )}
+                            
+                            <div className="flex items-center space-x-4 text-xs text-gray-500">
+                              <div className="flex items-center space-x-1">
+                                <Package className="h-3 w-3" />
+                                <span>{review.productTitle || review.productName || 'Sản phẩm'}</span>
+                              </div>
+                              <div className="flex items-center space-x-1">
+                                <Calendar className="h-3 w-3" />
+                                <span>Đơn #{review.orderId}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <Star className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600">Chưa có đánh giá nào</p>
+                    <p className="text-sm text-gray-500 mt-2">
+                      Đánh giá sẽ xuất hiện ở đây khi khách hàng đánh giá sản phẩm của bạn
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Sidebar */}

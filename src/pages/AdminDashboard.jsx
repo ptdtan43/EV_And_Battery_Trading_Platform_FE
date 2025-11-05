@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Users,
   Package,
@@ -19,18 +20,34 @@ import {
   BarChart3,
   Activity,
   Camera,
+  Bell,
+  Flag,
+  LogOut,
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
 import { formatPrice, formatDate } from "../utils/formatters";
 import { useToast } from "../contexts/ToastContext";
+import { useAuth } from "../contexts/AuthContext";
 import { notifyPostApproved, notifyPostRejected } from "../lib/notificationApi";
 import { rejectProduct, approveProduct } from "../lib/productApi";
 import { RejectProductModal } from "../components/admin/RejectProductModal";
+import { AdminReports } from "../components/admin/AdminReports";
 import { updateVerificationStatus, getVerificationRequests } from "../lib/verificationApi";
+import { getUserNotifications, getUnreadCount, notifyUserVerificationCompleted } from "../lib/notificationApi";
+import { forceSendNotificationsForAllSuccessfulPayments, sendNotificationsForKnownPayments, sendNotificationsForVerifiedProducts } from "../lib/verificationNotificationService";
 
 export const AdminDashboard = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
   const { show: showToast } = useToast();
-  const [activeTab, setActiveTab] = useState("dashboard"); // dashboard, vehicles, batteries, inspections
+  const { signOut } = useAuth();
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      return sessionStorage.getItem('admin_active_tab') || "dashboard";
+    } catch (_) {
+      return "dashboard";
+    }
+  }); // dashboard, vehicles, batteries, inspections, transactions, reports, users
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalListings: 0,
@@ -67,6 +84,54 @@ export const AdminDashboard = () => {
   const [expandedDetails, setExpandedDetails] = useState(false);
   const [processingIds, setProcessingIds] = useState(new Set());
   const [skipImageLoading, setSkipImageLoading] = useState(false); // Add flag to skip image loading if causing issues
+  // Users management state
+  const [users, setUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersPage, setUsersPage] = useState(1);
+  const [usersPageSize, setUsersPageSize] = useState(10);
+  const [usersTotalPages, setUsersTotalPages] = useState(1);
+  const [usersSearch, setUsersSearch] = useState("");
+  const [usersRole, setUsersRole] = useState(""); // '', 'admin', 'user'
+  const [usersStatus, setUsersStatus] = useState(""); // '', 'active', 'suspended', 'deleted'
+  const [showStatusModal, setShowStatusModal] = useState(false);
+  const [pendingStatusUserId, setPendingStatusUserId] = useState(null);
+  const [pendingStatus, setPendingStatus] = useState('active');
+  const [pendingStatusReason, setPendingStatusReason] = useState(''); // legacy free-text
+  const [pendingStatusReasonCode, setPendingStatusReasonCode] = useState('');
+  const [pendingStatusReasonNote, setPendingStatusReasonNote] = useState('');
+
+  const suspendedReasonOptions = [
+    { code: 'SPAM_CONTENT', label: 'Đăng nội dung spam/quảng cáo' },
+    { code: 'FRAUD_SUSPECT', label: 'Nghi ngờ gian lận/giả mạo' },
+    { code: 'VIOLATE_POLICY', label: 'Vi phạm điều khoản sử dụng' },
+    { code: 'ABUSE_HARASS', label: 'Quấy rối/Ngôn ngữ thù hằn' },
+    { code: 'FAKE_INFO', label: 'Cung cấp thông tin sai lệch' },
+    { code: 'MULTI_ACCOUNT', label: 'Nhiều tài khoản trái quy định' },
+    { code: 'CHARGEBACK_RISK', label: 'Rủi ro thanh toán/chargeback' },
+    { code: 'PENDING_VERIFICATION', label: 'Chờ xác minh danh tính' },
+    { code: 'SECURITY_RISK', label: 'Rủi ro bảo mật' },
+    { code: 'OTHER', label: 'Lý do khác' },
+  ];
+
+  const deletedReasonOptions = [
+    { code: 'USER_REQUEST', label: 'Người dùng yêu cầu xóa' },
+    { code: 'PERMANENT_VIOLATION', label: 'Vi phạm nghiêm trọng/đã tái phạm' },
+    { code: 'LEGAL_COMPLIANCE', label: 'Theo yêu cầu pháp lý' },
+    { code: 'INACTIVE_LONG', label: 'Không hoạt động quá lâu' },
+    { code: 'FRAUD_CONFIRMED', label: 'Xác nhận gian lận' },
+    { code: 'DATA_PURGE', label: 'Dọn dẹp dữ liệu' },
+    { code: 'OTHER', label: 'Lý do khác' },
+  ];
+
+  const getReasonTextForUser = (user) => {
+    const status = (user.status || user.Status || '').toString().toLowerCase();
+    const code = user.reasonCode || user.ReasonCode;
+    const note = user.reasonNote || user.ReasonNote || user.reason || user.Reason || user.accountStatusReason || user.AccountStatusReason;
+    if (!status) return note || '';
+    const list = status === 'deleted' ? deletedReasonOptions : suspendedReasonOptions;
+    const found = list.find(x => x.code === code);
+    return note || (found ? found.label : '');
+  };
 
   // Reject modal state
   const [rejectModal, setRejectModal] = useState({
@@ -82,7 +147,137 @@ export const AdminDashboard = () => {
   // Inspection modal state
   const [showInspectionModal, setShowInspectionModal] = useState(false);
   const [inspectionImages, setInspectionImages] = useState([]);
+  const [inspectionFiles, setInspectionFiles] = useState([]);
   const [currentInspectionProduct, setCurrentInspectionProduct] = useState(null);
+
+  // Reset to dashboard when arriving from admin logo click
+  useEffect(() => {
+    if (location?.state?.resetDashboard) {
+      setActiveTab("dashboard");
+      // Clear state to avoid repeated resets on future renders
+      navigate('/admin', { replace: true, state: {} });
+    }
+  }, [location?.state, navigate]);
+
+  // Persist selected tab so back navigation returns to the same tab
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('admin_active_tab', activeTab);
+    } catch (_) {}
+  }, [activeTab]);
+
+  // Users API helpers
+  const loadUsers = async (opts = {}) => {
+    const { page = usersPage, pageSize = usersPageSize, search = usersSearch, role = usersRole, status = usersStatus } = opts;
+    try {
+      setUsersLoading(true);
+      const params = new URLSearchParams();
+      if (search) params.set('search', search);
+      if (role) params.set('role', role);
+      if (status) params.set('status', status);
+      params.set('page', String(page));
+      params.set('pageSize', String(pageSize));
+      params.set('sort', 'createdAt:desc');
+      const res = await apiRequest(`/api/admin/users?${params.toString()}`);
+      setUsers(res.Items || res.items || []);
+      const meta = res.Meta || res.meta || {};
+      setUsersPage(meta.Page || meta.page || page);
+      setUsersPageSize(meta.PageSize || meta.pageSize || pageSize);
+      setUsersTotalPages(meta.TotalPages || meta.totalPages || 1);
+    } catch (e) {
+      console.error('Load users failed', e);
+      showToast({ title: 'Lỗi', description: 'Không tải được danh sách người dùng', type: 'error' });
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
+  const updateUserRole = async (userId, role) => {
+    // Optimistic update: update UI immediately
+    const oldUsers = [...users];
+    setUsers(prev => prev.map(u => {
+      const id = u.id || u.Id;
+      if (id === userId) {
+        return { ...u, role: role, Role: role };
+      }
+      return u;
+    }));
+    
+    try {
+      await apiRequest(`/api/admin/users/${userId}/role`, { method: 'PUT', body: { role } });
+      showToast({ title: 'Thành công', description: 'Đã cập nhật vai trò', type: 'success' });
+      // No need to reload - optimistic update already done
+    } catch (e) {
+      console.error('Update role failed', e);
+      // Rollback on error
+      setUsers(oldUsers);
+      showToast({ title: 'Lỗi', description: 'Không cập nhật được vai trò', type: 'error' });
+    }
+  };
+
+  const updateUserStatus = async (userId, status) => {
+    // Optimistic update: update UI immediately
+    const reasonLabel = (() => {
+      const list = status === 'deleted' ? deletedReasonOptions : suspendedReasonOptions;
+      const found = list.find(x => x.code === pendingStatusReasonCode);
+      return found ? found.label : '';
+    })();
+    
+    const oldUsers = [...users];
+    setUsers(prev => prev.map(u => {
+      const id = u.id || u.Id;
+      if (id === userId) {
+        return {
+          ...u,
+          status: status,
+          Status: status,
+          reasonCode: pendingStatusReasonCode,
+          reasonNote: pendingStatusReasonNote,
+          reason: pendingStatusReasonNote || reasonLabel || pendingStatusReason,
+          ReasonCode: pendingStatusReasonCode,
+          ReasonNote: pendingStatusReasonNote,
+          Reason: pendingStatusReasonNote || reasonLabel || pendingStatusReason,
+        };
+      }
+      return u;
+    }));
+    
+    try {
+      await apiRequest(`/api/admin/users/${userId}/status`, { 
+        method: 'PUT', 
+        body: { 
+          status, 
+          reasonCode: pendingStatusReasonCode || undefined, 
+          reasonNote: pendingStatusReasonNote || undefined,
+          // legacy compatibility
+          reason: pendingStatusReasonNote || reasonLabel || pendingStatusReason || undefined,
+        } 
+      });
+      showToast({ title: 'Thành công', description: 'Đã cập nhật trạng thái', type: 'success' });
+      // Only reload if needed for server-synced data
+      // await loadUsers();
+    } catch (e) {
+      console.error('Update status failed', e);
+      // Rollback on error
+      setUsers(oldUsers);
+      showToast({ title: 'Lỗi', description: 'Không cập nhật được trạng thái', type: 'error' });
+    }
+  };
+
+  // No inline modal for user detail; we open seller profile in a new tab instead
+
+  useEffect(() => {
+    if (activeTab === 'users') {
+      loadUsers({ page: 1 });
+    }
+  }, [activeTab]);
+
+  // Notification state
+  const [notifications, setNotifications] = useState([]);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [adminUserId, setAdminUserId] = useState(null);
+  const [autoNotificationsSent, setAutoNotificationsSent] = useState(false);
 
   const getId = (x) => x?.id || x?.productId || x?.Id || x?.listingId;
 
@@ -141,10 +336,350 @@ export const AdminDashboard = () => {
     await loadAdminData();
   };
 
+  // Load admin notifications
+  const loadAdminNotifications = async () => {
+    try {
+      if (!adminUserId) return;
+      
+      console.log('🔔 Loading admin notifications for user:', adminUserId);
+      const notificationData = await getUserNotifications(adminUserId);
+      setNotifications(notificationData.notifications || []);
+      
+      // Get unread count
+      const unreadCount = await getUnreadCount(adminUserId);
+      setUnreadNotificationCount(unreadCount);
+      
+      console.log('🔔 Admin notifications loaded:', notificationData.notifications?.length || 0);
+    } catch (error) {
+      console.error('❌ Error loading admin notifications:', error);
+    }
+  };
+
+  // Get admin user ID
+  const getAdminUserId = async () => {
+    try {
+      const users = await apiRequest('/api/User');
+      const adminUser = users.find(user => 
+        user.role === 'admin' || 
+        user.role === 'Admin' || 
+        user.isAdmin === true ||
+        user.email?.includes('admin') ||
+        user.fullName?.includes('Admin')
+      );
+      
+      if (adminUser) {
+        const userId = adminUser.id || adminUser.userId || adminUser.accountId;
+        setAdminUserId(userId);
+        return userId;
+      }
+      
+      // Fallback: use first user as admin
+      if (users.length > 0) {
+        const userId = users[0].id || users[0].userId || users[0].accountId;
+        setAdminUserId(userId);
+        return userId;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Error getting admin user ID:', error);
+      return null;
+    }
+  };
+
+  // Handle force sending notifications for successful payments
+  const handleForceSendNotifications = async () => {
+    if (!window.confirm('Bạn có chắc muốn gửi thông báo cho tất cả thanh toán kiểm định đã thành công?')) {
+      return;
+    }
+
+    try {
+      showToast({
+        title: 'Đang xử lý...',
+        description: 'Đang gửi thông báo cho các thanh toán kiểm định thành công',
+        type: 'info',
+      });
+
+      // Try the known payments function first (more reliable)
+      let notificationsSent = await sendNotificationsForKnownPayments();
+      
+      // If no notifications sent, try the full function
+      if (notificationsSent === 0) {
+        console.log('🔧 Trying full payment function...');
+        notificationsSent = await forceSendNotificationsForAllSuccessfulPayments();
+      }
+      
+      if (notificationsSent > 0) {
+        showToast({
+          title: 'Thành công!',
+          description: `Đã gửi ${notificationsSent} thông báo cho admin`,
+          type: 'success',
+        });
+        
+        // Reload notifications
+        await loadAdminNotifications();
+      } else {
+        showToast({
+          title: 'Không có thông báo nào',
+          description: 'Không tìm thấy thanh toán kiểm định thành công nào cần gửi thông báo',
+          type: 'info',
+        });
+      }
+    } catch (error) {
+      console.error('Error force sending notifications:', error);
+      showToast({
+        title: 'Lỗi',
+        description: 'Không thể gửi thông báo. Vui lòng thử lại.',
+        type: 'error',
+      });
+    }
+  };
+
+  // Tạo review cho người mua sau khi admin xác nhận
+  const createReviewForBuyer = async (productId) => {
+    try {
+      // Lấy thông tin order để tìm buyer
+      const orders = await apiRequest("/api/Order");
+      const completedOrder = orders.find(order => 
+        order.productId === productId && 
+        order.orderStatus === "completed"
+      );
+
+      if (!completedOrder) {
+        throw new Error("Không tìm thấy order đã hoàn thành cho sản phẩm này");
+      }
+
+      // Tạo review cho buyer
+      const reviewData = {
+        orderId: completedOrder.orderId,
+        productId: productId,
+        buyerId: completedOrder.userId,
+        sellerId: completedOrder.sellerId,
+        ratingValue: 0, // Mặc định 0, buyer sẽ cập nhật sau
+        comment: "", // Để trống, buyer sẽ điền sau
+        isCompleted: false // Chưa hoàn thành đánh giá
+      };
+
+      // Gọi API tạo review
+      await apiRequest("/api/Rating", {
+        method: 'POST',
+        body: reviewData
+      });
+
+      console.log(`✅ Review created for buyer ${completedOrder.userId} on product ${productId}`);
+      
+    } catch (error) {
+      console.error('Error creating review for buyer:', error);
+      throw error;
+    }
+  };
+
+  // Handle admin confirmation for reserved products
+  const handleAdminConfirm = async (productId) => {
+    if (!window.confirm('Bạn có chắc muốn xác nhận giao dịch này đã hoàn tất thành công?')) {
+      return;
+    }
+
+    try {
+      showToast({
+        title: 'Đang xử lý...',
+        description: 'Đang xác nhận giao dịch',
+        type: 'info',
+      });
+
+      // Use the new Payment API admin-confirm endpoint
+      await apiRequest(`/api/payment/admin-confirm`, {
+        method: 'POST',
+        body: {
+          Request: {
+            ProductId: productId
+          }
+        }
+      });
+
+      showToast({
+        title: 'Thành công!',
+        description: 'Đã xác nhận giao dịch thành công! Sản phẩm đã chuyển sang trạng thái "Đã bán".',
+        type: 'success',
+      });
+
+      // Tự động tạo review cho người mua
+      try {
+        await createReviewForBuyer(productId);
+        showToast({
+          title: 'Review đã được tạo!',
+          description: 'Người mua có thể đánh giá sản phẩm trong phần "Đánh giá của tôi".',
+          type: 'success',
+        });
+      } catch (reviewError) {
+        console.warn('Không thể tạo review:', reviewError);
+        showToast({
+          title: 'Cảnh báo',
+          description: 'Giao dịch đã thành công nhưng không thể tạo review tự động.',
+          type: 'warning',
+        });
+      }
+
+      // Reload data to update UI
+      await loadAdminData();
+    } catch (error) {
+      console.error('Error confirming transaction:', error);
+      showToast({
+        title: 'Lỗi',
+        description: 'Không thể xác nhận giao dịch. Vui lòng thử lại.',
+        type: 'error',
+      });
+    }
+  };
+
+  // Handle mark transaction as failed and refund
+  const handleMarkTransactionFailed = async (productId) => {
+    if (!window.confirm('Bạn có chắc muốn đánh dấu giao dịch này không thành công? Sản phẩm sẽ được trả về Homepage và hoàn tiền cho người mua.')) {
+      return;
+    }
+
+    try {
+      showToast({
+        title: 'Đang xử lý...',
+        description: 'Đang hoàn tiền và trả sản phẩm về trang chủ',
+        type: 'info',
+      });
+
+
+      // Find the product to get its details
+      const product = allListings.find(p => (p.id || p.productId) == productId);
+      console.log('📦 Product to return:', product);
+
+      // Update product status to 'Active' to release it back to Homepage
+      // Use PUT /api/Product/{id} to update the whole product
+      try {
+        // Get full product details first
+        const fullProduct = await apiRequest(`/api/Product/${productId}`);
+        console.log('📦 Full product data:', fullProduct);
+        
+        // Update product with Active status
+        const productUpdateResponse = await apiRequest(`/api/Product/${productId}`, {
+          method: 'PUT',
+          body: {
+            ...fullProduct,
+            status: 'Active'
+          }
+        });
+        console.log('✅ Product status updated to Active:', productUpdateResponse);
+      } catch (statusError) {
+        console.error('❌ Could not update product status:', statusError);
+        showToast({
+          title: 'Lỗi',
+          description: 'Không thể cập nhật trạng thái sản phẩm. Vui lòng thử lại.',
+          type: 'error',
+        });
+        return;
+      }
+
+      // Try to get payment details, but don't fail if this doesn't work
+      let refundAmount = 'N/A';
+      try {
+        const payments = await apiRequest(`/api/payment/product/${productId}`);
+        console.log('📝 Found payments for product:', payments);
+
+        if (payments && payments.length > 0) {
+          const latestPayment = payments[0];
+          refundAmount = latestPayment.amount 
+            ? (parseInt(latestPayment.amount) / 100).toLocaleString('vi-VN') 
+            : 'N/A';
+          
+          console.log('💰 Refund amount calculated:', refundAmount);
+        }
+      } catch (paymentError) {
+        console.warn('⚠️ Could not get payment details, using product price:', paymentError);
+        // Use product price as fallback (no need to divide by 100, price is already in correct unit)
+        refundAmount = product?.price ? parseInt(product.price).toLocaleString('vi-VN') : 'N/A';
+      }
+
+      // Save refund info to localStorage for banner display
+      const refundData = {
+        type: 'REFUND',
+        amount: refundAmount,
+        productTitle: product?.title || product?.name || 'Sản phẩm',
+        timestamp: Date.now()
+      };
+      localStorage.setItem('evtb_refund_success', JSON.stringify(refundData));
+      console.log('💾 Refund data saved to localStorage:', refundData);
+
+      showToast({
+        title: 'Thành công!',
+        description: 'Giao dịch đã được đánh dấu không thành công. Sản phẩm đã được trả về trang chủ.',
+        type: 'success',
+      });
+
+      // Reload data to update UI
+      await loadAdminData();
+
+      // Show info toast about refund banner
+      setTimeout(() => {
+        showToast({
+          title: 'Hoàn tiền',
+          description: 'Người mua sẽ thấy thông báo hoàn tiền khi vào Homepage',
+          type: 'success',
+        });
+      }, 1000);
+
+    } catch (error) {
+      console.error('❌ Error marking transaction as failed:', error);
+      showToast({
+        title: 'Lỗi',
+        description: `Không thể đánh dấu giao dịch thất bại: ${error.message || 'Vui lòng thử lại.'}`,
+        type: 'error',
+      });
+    }
+  };
+
+  // Handle view product details
+  const handleViewDetails = (product) => {
+    // Open product detail page in new tab
+    const productUrl = `http://localhost:5173/product/${product.id || product.productId}`;
+    window.open(productUrl, '_blank');
+  };
+
   useEffect(() => {
     console.log('🔍 AdminDashboard mounted, loading data...');
-    loadAdminData();
+    const initializeAdmin = async () => {
+      await loadAdminData();
+      await getAdminUserId();
+    };
+    initializeAdmin();
   }, []);
+
+  useEffect(() => {
+    if (adminUserId) {
+      loadAdminNotifications();
+      
+      // Auto-send notifications for successful verification payments (only once)
+      if (!autoNotificationsSent) {
+        const autoSendNotifications = async () => {
+          try {
+            console.log('🔔 Auto-checking for verification payments...');
+            const notificationsSent = await sendNotificationsForKnownPayments();
+            
+            if (notificationsSent > 0) {
+              console.log(`✅ Auto-sent ${notificationsSent} verification notifications`);
+              setAutoNotificationsSent(true); // Mark as sent
+              
+              // Reload notifications to show the new ones
+              await loadAdminNotifications();
+              
+              // Do not auto-open dropdown or show toast; icon bell already indicates updates
+            }
+          } catch (error) {
+            console.error('❌ Error auto-sending notifications:', error);
+          }
+        };
+        
+        // Run auto-send after a short delay to ensure dashboard is loaded
+        setTimeout(autoSendNotifications, 2000);
+      }
+    }
+  }, [adminUserId]);
 
   useEffect(() => {
     filterListings();
@@ -233,26 +768,20 @@ export const AdminDashboard = () => {
 
       const norm = (v) => String(v || "").toLowerCase();
 
-      // Process listings with better field mapping - Load images in parallel with reduced delay
+      // ✅ OPTIMIZED: Process listings without delays - just map data, don't load images
       const processedListings = [];
       
-      // Process listings in smaller batches to avoid DbContext conflicts
-      const batchSize = 2; // Reduced from 5 to 2 to avoid DbContext conflicts
       console.log("🔍 Starting to process listings:", listings.length, "items");
-      for (let i = 0; i < listings.length; i += batchSize) {
-        const batch = listings.slice(i, i + batchSize);
-        
-        // Process batch sequentially to avoid DbContext conflicts
-        for (let j = 0; j < batch.length; j++) {
-          const item = batch[j];
-          console.log(`🔍 Processing item ${i + j + 1}/${listings.length}:`, {id: item.id, verificationStatus: item.verificationStatus, productType: item.productType});
+      
+      // ✅ Process all listings in parallel - NO DELAYS, NO IMAGE LOADING
+      for (let i = 0; i < listings.length; i++) {
+        const item = listings[i];
+        // ✅ Reduced logging for faster performance
+        if (i % 10 === 0 || i === listings.length - 1) {
+          console.log(`🔍 Processing items ${i + 1}/${listings.length}...`);
+        }
           
-          // Add delay between each item to avoid DbContext conflicts
-          if (i > 0 || j > 0) {
-            await new Promise(resolve => setTimeout(resolve, 300));
-          }
-          
-          const norm = (v) => String(v || "").toLowerCase();
+        const norm = (v) => String(v || "").toLowerCase();
           // Get seller info from users array if sellerId exists
           const sellerId = item.sellerId || item.userId || item.ownerId || item.createdBy;
           let sellerInfo = {
@@ -287,7 +816,8 @@ export const AdminDashboard = () => {
             title: item.title || item.name || item.productName || "Không có tiêu đề",
             brand: item.brand || item.brandName || "Không rõ",
             model: item.model || item.modelName || "Không rõ",
-            year: item.year || item.modelYear || item.manufacturingYear || "N/A",
+            year: item.manufactureYear || item.year || item.modelYear || item.manufacturingYear || "N/A",
+            manufactureYear: item.manufactureYear || item.year || item.modelYear || item.manufacturingYear || "N/A",
             price: parseFloat(item.price || item.listPrice || item.sellingPrice || 0),
             status: (() => {
               const rawStatus = norm(item.status || item.verificationStatus || item.approvalStatus || "pending");
@@ -295,6 +825,8 @@ export const AdminDashboard = () => {
               if (rawStatus === "draft" || rawStatus === "re-submit") return "pending";
               if (rawStatus === "active" || rawStatus === "approved") return "Active";
               if (rawStatus === "rejected") return "rejected";
+              if (rawStatus === "reserved") return "reserved"; // Đang trong quá trình thanh toán
+              if (rawStatus === "sold") return "sold"; // Đã bán thành công
               return rawStatus;
             })(),
             productType: norm(item.productType || item.type || item.category || "vehicle"),
@@ -346,87 +878,18 @@ export const AdminDashboard = () => {
             })(),
           };
 
-          // Try to load images from ProductImage API with timeout (skip if flag is set)
-          if (!skipImageLoading) {
-            try {
-              const imagePromise = apiRequest(`/api/ProductImage/product/${mapped.id}`);
-              const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Image load timeout')), 5000) // Increased timeout to 5 seconds
-              );
-              
-              const imagesData = await Promise.race([imagePromise, timeoutPromise]);
-              console.log(`Images for product ${mapped.id}:`, imagesData);
-              
-              if (Array.isArray(imagesData) && imagesData.length > 0) {
-                mapped.images = imagesData.map(img => img.imageUrl || img.url || img.imageData).filter(Boolean);
-              } else if (imagesData && imagesData.imageData) {
-                mapped.images = [imagesData.imageData];
-              } else if (imagesData && typeof imagesData === 'object') {
-                // Handle single object response
-                if (imagesData.imageUrl || imagesData.url) {
-                  mapped.images = [imagesData.imageUrl || imagesData.url];
-                } else if (imagesData.items && Array.isArray(imagesData.items)) {
-                  mapped.images = imagesData.items.map(img => img.imageUrl || img.url || img.imageData).filter(Boolean);
-                }
-              }
-              
-              // Fallback: check if product has images in other fields
-              if (mapped.images.length === 0) {
-                const fallbackImages = [];
-                if (item.imageUrl) fallbackImages.push(item.imageUrl);
-                if (item.imageUrls && Array.isArray(item.imageUrls)) fallbackImages.push(...item.imageUrls);
-                if (item.images && Array.isArray(item.images)) fallbackImages.push(...item.images);
-                if (item.photos && Array.isArray(item.photos)) fallbackImages.push(...item.photos);
-                if (item.pictures && Array.isArray(item.pictures)) fallbackImages.push(...item.pictures);
-                
-                mapped.images = fallbackImages.filter(Boolean);
-                if (mapped.images.length > 0) {
-                  console.log(`Using fallback images for product ${mapped.id}:`, mapped.images);
-                }
-              }
-              
-              console.log(`Final images for product ${mapped.id}:`, mapped.images);
-          } catch (error) {
-              console.warn(`Failed to load images for product ${mapped.id}:`, error.message);
-              
-              // If DbContext error, set flag to skip image loading for future items
-              if (error.message.includes('DbContext') || error.message.includes('second operation')) {
-                console.warn('DbContext error detected, skipping image loading for remaining items');
-                setSkipImageLoading(true);
-              }
-              
-              // Set empty images array and try fallback
-              mapped.images = [];
-              
-              // Try fallback images from product data
-              const fallbackImages = [];
-              if (item.imageUrl) fallbackImages.push(item.imageUrl);
-              if (item.imageUrls && Array.isArray(item.imageUrls)) fallbackImages.push(...item.imageUrls);
-              if (item.images && Array.isArray(item.images)) fallbackImages.push(...item.images);
-              if (item.photos && Array.isArray(item.photos)) fallbackImages.push(...item.photos);
-              if (item.pictures && Array.isArray(item.pictures)) fallbackImages.push(...item.pictures);
-              
-              mapped.images = fallbackImages.filter(Boolean);
-              if (mapped.images.length > 0) {
-                console.log(`Using fallback images for product ${mapped.id} after error:`, mapped.images);
-              }
-            }
-          } else {
-            console.log(`Skipping image loading for product ${mapped.id} due to previous DbContext error`);
-            // Use fallback images only
-            const fallbackImages = [];
-            if (item.imageUrl) fallbackImages.push(item.imageUrl);
-            if (item.imageUrls && Array.isArray(item.imageUrls)) fallbackImages.push(...item.imageUrls);
-            if (item.images && Array.isArray(item.images)) fallbackImages.push(...item.images);
-            if (item.photos && Array.isArray(item.photos)) fallbackImages.push(...item.photos);
-            if (item.pictures && Array.isArray(item.pictures)) fallbackImages.push(...item.pictures);
-            
-            mapped.images = fallbackImages.filter(Boolean);
-          }
+          // ✅ OPTIMIZED: Use only fallback images from product data - NO API CALLS
+          // Admin dashboard doesn't need to load images from API, just use what's already in product data
+          const fallbackImages = [];
+          if (item.imageUrl) fallbackImages.push(item.imageUrl);
+          if (item.imageUrls && Array.isArray(item.imageUrls)) fallbackImages.push(...item.imageUrls);
+          if (item.images && Array.isArray(item.images)) fallbackImages.push(...item.images);
+          if (item.photos && Array.isArray(item.photos)) fallbackImages.push(...item.photos);
+          if (item.pictures && Array.isArray(item.pictures)) fallbackImages.push(...item.pictures);
+          
+          mapped.images = fallbackImages.filter(Boolean);
 
           processedListings.push(mapped);
-          console.log(`✅ Added item ${mapped.id} to processedListings. Total: ${processedListings.length}`);
-        }
       }
 
       // Filter out deleted products
@@ -440,8 +903,25 @@ export const AdminDashboard = () => {
         sample: processedListings.slice(0, 2)
       });
 
-      // Sort listings to show newest first
+      // Sort listings: Pending first, then by updatedDate (recently updated first), then by createdDate
       const sortedListings = nonDeletedListings.sort((a, b) => {
+        // Priority 1: Pending status first
+        const isPendingA = a.status === "pending" ? 1 : 0;
+        const isPendingB = b.status === "pending" ? 1 : 0;
+        if (isPendingA !== isPendingB) {
+          return isPendingB - isPendingA; // Pending items first
+        }
+        
+        // Priority 2: Recently updated products first (only for pending items)
+        if (a.status === "pending" && b.status === "pending") {
+          const updatedA = new Date(a.updatedDate || a.createdDate || 0);
+          const updatedB = new Date(b.updatedDate || b.createdDate || 0);
+          if (updatedA.getTime() !== updatedB.getTime()) {
+            return updatedB - updatedA; // Most recently updated first
+          }
+        }
+        
+        // Priority 3: Newest created first
         const dateA = new Date(a.createdDate || 0);
         const dateB = new Date(b.createdDate || 0);
         return dateB - dateA;
@@ -716,7 +1196,7 @@ export const AdminDashboard = () => {
         );
       } else {
         // Regular status filter
-        filtered = filtered.filter((l) => l.status === statusFilter);
+      filtered = filtered.filter((l) => l.status === statusFilter);
       }
     }
 
@@ -846,6 +1326,13 @@ export const AdminDashboard = () => {
       const sellerId = product?.sellerId || product?.userId;
       if (sellerId) {
         await notifyPostRejected(sellerId, product?.title || product?.name);
+        
+        // Also send verification rejection notification
+        await sendVerificationNotificationToUser(
+          productId,
+          'Rejected',
+          rejectionReason || 'Sản phẩm không đạt yêu cầu kiểm định.'
+        );
       }
 
       showToast({
@@ -875,74 +1362,353 @@ export const AdminDashboard = () => {
 
   const handleStartInspection = async (productId) => {
     try {
-      console.log(`Starting inspection for product ${productId}...`);
+      console.log(`📋 Opening inspection modal for product ${productId}...`);
       
-      // Try multiple API endpoints to update verification status
-      let response = null;
-      
-      try {
-        // Try the verify endpoint first
-        response = await apiRequest(`/api/Product/verify/${productId}`, {
-        method: 'PUT'
-      });
-        console.log("✅ Used verify endpoint:", response);
-      } catch (verifyError) {
-        console.warn("⚠️ Verify endpoint failed, trying direct product update...");
-        
-        try {
-          // Fallback: try direct product update
-          response = await apiRequest(`/api/Product/${productId}`, {
-            method: 'PUT',
-            body: JSON.stringify({
-              verificationStatus: 'InProgress'
-            })
-          });
-          console.log("✅ Used direct product update:", response);
-        } catch (directError) {
-          console.warn("⚠️ Direct update failed, trying alternative approach...");
-          
-          // Final fallback: try with different field names
-          response = await apiRequest(`/api/Product/${productId}`, {
-            method: 'PUT',
-            body: JSON.stringify({
-              inspectionRequested: false,
-              inspectionCompleted: true
-            })
-          });
-          console.log("✅ Used alternative approach:", response);
-        }
-      }
-      
-      // Open inspection modal for image upload
+      // Lấy thông tin sản phẩm hiện tại
       const product = allListings.find(p => getId(p) === productId);
-      if (product) {
-        setCurrentInspectionProduct(product);
-        setInspectionImages([]);
-        setShowInspectionModal(true);
+      if (!product) {
+        showToast("Không tìm thấy thông tin sản phẩm", "error");
+        return;
       }
       
-      showToast("Mở modal kiểm định. Vui lòng upload hình ảnh để hoàn thành kiểm định.", "info");
+      // ✅ CHỈ MỞ MODAL - KHÔNG GỌI API, KHÔNG THAY ĐỔI STATUS
+      // Trạng thái chỉ thay đổi khi admin bấm "Hoàn thành kiểm định"
+      console.log("📋 Product data for inspection:", {
+        manufactureYear: product.manufactureYear,
+        year: product.year,
+        mileage: product.mileage,
+        condition: product.condition,
+        fullProduct: product
+      });
+      setCurrentInspectionProduct(product);
+      setInspectionImages([]);
+      setInspectionFiles([]);
+      setShowInspectionModal(true);
+      
+      showToast("Vui lòng upload hình ảnh kiểm định để hoàn thành.", "info");
       
     } catch (error) {
-      console.error("Failed to start inspection:", error);
-      showToast("Không thể bắt đầu kiểm định xe. Vui lòng thử lại.", "error");
+      console.error("Failed to open inspection modal:", error);
+      showToast("Không thể mở modal kiểm định. Vui lòng thử lại.", "error");
     }
+  };
+
+  // Helper function to send verification notification to user
+  const sendVerificationNotificationToUser = async (productId, verificationResult, adminNotes = '') => {
+    try {
+      const product = allListings.find(p => getId(p) === productId);
+      if (!product) return false;
+
+      const sellerId = product.userId || product.sellerId || product.ownerId;
+      if (!sellerId) return false;
+
+      const notificationSent = await notifyUserVerificationCompleted(
+        sellerId,
+        product.title || product.name || 'Sản phẩm',
+        productId,
+        verificationResult,
+        adminNotes
+      );
+
+      if (notificationSent) {
+        console.log(`✅ Verification ${verificationResult} notification sent to user ${sellerId}`);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('❌ Failed to send verification notification to user:', error);
+      return false;
+    }
+  };
+
+  const uploadAdminVerificationImages = async (productId, files) => {
+    try {
+      const uploadPromises = files.map(async (file) => {
+        const formData = new FormData();
+        formData.append('productId', productId);
+        formData.append('imageFile', file);
+        
+        const response = await apiRequest('/api/ProductImage/admin-verification', {
+          method: 'POST',
+          body: formData
+        });
+        
+        return response;
+      });
+      
+      const results = await Promise.all(uploadPromises);
+      console.log("✅ Admin verification images uploaded:", results);
+      return results;
+    } catch (error) {
+      console.error("❌ Failed to upload admin verification images:", error);
+      throw error;
+    }
+  };
+
+  // ✅ Function to add watermark to image
+  const addWatermarkToImage = async (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      
+      reader.onload = (e) => {
+        const img = new Image();
+        
+        img.onload = () => {
+          // Create canvas
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          
+          // Set canvas size to image size
+          canvas.width = img.width;
+          canvas.height = img.height;
+          
+          // Draw original image
+          ctx.drawImage(img, 0, 0);
+          
+          // Add watermark "VERIFIED" to đùng ở giữa ảnh
+          const fontSize = Math.max(60, img.width / 8); // Large font size
+          ctx.font = `bold ${fontSize}px Arial`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          
+          const watermarkText = 'VERIFIED';
+          
+          // Vẽ ở giữa ảnh
+          const centerX = canvas.width / 2;
+          const centerY = canvas.height / 2;
+          
+          // Shadow để text nổi bật hơn
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+          ctx.shadowBlur = 10;
+          ctx.shadowOffsetX = 5;
+          ctx.shadowOffsetY = 5;
+          
+          // Viền trắng dày
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+          ctx.lineWidth = Math.max(8, fontSize / 10);
+          ctx.strokeText(watermarkText, centerX, centerY);
+          
+          // Chữ xanh dương
+          ctx.fillStyle = 'rgba(37, 99, 235, 0.85)';
+          ctx.fillText(watermarkText, centerX, centerY);
+          
+          // Convert canvas to blob
+          canvas.toBlob((blob) => {
+            if (blob) {
+              const watermarkedFile = new File([blob], file.name, { type: file.type });
+              resolve(watermarkedFile);
+            } else {
+              reject(new Error('Failed to create watermarked image'));
+            }
+          }, file.type);
+        };
+        
+        img.onerror = () => {
+          reject(new Error('Failed to load image'));
+        };
+        
+        img.src = e.target.result;
+      };
+      
+      reader.onerror = () => {
+        reject(new Error('Failed to read file'));
+      };
+      
+      reader.readAsDataURL(file);
+    });
   };
 
   const handleCompleteInspection = async (productId) => {
     try {
-      console.log(`Completing inspection for product ${productId}...`);
+      console.log(`📋 Completing inspection for product ${productId}...`);
       
-      await updateVerificationStatus(productId, "Verified");
+      // Validate inspection files
+      if (!inspectionFiles || inspectionFiles.length === 0) {
+        showToast("Vui lòng upload ít nhất một hình ảnh kiểm định!", "error");
+        return;
+      }
       
-      // Refresh data
-      setRefreshTrigger(prev => prev + 1);
+      // Get product details
+      const product = allListings.find(p => getId(p) === productId);
+      if (!product) {
+        showToast("Không tìm thấy thông tin sản phẩm", "error");
+        return;
+      }
       
-      showToast("Đã hoàn thành kiểm định xe thành công!", "success");
+      // ✅ BƯỚC 1: Ảnh đã được watermark ngay khi upload, không cần watermark lại
+      console.log(`📋 Images already watermarked during upload. Preparing to upload ${inspectionFiles.length} images...`);
+      const watermarkedFiles = inspectionFiles; // Đã có watermark rồi
+      
+      // ✅ BƯỚC 2: Upload ảnh kiểm định qua API /api/ProductImage/multiple
+      console.log(`🔄 Uploading ${watermarkedFiles.length} watermarked admin inspection images...`);
+      try {
+        // Tạo FormData cho multiple upload
+        const formData = new FormData();
+        formData.append('productId', productId);
+        formData.append('name', 'Vehicle'); // ✅ Tên loại ảnh (Vehicle/Battery/Document)
+        
+        // Thêm tất cả file đã watermark vào FormData
+        watermarkedFiles.forEach((file, index) => {
+          // Rename file để đánh dấu là ảnh admin kiểm định
+          const adminFileName = `ADMIN-INSPECTION-${Date.now()}-${index + 1}-${file.name}`;
+          const renamedFile = new File([file], adminFileName, { type: file.type });
+          formData.append('images', renamedFile);
+          console.log(`  📎 Added watermarked file ${index + 1}:`, adminFileName, file.size, 'bytes');
+        });
+        
+        // Gọi API upload multiple images
+        const uploadResponse = await apiRequest('/api/ProductImage/multiple', {
+          method: 'POST',
+          body: formData,
+          // Không set Content-Type header, browser sẽ tự động set cho FormData
+        });
+        
+        console.log(`✅ Uploaded ${uploadResponse.length} admin inspection images:`, uploadResponse);
+        showToast(`Đã upload ${uploadResponse.length} hình ảnh kiểm định thành công!`, "success");
+        
+      } catch (uploadError) {
+        console.error("❌ Failed to upload admin inspection images:", uploadError);
+        showToast("Không thể upload hình ảnh kiểm định. Vui lòng thử lại.", "error");
+        return; // Dừng lại nếu upload thất bại
+      }
+      
+      // ✅ BƯỚC 3: Cập nhật VerificationStatus thành "Verified" TRƯỚC (quan trọng!)
+      console.log(`🔄 Calling verify API for product ${productId}...`);
+      try {
+        const verifyResponse = await apiRequest(`/api/Product/verify/${productId}`, {
+          method: 'PUT'
+        });
+        console.log("✅ Product verified successfully:", verifyResponse);
+      } catch (verifyError) {
+        console.error("❌ Failed to verify product:", verifyError);
+        showToast("Không thể hoàn thành kiểm định. Vui lòng thử lại.", "error");
+        return;
+      }
+      
+      // ✅ BƯỚC 4: Cập nhật thông tin sản phẩm SAU khi đã verify (nếu admin đã chỉnh sửa)
+      console.log(`🔄 Updating product information for product ${productId} using admin API...`);
+      console.log("📋 Current inspection product data:", currentInspectionProduct);
+      
+      try {
+        // Helper function to parse int safely
+        const safeParseInt = (value) => {
+          if (!value || value === "N/A" || value === "") return null;
+          const parsed = parseInt(value);
+          return isNaN(parsed) ? null : parsed;
+        };
+
+        // Helper function to parse float safely
+        const safeParseFloat = (value) => {
+          if (!value || value === "N/A" || value === "") return 0;
+          const parsed = parseFloat(value);
+          return isNaN(parsed) ? 0 : parsed;
+        };
+
+        // Chuẩn bị dữ liệu cho ProductRequest DTO (PascalCase)
+        const productData = {
+          // ⚠️ ProductType là REQUIRED - phải có giá trị "Vehicle" hoặc "Battery"
+          ProductType: currentInspectionProduct.productType || "Vehicle",
+          Title: currentInspectionProduct.title || "",
+          Description: currentInspectionProduct.description || "",
+          Price: safeParseFloat(currentInspectionProduct.price),
+          Brand: currentInspectionProduct.brand || "",
+          Model: currentInspectionProduct.model || "",
+          Condition: currentInspectionProduct.condition || "",
+          // Các trường cho xe (nếu là xe)
+          VehicleType: currentInspectionProduct.vehicleType || null,
+          ManufactureYear: safeParseInt(currentInspectionProduct.manufactureYear || currentInspectionProduct.year),
+          Mileage: safeParseInt(currentInspectionProduct.mileage),
+          Transmission: currentInspectionProduct.transmission || null,
+          SeatCount: safeParseInt(currentInspectionProduct.seatCount),
+          LicensePlate: currentInspectionProduct.licensePlate || "",
+          // Các trường cho pin (nếu là pin) - set null để backend giữ giá trị cũ
+          BatteryType: currentInspectionProduct.batteryType || null,
+          BatteryHealth: currentInspectionProduct.batteryHealth || null,
+          Capacity: currentInspectionProduct.capacity || null,
+          Voltage: currentInspectionProduct.voltage || null,
+          BMS: currentInspectionProduct.bms || null,
+          CellType: currentInspectionProduct.cellType || null,
+          CycleCount: safeParseInt(currentInspectionProduct.cycleCount)
+        };
+
+        console.log("📝 Product data to update (ProductRequest DTO):", JSON.stringify(productData, null, 2));
+
+        // ✅ Gọi API PUT /api/Product/admin/update/{id}
+        console.log(`🚀 Calling API: PUT /api/Product/admin/update/${productId}`);
+        const updateResponse = await apiRequest(`/api/Product/admin/update/${productId}`, {
+          method: 'PUT',
+          body: productData
+        });
+        
+        console.log("✅ Product information updated successfully (status preserved):", updateResponse);
+        console.log("✅ Updated fields from response:", {
+          Title: updateResponse.title,
+          Brand: updateResponse.brand,
+          Model: updateResponse.model,
+          Price: updateResponse.price,
+          Condition: updateResponse.condition,
+          ManufactureYear: updateResponse.manufactureYear,
+          Mileage: updateResponse.mileage,
+          LicensePlate: updateResponse.licensePlate
+        });
+        
+      } catch (updateError) {
+        console.error("❌ Failed to update product information:", updateError);
+        console.error("❌ Error details:", {
+          status: updateError.status,
+          message: updateError.message,
+          data: updateError.data
+        });
+        console.error("❌ Full error object:", updateError);
+        // Không return - tiếp tục đóng modal ngay cả khi update thất bại
+        // Vì đã verify thành công rồi
+      }
+      
+      // ✅ BƯỚC 4: Cập nhật local state
+      setAllListings((prev) =>
+        prev.map((item) =>
+          getId(item) === productId
+            ? { ...item, verificationStatus: "Verified" }
+            : item
+        )
+      );
+      
+      // ✅ BƯỚC 5: Gửi thông báo cho người bán (nếu có)
+      try {
+        await sendVerificationNotificationToUser(
+          productId, 
+          'Verified', 
+          'Xe đã được kiểm định thành công và đạt tiêu chuẩn chất lượng.'
+        );
+      } catch (notifError) {
+        console.warn("⚠️ Failed to send notification:", notifError);
+        // Không dừng lại nếu gửi thông báo thất bại
+      }
+      
+      // ✅ BƯỚC 6: Refresh data để cập nhật UI
+      console.log("🔄 Refreshing admin data...");
+      await loadAdminData();
+      
+      // ✅ BƯỚC 7: Đóng modal và reset state
+      console.log("🔄 Closing inspection modal and resetting state...");
+      setShowInspectionModal(false);
+      setCurrentInspectionProduct(null);
+      setInspectionImages([]);
+      setInspectionFiles([]);
+      setShowNotifications(false);
+      
+      showToast("✅ Đã hoàn thành kiểm định xe và cập nhật thông tin thành công!", "success");
       
     } catch (error) {
-      console.error("Failed to complete inspection:", error);
-      showToast("Không thể hoàn thành kiểm định xe. Vui lòng thử lại.", "error");
+      console.error("❌ Failed to complete inspection:", error);
+      showToast("Không thể hoàn thành kiểm định. Vui lòng thử lại.", "error");
+      
+      // Đóng modal ngay cả khi có lỗi
+      setShowInspectionModal(false);
+      setCurrentInspectionProduct(null);
+      setInspectionImages([]);
+      setInspectionFiles([]);
+      setShowNotifications(false);
     }
   };
 
@@ -958,6 +1724,8 @@ export const AdminDashboard = () => {
       pending: { color: "bg-yellow-100 text-yellow-800", text: "Đang chờ duyệt" },
       Active: { color: "bg-green-100 text-green-800", text: "Đã duyệt" },
       rejected: { color: "bg-red-100 text-red-800", text: "Bị từ chối" },
+      reserved: { color: "bg-orange-100 text-orange-800", text: "Đang trong quá trình thanh toán" },
+      sold: { color: "bg-blue-100 text-blue-800", text: "Đã bán thành công" },
     };
 
     const config = statusConfig[status] || statusConfig.pending;
@@ -978,7 +1746,7 @@ export const AdminDashboard = () => {
     };
 
     const config = statusConfig[verificationStatus] || { color: "bg-gray-100 text-gray-800", text: "Không xác định" };
-    
+
     return (
       <span className={`px-2 py-1 text-xs font-medium rounded-full ${config.color}`}>
         {config.text}
@@ -1025,18 +1793,18 @@ export const AdminDashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 overflow-x-hidden">
       {/* Sidebar */}
       <div className="fixed left-0 top-0 h-full w-64 bg-white shadow-lg z-10">
         {/* Logo Section */}
-        <div className="p-6 border-b border-gray-200">
+        <div className="px-6 py-4">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
               <Car className="h-6 w-6 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-gray-900">EV Market</h1>
-              <p className="text-sm text-gray-500">Admin Portal</p>
+              <h1 className="text-xl font-bold text-gray-900 leading-tight">EV Market</h1>
+              <p className="text-sm text-gray-500 leading-tight">Cổng quản trị</p>
             </div>
           </div>
         </div>
@@ -1048,15 +1816,9 @@ export const AdminDashboard = () => {
               <span className="text-white font-semibold text-lg">A</span>
             </div>
             <div>
-              <h3 className="font-semibold text-gray-900">Admin User</h3>
-              <p className="text-sm text-gray-500">Super Administrator</p>
+              <h3 className="font-semibold text-gray-900">Quản trị viên</h3>
+              <p className="text-sm text-gray-500">Quản trị cấp cao</p>
             </div>
-          </div>
-          <div className="mt-3 flex items-center justify-between">
-            <div className="flex-1 bg-gray-200 rounded-full h-2">
-              <div className="bg-green-500 h-2 rounded-full" style={{ width: '95%' }}></div>
-            </div>
-            <span className="text-xs text-gray-500 ml-2">95% uptime</span>
           </div>
         </div>
 
@@ -1072,7 +1834,7 @@ export const AdminDashboard = () => {
               onClick={() => setActiveTab("dashboard")}
             >
               <BarChart3 className="h-5 w-5" />
-              <span className="font-medium">Dashboard</span>
+              <span className="font-medium">Bảng điều khiển</span>
             </div>
             <div 
               className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
@@ -1083,7 +1845,7 @@ export const AdminDashboard = () => {
               onClick={() => setActiveTab("vehicles")}
             >
               <Car className="h-5 w-5" />
-              <span>Vehicle Management</span>
+              <span>Quản lý phương tiện</span>
             </div>
             <div 
               className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
@@ -1094,74 +1856,76 @@ export const AdminDashboard = () => {
               onClick={() => setActiveTab("batteries")}
             >
               <Shield className="h-5 w-5" />
-              <span>Battery Management</span>
+              <span>Quản lý pin</span>
             </div>
-            <div className="flex items-center space-x-3 p-3 text-gray-600 hover:bg-gray-50 rounded-lg cursor-pointer">
+            <div 
+              className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
+                activeTab === "users" 
+                  ? "bg-blue-50 text-blue-600" 
+                  : "text-gray-600 hover:bg-gray-50"
+              }`}
+              onClick={() => setActiveTab("users")}
+            >
               <Users className="h-5 w-5" />
-              <span>User Management</span>
+              <span>Quản lý người dùng</span>
+            </div>
+            <div 
+              className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
+                activeTab === "transactions" 
+                  ? "bg-blue-50 text-blue-600" 
+                  : "text-gray-600 hover:bg-gray-50"
+              }`}
+              onClick={() => setActiveTab("transactions")}
+            >
+              <DollarSign className="h-5 w-5" />
+              <span>Quản lý giao dịch</span>
+            </div>
+            <div 
+              className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
+                activeTab === "reports" 
+                  ? "bg-blue-50 text-blue-600" 
+                  : "text-gray-600 hover:bg-gray-50"
+              }`}
+              onClick={() => setActiveTab("reports")}
+            >
+              <Flag className="h-5 w-5" />
+              <span>Báo cáo vi phạm</span>
             </div>
           </div>
         </nav>
-
-        {/* Tips Section */}
-        <div className="absolute bottom-20 left-4 right-4">
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-            <div className="flex items-start space-x-3">
-              <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
-                <span className="text-yellow-600 text-sm">💡</span>
-              </div>
-              <div>
-                <p className="text-sm text-yellow-800 font-medium">Tips</p>
-                <p className="text-xs text-yellow-700">Quick responses can help improve customer satisfaction.</p>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Main Content */}
-      <div className="ml-64 p-8">
+      <div className="ml-64 p-8 overflow-x-hidden">
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-900 mb-2">
-                {activeTab === "dashboard" && "Administration Dashboard"}
-                {activeTab === "vehicles" && "Vehicle Management"}
-                {activeTab === "batteries" && "Battery Management"}
+                {activeTab === "dashboard" && "Bảng điều khiển quản trị"}
+                {activeTab === "vehicles" && "Quản lý phương tiện"}
+                {activeTab === "batteries" && "Quản lý pin"}
+                {activeTab === "transactions" && "Quản lý giao dịch"}
+                {activeTab === "reports" && "Báo cáo vi phạm"}
               </h1>
               <p className="text-gray-600">
-                {activeTab === "dashboard" && "EV Market system overview • Realtime update"}
-                {activeTab === "vehicles" && "Manage all vehicle listings and approvals"}
-                {activeTab === "batteries" && "Manage all battery listings and approvals"}
+                {activeTab === "dashboard" && "Tổng quan hệ thống EV Market • Cập nhật theo thời gian thực"}
+                {activeTab === "vehicles" && "Quản lý bài đăng xe và phê duyệt"}
+                {activeTab === "batteries" && "Quản lý bài đăng pin và phê duyệt"}
+                {activeTab === "transactions" && "Quản lý giao dịch hoàn tất và xác nhận từ người bán"}
+                {activeTab === "reports" && "Xem xét và xử lý các báo cáo vi phạm từ người dùng"}
               </p>
             </div>
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={refreshData}
-                disabled={loading}
-                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {loading ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Activity className="h-4 w-4" />
-                )}
-                <span>Làm mới</span>
-              </button>
-              
-              {skipImageLoading && (
-              <button
-                  onClick={() => {
-                    setSkipImageLoading(false);
-                    refreshData();
-                  }}
-                  className="flex items-center space-x-2 px-3 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors text-sm"
-                >
-                  <span>Bật tải hình ảnh</span>
-              </button>
-              )}
-            </div>
+            <button
+              onClick={() => {
+                signOut();
+                navigate("/");
+              }}
+              className="flex items-center space-x-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors duration-200 shadow-md hover:shadow-lg"
+            >
+              <LogOut className="h-5 w-5" />
+              <span>Đăng xuất</span>
+            </button>
           </div>
         </div>
 
@@ -1172,19 +1936,16 @@ export const AdminDashboard = () => {
           <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">TOTAL VALUE</p>
+                  <p className="text-gray-500 text-sm font-medium">TỔNG GIÁ TRỊ</p>
                 <p className="text-3xl font-bold text-gray-900 mt-2">
                     {formatPrice(stats.totalRevenue)}
                 </p>
-                  <p className="text-xs text-gray-600 mt-1">Approved Products</p>
-              </div>
-                <div className="bg-gray-100 p-4 rounded-xl">
-                  <DollarSign className="h-8 w-8 text-gray-600" />
+                  <p className="text-xs text-gray-600 mt-1">Sản phẩm đã duyệt</p>
               </div>
             </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">This Year: {formatPrice(stats.thisYearRevenue)}</p>
-                <p className="text-xs text-gray-500">This Month: {formatPrice(stats.thisMonthRevenue)}</p>
+                <p className="text-xs text-gray-500">Năm nay: {formatPrice(stats.thisYearRevenue)}</p>
+                <p className="text-xs text-gray-500">Tháng này: {formatPrice(stats.thisMonthRevenue)}</p>
             </div>
           </div>
 
@@ -1192,19 +1953,19 @@ export const AdminDashboard = () => {
           <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">TODAY'S VALUE</p>
+                  <p className="text-gray-500 text-sm font-medium">GIÁ TRỊ HÔM NAY</p>
                   <p className="text-3xl font-bold text-gray-900 mt-2">
                     {formatPrice(stats.todaysRevenue)}
                   </p>
-                  <p className="text-xs text-gray-600 mt-1">Approved Today</p>
+                  <p className="text-xs text-gray-600 mt-1">Đã duyệt hôm nay</p>
               </div>
                 <div className="bg-green-100 p-4 rounded-xl">
                   <TrendingUp className="h-8 w-8 text-green-600" />
               </div>
             </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Average/Month: {formatPrice(stats.thisYearRevenue / 12)}</p>
-                <p className="text-xs text-gray-500">Products Approved: {stats.approvedListings}</p>
+                <p className="text-xs text-gray-500">Trung bình/Tháng: {formatPrice(stats.thisYearRevenue / 12)}</p>
+                <p className="text-xs text-gray-500">Sản phẩm đã duyệt: {stats.approvedListings}</p>
             </div>
           </div>
 
@@ -1212,19 +1973,19 @@ export const AdminDashboard = () => {
           <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">TOTAL ORDERS</p>
+                  <p className="text-gray-500 text-sm font-medium">TỔNG ĐƠN HÀNG</p>
                   <p className="text-3xl font-bold text-gray-900 mt-2">
                     {stats.totalOrders}
                   </p>
-                  <p className="text-xs text-gray-600 mt-1">All Time</p>
+                  <p className="text-xs text-gray-600 mt-1">Tổng cộng</p>
               </div>
                 <div className="bg-blue-100 p-4 rounded-xl">
                   <Package className="h-8 w-8 text-blue-600" />
               </div>
             </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Completed: {stats.completedOrders}</p>
-                <p className="text-xs text-gray-500">Active: {stats.activeOrders}</p>
+                <p className="text-xs text-gray-500">Hoàn tất: {stats.completedOrders}</p>
+                <p className="text-xs text-gray-500">Đang hoạt động: {stats.activeOrders}</p>
             </div>
           </div>
 
@@ -1232,19 +1993,19 @@ export const AdminDashboard = () => {
           <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">AVERAGE VALUE/PRODUCT</p>
+                  <p className="text-gray-500 text-sm font-medium">GIÁ TRỊ TB/MỖI SẢN PHẨM</p>
                 <p className="text-3xl font-bold text-gray-900 mt-2">
                     {formatPrice(stats.averageOrderValue)}
                 </p>
-                  <p className="text-xs text-gray-600 mt-1">Per Product</p>
+                  <p className="text-xs text-gray-600 mt-1">Mỗi sản phẩm</p>
               </div>
                 <div className="bg-blue-100 p-4 rounded-xl">
                   <Activity className="h-8 w-8 text-blue-600" />
               </div>
             </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Highest: {formatPrice(stats.averageOrderValue * 1.5)}</p>
-                <p className="text-xs text-gray-500">Lowest: {formatPrice(stats.averageOrderValue * 0.5)}</p>
+                <p className="text-xs text-gray-500">Cao nhất: {formatPrice(stats.averageOrderValue * 1.5)}</p>
+                <p className="text-xs text-gray-500">Thấp nhất: {formatPrice(stats.averageOrderValue * 0.5)}</p>
           </div>
         </div>
           </div>
@@ -1257,19 +2018,19 @@ export const AdminDashboard = () => {
             <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">COMPLETED ORDERS</p>
+                  <p className="text-gray-500 text-sm font-medium">ĐƠN HÀNG HOÀN TẤT</p>
                   <p className="text-3xl font-bold text-gray-900 mt-2">
                     {stats.completedOrders}
                   </p>
-                  <p className="text-xs text-gray-600 mt-1">{stats.completionRate.toFixed(1)}% Completion Rate</p>
+                  <p className="text-xs text-gray-600 mt-1">Tỉ lệ hoàn tất {stats.completionRate.toFixed(1)}%</p>
               </div>
                 <div className="bg-green-100 p-4 rounded-xl">
                   <CheckCircle className="h-8 w-8 text-green-600" />
                 </div>
               </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Active Orders: {stats.activeOrders}</p>
-                <p className="text-xs text-gray-500">Total Value: {formatPrice(stats.totalRevenue)}</p>
+                <p className="text-xs text-gray-500">Đơn đang hoạt động: {stats.activeOrders}</p>
+                <p className="text-xs text-gray-500">Tổng giá trị: {formatPrice(stats.totalRevenue)}</p>
             </div>
           </div>
 
@@ -1277,19 +2038,19 @@ export const AdminDashboard = () => {
             <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">THIS MONTH</p>
+                  <p className="text-gray-500 text-sm font-medium">THÁNG NÀY</p>
                   <p className="text-3xl font-bold text-gray-900 mt-2">
                     {formatPrice(stats.thisMonthRevenue)}
                 </p>
-                  <p className="text-xs text-gray-600 mt-1">Month {new Date().getMonth() + 1}/{new Date().getFullYear()}</p>
+                  <p className="text-xs text-gray-600 mt-1">Tháng {new Date().getMonth() + 1}/{new Date().getFullYear()}</p>
               </div>
                 <div className="bg-purple-100 p-4 rounded-xl">
                   <Calendar className="h-8 w-8 text-purple-600" />
                 </div>
               </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Average/Day: {formatPrice(stats.thisMonthRevenue / new Date().getDate())}</p>
-                <p className="text-xs text-gray-500">Total Orders: {stats.totalOrders}</p>
+                <p className="text-xs text-gray-500">Trung bình/Ngày: {formatPrice(stats.thisMonthRevenue / new Date().getDate())}</p>
+                <p className="text-xs text-gray-500">Tổng đơn hàng: {stats.totalOrders}</p>
             </div>
           </div>
 
@@ -1297,25 +2058,386 @@ export const AdminDashboard = () => {
             <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">VEHICLES & BATTERIES</p>
+                  <p className="text-gray-500 text-sm font-medium">XE & PIN</p>
                   <p className="text-2xl font-bold text-gray-900 mt-2">
                     {stats.totalVehicles + stats.totalBatteries}
                   </p>
-                  <p className="text-xs text-gray-600 mt-1">Total Products</p>
+                  <p className="text-xs text-gray-600 mt-1">Tổng sản phẩm</p>
               </div>
                 <div className="bg-orange-100 p-4 rounded-xl">
                   <Car className="h-8 w-8 text-orange-600" />
             </div>
           </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Vehicles: {stats.totalVehicles}</p>
-                <p className="text-xs text-gray-500">Batteries: {stats.totalBatteries}</p>
+                <p className="text-xs text-gray-500">Xe: {stats.totalVehicles}</p>
+                <p className="text-xs text-gray-500">Pin: {stats.totalBatteries}</p>
         </div>
             </div>
           </div>
         )}
 
-            {/* Filters and Search */}
+        {/* Additional Stats Row for Inspections - Only show on dashboard */}
+        {activeTab === "dashboard" && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            {/* Pending Inspections */}
+            <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
+            <div className="flex items-center justify-between">
+              <div>
+                  <p className="text-gray-500 text-sm font-medium">KIỂM ĐỊNH ĐANG CHỜ</p>
+                  <p className="text-3xl font-bold text-gray-900 mt-2">
+                    {allListings.filter(l => l.verificationStatus === "Requested").length}
+                </p>
+                  <p className="text-xs text-gray-600 mt-1">Chờ quản trị viên xử lý</p>
+              </div>
+                <div className="bg-yellow-100 p-4 rounded-xl">
+                  <Camera className="h-8 w-8 text-yellow-600" />
+                </div>
+              </div>
+              <div className="mt-4 space-y-1">
+                <p className="text-xs text-gray-500">Đang thực hiện: {allListings.filter(l => l.verificationStatus === "InProgress").length}</p>
+                <p className="text-xs text-gray-500">Đã hoàn thành: {allListings.filter(l => l.verificationStatus === "Verified").length}</p>
+            </div>
+          </div>
+
+            {/* Recent Notifications */}
+            <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
+            <div className="flex items-center justify-between">
+              <div>
+                  <p className="text-gray-500 text-sm font-medium">THÔNG BÁO GẦN ĐÂY</p>
+                  <p className="text-3xl font-bold text-gray-900 mt-2">
+                    {unreadNotificationCount}
+                  </p>
+                  <p className="text-xs text-gray-600 mt-1">Tin chưa đọc</p>
+              </div>
+                <div className="bg-blue-100 p-4 rounded-xl">
+                  <Bell className="h-8 w-8 text-blue-600" />
+            </div>
+          </div>
+              <div className="mt-4 space-y-1">
+                <p className="text-xs text-gray-500">Tổng: {notifications.length}</p>
+                <p className="text-xs text-gray-500">Kiểm định: {notifications.filter(n => n.notificationType === 'verification_payment_success').length}</p>
+        </div>
+          </div>
+        </div>
+        )}
+
+        {/* Users Management */}
+        {activeTab === 'users' && (
+          <div className="bg-white rounded-2xl shadow-lg p-6 mb-8 border border-gray-100">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
+              <div className="flex-1">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+                  <input
+                    type="text"
+                    placeholder="Tìm theo tên, email, số điện thoại"
+                    value={usersSearch}
+                    onChange={(e) => setUsersSearch(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') loadUsers({ page: 1, search: e.target.value }); }}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <select
+                  value={usersRole}
+                  onChange={(e) => { setUsersRole(e.target.value); loadUsers({ page: 1, role: e.target.value }); }}
+                  className="px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="">Tất cả vai trò</option>
+                  <option value="admin">Quản trị viên</option>
+                  <option value="user">Người dùng</option>
+                </select>
+                <select
+                  value={usersStatus}
+                  onChange={(e) => { setUsersStatus(e.target.value); loadUsers({ page: 1, status: e.target.value }); }}
+                  className="px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="">Tất cả trạng thái</option>
+                  <option value="active">Đang hoạt động</option>
+                  <option value="suspended">Đã tạm khóa</option>
+                  <option value="deleted">Đã xóa</option>
+                </select>
+                <button
+                  onClick={() => loadUsers({ page: 1 })}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  disabled={usersLoading}
+                >
+                  {usersLoading ? 'Đang tải...' : 'Làm mới'}
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <h3 className="text-base font-semibold text-gray-900 mb-3">Tài khoản đang hoạt động</h3>
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Họ tên</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Email</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Vai trò</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Trạng thái</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Ngày tạo</th>
+                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500">Chi tiết</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-100">
+                  {(() => {
+                    const activeUsersList = users.filter(u => {
+                      const st = (u.status || u.Status || 'active').toString().toLowerCase();
+                      return st === 'active' || st === '';
+                    });
+                    return activeUsersList.map((u) => (
+                    <tr key={u.id || u.Id}>
+                      <td className="px-4 py-3 text-sm text-gray-900">{u.fullName || u.FullName || '-'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{u.email || u.Email}</td>
+                      <td className="px-4 py-3 text-sm">
+                        {(() => {
+                          const role = (u.role || u.Role || 'user').toString().toLowerCase();
+                          // Map sub_admin to user, only show 2 roles: admin and user
+                          const normalizedRole = role === 'admin' ? 'admin' : 'user';
+                          const label = normalizedRole === 'admin' ? 'Quản trị viên' : 'Người dùng';
+                          const cls = normalizedRole === 'admin' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800';
+                          return <span className={`px-2 py-1 text-xs font-medium rounded-full ${cls}`}>{label}</span>;
+                        })()}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <select
+                          title={getReasonTextForUser(u) || undefined}
+                          defaultValue={(u.status || u.Status || 'active').toLowerCase()}
+                          onChange={(e) => {
+                            const id = u.id || u.Id;
+                            const next = e.target.value;
+                            if (next === 'suspended' || next === 'deleted') {
+                              setPendingStatusUserId(id);
+                              setPendingStatus(next);
+                              setPendingStatusReason('');
+                              setShowStatusModal(true);
+                              // revert UI select until confirmed
+                              e.target.value = (u.status || u.Status || 'active').toLowerCase();
+                            } else {
+                              updateUserStatus(id, next);
+                            }
+                          }}
+                          className="px-2 py-1 border border-gray-300 rounded"
+                        >
+                          <option value="active">Đang hoạt động</option>
+                          <option value="suspended">Đã tạm khóa</option>
+                          <option value="deleted">Đã xóa</option>
+                        </select>
+                        {(() => {
+                          const txt = getReasonTextForUser(u);
+                          const st = (u.status || u.Status || '').toString().toLowerCase();
+                          if (!txt || (st !== 'suspended' && st !== 'deleted')) return null;
+                          return (
+                            <div className="mt-1 text-xs text-gray-500 truncate" title={txt}>{txt}</div>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {u.createdAt || u.CreatedAt ? new Date(u.createdAt || u.CreatedAt).toLocaleDateString() : '-'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right">
+                        <button
+                          className="inline-flex items-center justify-center p-2 rounded hover:bg-gray-100 text-blue-600"
+                          title="Xem hồ sơ"
+                          onClick={() => {
+                            const id = u.id || u.Id;
+                            if (id) {
+                              navigate(`/seller/${id}`);
+                            } else {
+                              showToast({ title: 'Lỗi', description: 'Không xác định được ID người dùng', type: 'error' });
+                            }
+                          }}
+                        >
+                          <Eye className="h-5 w-5" />
+                        </button>
+                      </td>
+                    </tr>
+                    ));
+                  })()}
+                  {(() => {
+                    const activeUsersList = users.filter(u => {
+                      const st = (u.status || u.Status || 'active').toString().toLowerCase();
+                      return st === 'active' || st === '';
+                    });
+                    return activeUsersList.length === 0 && !usersLoading && (
+                      <tr>
+                        <td className="px-4 py-6 text-center text-sm text-gray-500" colSpan={6}>Không có tài khoản đang hoạt động</td>
+                      </tr>
+                    );
+                  })()}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Restricted accounts table */}
+            {(() => {
+              const restrictedUsersList = users.filter(u => {
+                const st = (u.status || u.Status || '').toString().toLowerCase();
+                return st === 'suspended' || st === 'deleted';
+              });
+              return (
+                <div className="overflow-x-auto mt-8">
+                  <h3 className="text-base font-semibold text-gray-900 mb-3">Các tài khoản bị hạn chế</h3>
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Họ tên</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Email</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Vai trò</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Trạng thái</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Lý do</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Ngày tạo</th>
+                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500">Chi tiết</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-100">
+                      {restrictedUsersList.map((u) => (
+                        <tr key={u.id || u.Id}>
+                          <td className="px-4 py-3 text-sm text-gray-900">{u.fullName || u.FullName || '-'}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{u.email || u.Email}</td>
+                          <td className="px-4 py-3 text-sm">
+                            {(() => {
+                              const role = (u.role || u.Role || 'user').toString().toLowerCase();
+                              // Map sub_admin to user, only show 2 roles: admin and user
+                              const normalizedRole = role === 'admin' ? 'admin' : 'user';
+                              const label = normalizedRole === 'admin' ? 'Quản trị viên' : 'Người dùng';
+                              const cls = normalizedRole === 'admin' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800';
+                              return <span className={`px-2 py-1 text-xs font-medium rounded-full ${cls}`}>{label}</span>;
+                            })()}
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            <select
+                              title={getReasonTextForUser(u) || undefined}
+                              defaultValue={(u.status || u.Status || 'suspended').toLowerCase()}
+                              onChange={(e) => {
+                                const id = u.id || u.Id;
+                                const next = e.target.value;
+                                if (next === 'suspended' || next === 'deleted') {
+                                  setPendingStatusUserId(id);
+                                  setPendingStatus(next);
+                                  setPendingStatusReason('');
+                                  setPendingStatusReasonCode('');
+                                  setPendingStatusReasonNote('');
+                                  setShowStatusModal(true);
+                                  e.target.value = (u.status || u.Status || 'suspended').toLowerCase();
+                                } else {
+                                  updateUserStatus(id, next);
+                                }
+                              }}
+                              className="px-2 py-1 border border-gray-300 rounded"
+                            >
+                              <option value="active">Khôi phục hoạt động</option>
+                              <option value="suspended">Đã tạm khóa</option>
+                              <option value="deleted">Đã xóa</option>
+                            </select>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            {(() => {
+                              const txt = getReasonTextForUser(u);
+                              return txt ? <span className="line-clamp-2" title={txt}>{txt}</span> : '-';
+                            })()}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{u.createdAt || u.CreatedAt ? new Date(u.createdAt || u.CreatedAt).toLocaleDateString() : '-'}</td>
+                          <td className="px-4 py-3 text-sm text-right">
+                            <button
+                              className="inline-flex items-center justify-center p-2 rounded hover:bg-gray-100 text-blue-600"
+                              title="Xem hồ sơ"
+                              onClick={() => {
+                                const id = u.id || u.Id;
+                                if (id) {
+                                  navigate(`/seller/${id}`);
+                                } else {
+                                  showToast({ title: 'Lỗi', description: 'Không xác định được ID người dùng', type: 'error' });
+                                }
+                              }}
+                            >
+                              <Eye className="h-5 w-5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {restrictedUsersList.length === 0 && !usersLoading && (
+                        <tr>
+                          <td className="px-4 py-6 text-center text-sm text-gray-500" colSpan={7}>Không có tài khoản bị hạn chế</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
+
+            <div className="mt-4 flex items-center justify-between">
+              <div className="text-sm text-gray-600">Trang {usersPage} / {usersTotalPages}</div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="px-3 py-2 border rounded disabled:opacity-50"
+                  disabled={usersPage <= 1 || usersLoading}
+                  onClick={() => { const p = usersPage - 1; setUsersPage(p); loadUsers({ page: p }); }}
+                >
+                  Trước
+                </button>
+                <button
+                  className="px-3 py-2 border rounded disabled:opacity-50"
+                  disabled={usersPage >= usersTotalPages || usersLoading}
+                  onClick={() => { const p = usersPage + 1; setUsersPage(p); loadUsers({ page: p }); }}
+                >
+                  Sau
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* No inline modal; using seller profile page in new tab */}
+        {showStatusModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black bg-opacity-40" onClick={() => setShowStatusModal(false)} />
+            <div className="relative bg-white w-full max-w-md rounded-2xl shadow-xl p-6 z-10">
+              <h3 className="text-lg font-semibold text-gray-900 mb-3">{pendingStatus === 'suspended' ? 'Chọn lý do tạm khóa' : 'Chọn lý do xóa'}</h3>
+              <div className="space-y-3">
+                <select
+                  value={pendingStatusReasonCode}
+                  onChange={(e) => setPendingStatusReasonCode(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg p-3"
+                >
+                  <option value="">-- Chọn lý do --</option>
+                  {(pendingStatus === 'deleted' ? deletedReasonOptions : suspendedReasonOptions).map(opt => (
+                    <option key={opt.code} value={opt.code}>{opt.label}</option>
+                  ))}
+                </select>
+                {(pendingStatusReasonCode === 'OTHER') && (
+                  <textarea
+                    value={pendingStatusReasonNote}
+                    onChange={(e) => setPendingStatusReasonNote(e.target.value)}
+                    placeholder="Nhập ghi chú bổ sung..."
+                    className="w-full border border-gray-300 rounded-lg p-3 h-24 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                )}
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button className="px-4 py-2 rounded-lg border" onClick={() => setShowStatusModal(false)}>Hủy</button>
+                <button
+                  className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                  disabled={!pendingStatusUserId || !pendingStatusReasonCode || (pendingStatusReasonCode === 'OTHER' && pendingStatusReasonNote.trim().length === 0)}
+                  onClick={async () => {
+                    const uid = pendingStatusUserId;
+                    const st = pendingStatus;
+                    setShowStatusModal(false);
+                    await updateUserStatus(uid, st);
+                  }}
+                >
+                  Xác nhận
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+            {/* Filters and Search - Hide on reports and users tabs */}
+            {activeTab !== "reports" && activeTab !== "users" && (
             <div className="bg-white rounded-2xl shadow-lg p-6 mb-8 border border-gray-100">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0 lg:space-x-6">
             <div className="flex-1">
@@ -1340,6 +2462,8 @@ export const AdminDashboard = () => {
                 <option value="pending">Đang chờ duyệt ({allListings.filter(l => l.status === "pending").length})</option>
                 <option value="approved">Đã duyệt ({allListings.filter(l => l.status === "Active").length})</option>
                 <option value="rejected">Bị từ chối ({allListings.filter(l => l.status === "rejected").length})</option>
+                <option value="reserved">Đang trong quá trình thanh toán ({allListings.filter(l => l.status === "reserved").length})</option>
+                <option value="sold">Đã bán thành công ({allListings.filter(l => l.status === "sold").length})</option>
                 <option value="verification_requested">Yêu cầu kiểm định ({allListings.filter(l => l.verificationStatus === "Requested" || l.verificationStatus === "InProgress").length})</option>
               </select>
               <select
@@ -1365,9 +2489,10 @@ export const AdminDashboard = () => {
             </div>
           </div>
         </div>
+        )}
 
-        {/* Listings Table - Hide on inspections tab */}
-        {activeTab !== "inspections" && (
+        {/* Listings Table - Hide on inspections, transactions, reports and users tabs */}
+        {activeTab !== "inspections" && activeTab !== "transactions" && activeTab !== "reports" && activeTab !== "users" && (
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200">
             <h2 className="text-xl font-semibold text-gray-900">
@@ -1473,19 +2598,24 @@ export const AdminDashboard = () => {
                           <Eye className="h-4 w-4" />
                       </button>
                       
-                      {/* Inspection button for products with Requested verification status */}
-                      {listing.verificationStatus === "Requested" && (
-                        <button
+                      {/* Inspection button for products with Requested or InProgress verification status */}
+                      {(listing.verificationStatus === "Requested" || listing.verificationStatus === "InProgress") && (
+                      <button
                           onClick={() => handleStartInspection(listing.id)}
-                          className="bg-blue-600 text-white px-3 py-1 rounded-lg text-xs hover:bg-blue-700 flex items-center space-x-1"
-                          title="Bắt đầu kiểm định"
+                          className={`px-3 py-1 rounded-lg text-xs flex items-center space-x-1 ${
+                            listing.verificationStatus === "InProgress" 
+                              ? "bg-orange-600 text-white hover:bg-orange-700" 
+                              : "bg-blue-600 text-white hover:bg-blue-700"
+                          }`}
+                          title={listing.verificationStatus === "InProgress" ? "Tiếp tục kiểm định" : "Bắt đầu kiểm định"}
                         >
                           <Camera className="h-3 w-3" />
-                          <span>Kiểm định</span>
-                        </button>
+                          <span>{listing.verificationStatus === "InProgress" ? "Tiếp tục" : "Kiểm định"}</span>
+                      </button>
                       )}
                         
-                        {(listing.status === "pending" || listing.status === "Đang chờ duyệt" || listing.status === "Re-submit" || listing.status === "Draft") && (
+                        {(listing.status === "pending" || listing.status === "Đang chờ duyệt" || listing.status === "Re-submit" || listing.status === "Draft") && listing.status !== "reserved" && (
+                          
                           <>
                             {console.log(`🔍 Product ${listing.id} debug:`, {
                               status: listing.status,
@@ -1543,29 +2673,29 @@ export const AdminDashboard = () => {
                       <div className="flex items-center space-x-3">
                         <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
                           <Package className="h-6 w-6 text-white" />
-              </div>
+                </div>
                         <div>
                           <h3 className="text-xl font-bold text-gray-900">{product.title}</h3>
                           <p className="text-sm text-gray-600">Chi tiết sản phẩm</p>
-                            </div>
-                          </div>
+              </div>
+            </div>
                         <button
                         onClick={() => setExpandedDetails(false)}
                         className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                 >
                         <XCircle className="h-6 w-6 text-gray-500" />
                         </button>
-      </div>
+              </div>
 
                     {/* Content */}
-            <div className="p-6">
+              <div className="p-6">
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         {/* Images */}
                 <div>
                           <h4 className="text-lg font-semibold text-gray-900 mb-4">Hình ảnh</h4>
                           {product.images && product.images.length > 0 ? (
                     <div className="space-y-4">
-                      <div className="relative">
+                        <div className="relative">
                         <img
                                   src={product.images[currentImageIndex]}
                                   alt={product.title}
@@ -1595,8 +2725,8 @@ export const AdminDashboard = () => {
                   ) : (
                             <div className="w-full h-64 bg-gray-200 rounded-lg flex items-center justify-center">
                               <Package className="h-16 w-16 text-gray-400" />
-                    </div>
-                  )}
+                            </div>
+                          )}
                 </div>
 
                         {/* Details */}
@@ -1611,8 +2741,8 @@ export const AdminDashboard = () => {
                       <div>
                                 <p className="text-sm text-gray-500">Trạng thái</p>
                                 <p className="font-medium">{getStatusBadge(product.status)}</p>
-                      </div>
-                  </div>
+                          </div>
+                        </div>
 
                     <div className="grid grid-cols-2 gap-4">
                       <div>
@@ -1629,7 +2759,7 @@ export const AdminDashboard = () => {
                         <div>
                                 <p className="text-sm text-gray-500">Năm sản xuất</p>
                                 <p className="font-medium">{product.year}</p>
-                        </div>
+                            </div>
                       <div>
                                 <p className="text-sm text-gray-500">Giá</p>
                                 <p className="font-medium text-green-600">{formatPrice(product.price)}</p>
@@ -1682,8 +2812,8 @@ export const AdminDashboard = () => {
                                   <p className="text-sm text-gray-500">Email</p>
                                   <p className="font-medium">{product.sellerEmail}</p>
                               </div>
-                              )}
-                              </div>
+                            )}
+                          </div>
 
                             {product.rejectionReason && (
                             <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -1691,21 +2821,21 @@ export const AdminDashboard = () => {
                                 <p className="text-sm text-red-700 mt-1">{product.rejectionReason}</p>
                               </div>
                     )}
-                              </div>
-                              </div>
-              </div>
+                          </div>
+                        </div>
+                      </div>
 
                       {/* Actions */}
                       <div className="mt-6 flex items-center justify-end space-x-3">
-                      <button
+                        <button
                           onClick={() => setExpandedDetails(false)}
                           className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-                      >
+                        >
                           Đóng
-                      </button>
+                        </button>
                         {(product.status === "pending" || product.status === "Re-submit" || product.status === "Draft") && (
                           <>
-                      <button
+                          <button
                               onClick={() => {
                                 setExpandedDetails(false);
                                 handleApprove(product.id);
@@ -1719,7 +2849,7 @@ export const AdminDashboard = () => {
                                 <CheckCircle className="h-4 w-4" />
                               )}
                               <span>Duyệt</span>
-                      </button>
+                          </button>
                             <button
                               onClick={() => {
                                 setExpandedDetails(false);
@@ -1733,14 +2863,14 @@ export const AdminDashboard = () => {
                             </button>
                           </>
                         )}
+                      </div>
                     </div>
-                  </div>
                   </>
                 );
               })()}
-                            </div>
-                          </div>
-                        )}
+                </div>
+              </div>
+            )}
 
 
         {/* Reject Modal */}
@@ -1758,22 +2888,22 @@ export const AdminDashboard = () => {
             <div className="p-6">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold text-gray-900">Chi tiết sản phẩm</h2>
-                      <button
+                <button
                   onClick={() => setShowModal(false)}
                   className="text-gray-400 hover:text-gray-600"
                 >
                   <XCircle className="h-6 w-6" />
-                      </button>
-                    </div>
+                </button>
+            </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Images */}
                 <div>
                   <div className="relative h-64 bg-gray-100 rounded-lg overflow-hidden">
                     {selectedListing.images && selectedListing.images.length > 0 ? (
-                      <img
-                        src={selectedListing.images[currentImageIndex]}
-                        alt={selectedListing.title}
+                        <img
+                          src={selectedListing.images[currentImageIndex]}
+                          alt={selectedListing.title}
                         className="w-full h-full object-cover"
                       />
                     ) : (
@@ -1846,19 +2976,19 @@ export const AdminDashboard = () => {
                     
                     {/* Show inspection button only for products with Requested verification status */}
                     {selectedListing.verificationStatus === "Requested" && (
-                      <button
+                            <button
                         onClick={() => handleStartInspection(selectedListing.id)}
                         className="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                       >
                         <Camera className="h-5 w-5" />
                         <span>Bắt đầu kiểm định</span>
-                      </button>
+                            </button>
                     )}
-                    
+
                     {/* Show button for testing - temporarily show for all products */}
                     {selectedListing.verificationStatus !== "Requested" && selectedListing.verificationStatus !== "InProgress" && selectedListing.verificationStatus !== "Verified" && (
-                      <button
-                        onClick={() => {
+                            <button
+                              onClick={() => {
                           // Temporarily change verification status to Requested for testing
                           const updatedListing = {...selectedListing, verificationStatus: "Requested"};
                           setSelectedListing(updatedListing);
@@ -1879,7 +3009,7 @@ export const AdminDashboard = () => {
                       >
                         <CheckCircle className="h-5 w-5" />
                         <span>Hoàn thành kiểm định</span>
-                      </button>
+                            </button>
                     )}
                     
                     {/* Show status for verified products */}
@@ -1887,15 +3017,15 @@ export const AdminDashboard = () => {
                       <div className="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-green-100 text-green-800 rounded-lg">
                         <CheckCircle className="h-5 w-5" />
                         <span>Đã kiểm định</span>
+                          </div>
+                        )}
                       </div>
-                    )}
-                </div>
-                </div>
+                    </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+                    </div>
+                  )}
 
       {/* Inspection Modal */}
       {showInspectionModal && currentInspectionProduct && (
@@ -1912,30 +3042,169 @@ export const AdminDashboard = () => {
                 >
                   <XCircle className="h-6 w-6" />
                 </button>
-              </div>
-
-              <div className="space-y-6">
-                {/* Product Info */}
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <h3 className="text-lg font-semibold mb-2">Thông tin xe</h3>
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="font-medium">Thương hiệu:</span> {currentInspectionProduct.brand}
-                    </div>
-                    <div>
-                      <span className="font-medium">Model:</span> {currentInspectionProduct.model}
-                    </div>
-                    <div>
-                      <span className="font-medium">Biển số:</span> {currentInspectionProduct.licensePlate || "N/A"}
-                    </div>
-                    <div>
-                      <span className="font-medium">Số km:</span> {currentInspectionProduct.mileage || "N/A"}
-                    </div>
-                  </div>
                 </div>
 
+                <div className="space-y-6">
+                {/* Editable Product Info Form */}
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold">Thông tin xe - Kiểm tra & Chỉnh sửa</h3>
+                  </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                    {/* Title */}
+                    <div className="col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Tiêu đề
+                      </label>
+                      <input
+                        type="text"
+                        value={currentInspectionProduct.title || ''}
+                        onChange={(e) => setCurrentInspectionProduct({...currentInspectionProduct, title: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+
+                    {/* Brand */}
+                      <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Thương hiệu
+                      </label>
+                      <input
+                        type="text"
+                        value={currentInspectionProduct.brand || ''}
+                        onChange={(e) => setCurrentInspectionProduct({...currentInspectionProduct, brand: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                      </div>
+
+                    {/* Model */}
+                      <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Model
+                      </label>
+                      <input
+                        type="text"
+                        value={currentInspectionProduct.model || ''}
+                        onChange={(e) => setCurrentInspectionProduct({...currentInspectionProduct, model: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                      </div>
+
+                    {/* License Plate */}
+                        <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Biển số xe
+                      </label>
+                      <input
+                        type="text"
+                        value={currentInspectionProduct.licensePlate || ''}
+                        onChange={(e) => setCurrentInspectionProduct({...currentInspectionProduct, licensePlate: e.target.value})}
+                        placeholder="VD: 30A-12345"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                        </div>
+
+                    {/* Mileage */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Số km đã đi
+                      </label>
+                      <input
+                        type="number"
+                        value={
+                          currentInspectionProduct.mileage && 
+                          currentInspectionProduct.mileage !== 'N/A' && 
+                          currentInspectionProduct.mileage !== 0
+                            ? currentInspectionProduct.mileage 
+                            : ''
+                        }
+                        onChange={(e) => setCurrentInspectionProduct({...currentInspectionProduct, mileage: e.target.value ? parseInt(e.target.value) : ''})}
+                        placeholder="VD: 50000"
+                        min="0"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+
+                    {/* Manufacture Year */}
+                              <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Năm sản xuất
+                      </label>
+                      <input
+                        type="number"
+                        value={
+                          currentInspectionProduct.manufactureYear && 
+                          currentInspectionProduct.manufactureYear !== 'N/A' && 
+                          currentInspectionProduct.manufactureYear !== 0
+                            ? currentInspectionProduct.manufactureYear 
+                            : currentInspectionProduct.year && 
+                              currentInspectionProduct.year !== 'N/A' && 
+                              currentInspectionProduct.year !== 0
+                              ? currentInspectionProduct.year 
+                              : ''
+                        }
+                        onChange={(e) => setCurrentInspectionProduct({...currentInspectionProduct, manufactureYear: e.target.value ? parseInt(e.target.value) : ''})}
+                        placeholder="VD: 2023"
+                        min="2000"
+                        max="2030"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                              </div>
+
+                    {/* Condition */}
+                              <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Tình trạng
+                      </label>
+                      <select
+                        value={currentInspectionProduct.condition || ''}
+                        onChange={(e) => setCurrentInspectionProduct({...currentInspectionProduct, condition: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      >
+                        <option value="excellent">Xuất sắc</option>
+                        <option value="good">Tốt</option>
+                        <option value="fair">Khá</option>
+                        <option value="poor">Kém</option>
+                      </select>
+                              </div>
+
+                    {/* Price */}
+                              <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Giá (VNĐ)
+                      </label>
+                      <input
+                        type="number"
+                        value={currentInspectionProduct.price || ''}
+                        onChange={(e) => setCurrentInspectionProduct({...currentInspectionProduct, price: parseFloat(e.target.value) || 0})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                              </div>
+
+                    {/* Description */}
+                    <div className="col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Mô tả
+                      </label>
+                      <textarea
+                        value={currentInspectionProduct.description || ''}
+                        onChange={(e) => setCurrentInspectionProduct({...currentInspectionProduct, description: e.target.value})}
+                        rows={3}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                              </div>
+                              </div>
+
+                  <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <p className="text-sm text-blue-800">
+                      💡 <strong>Hướng dẫn:</strong> Kiểm tra và chỉnh sửa thông tin xe nếu cần. Thông tin sẽ được cập nhật khi bạn hoàn thành kiểm định.
+                                </p>
+                              </div>
+                              </div>
+
                 {/* Image Upload Section */}
-                <div>
+                              <div>
                   <h3 className="text-lg font-semibold mb-4">Upload hình ảnh kiểm định</h3>
                   <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
                     <Camera className="h-12 w-12 text-gray-400 mx-auto mb-4" />
@@ -1946,10 +3215,29 @@ export const AdminDashboard = () => {
                       type="file"
                       multiple
                       accept="image/*"
-                      onChange={(e) => {
+                      onChange={async (e) => {
                         const files = Array.from(e.target.files);
-                        const imageUrls = files.map(file => URL.createObjectURL(file));
-                        setInspectionImages(prev => [...prev, ...imageUrls]);
+                        
+                        // ✅ Thêm watermark ngay khi upload
+                        console.log(`🎨 Adding watermarks to ${files.length} images...`);
+                        for (const file of files) {
+                          try {
+                            // Add watermark to image
+                            const watermarkedFile = await addWatermarkToImage(file);
+                            
+                            // Create preview URL from watermarked image
+                            const imageUrl = URL.createObjectURL(watermarkedFile);
+                            
+                            // Add to state
+                            setInspectionImages(prev => [...prev, imageUrl]);
+                            setInspectionFiles(prev => [...prev, watermarkedFile]);
+                            
+                            console.log(`  ✓ Watermarked and added: ${file.name}`);
+                          } catch (error) {
+                            console.error(`  ❌ Failed to watermark ${file.name}:`, error);
+                            showToast(`Không thể thêm watermark vào ${file.name}`, "error");
+                          }
+                        }
                       }}
                       className="hidden"
                       id="inspection-image-upload"
@@ -1960,7 +3248,7 @@ export const AdminDashboard = () => {
                     >
                       Chọn hình ảnh
                     </label>
-                  </div>
+                              </div>
 
                   {/* Display uploaded images */}
                   {inspectionImages.length > 0 && (
@@ -1977,16 +3265,17 @@ export const AdminDashboard = () => {
                             <button
                               onClick={() => {
                                 setInspectionImages(prev => prev.filter((_, i) => i !== index));
+                                setInspectionFiles(prev => prev.filter((_, i) => i !== index));
                               }}
                               className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600"
                             >
                               ×
                             </button>
-                          </div>
+                              </div>
                         ))}
-                      </div>
-                    </div>
-                  )}
+                            </div>
+                          </div>
+                        )}
                 </div>
 
                 {/* Action Buttons */}
@@ -1997,12 +3286,14 @@ export const AdminDashboard = () => {
                         if (window.confirm("Bạn có chắc muốn hủy kiểm định? Hình ảnh đã upload sẽ bị mất và trạng thái xe không thay đổi.")) {
                           setShowInspectionModal(false);
                           setInspectionImages([]);
+                          setInspectionFiles([]);
                           setCurrentInspectionProduct(null);
                           showToast("Đã hủy kiểm định. Trạng thái xe không thay đổi.", "info");
                         }
                       } else {
                         setShowInspectionModal(false);
                         setInspectionImages([]);
+                        setInspectionFiles([]);
                         setCurrentInspectionProduct(null);
                         showToast("Đã hủy kiểm định. Trạng thái xe không thay đổi.", "info");
                       }
@@ -2013,74 +3304,13 @@ export const AdminDashboard = () => {
                   </button>
                   <button
                     onClick={async () => {
-                      try {
-                        if (inspectionImages.length === 0) {
-                          showToast("Vui lòng upload ít nhất một hình ảnh kiểm định!", "error");
-                          return;
-                        }
-
-                        // Upload inspection images to the server
-                        console.log('Uploading inspection images:', inspectionImages);
-                        
-                        // Upload each image using the ProductImage API
-                        const uploadedImages = [];
-                        for (let i = 0; i < inspectionImages.length; i++) {
-                          const imageUrl = inspectionImages[i];
-                          try {
-                            // Convert blob URL to file if needed
-                            const response = await fetch(imageUrl);
-                            const blob = await response.blob();
-                            const file = new File([blob], `inspection_${i + 1}.jpg`, { type: 'image/jpeg' });
-                            
-                            // Create FormData for file upload
-                            const formData = new FormData();
-                            formData.append('file', file);
-                            formData.append('type', 'inspection');
-                            formData.append('description', `Hình ảnh kiểm định ${i + 1} - Admin`);
-                            
-                            // Upload to ProductImage API
-                            const uploadResponse = await apiRequest(`/api/ProductImage/${currentInspectionProduct.id}`, {
-                              method: 'PUT',
-                              body: formData
-                            });
-                            
-                            uploadedImages.push({
-                              url: imageUrl,
-                              type: 'inspection',
-                              uploadedBy: 'admin',
-                              uploadedAt: new Date().toISOString(),
-                              description: `Hình ảnh kiểm định ${i + 1} - Admin`,
-                              id: uploadResponse.id || `inspection_${i + 1}`
-                            });
-                            
-                            console.log(`✅ Uploaded inspection image ${i + 1}:`, uploadResponse);
-                          } catch (uploadError) {
-                            console.error(`❌ Failed to upload image ${i + 1}:`, uploadError);
-                            // Continue with other images even if one fails
-                          }
-                        }
-
-                        // Update product verification status
-                        await apiRequest(`/api/Product/${currentInspectionProduct.id}`, {
-                          method: 'PUT',
-                          body: JSON.stringify({
-                            verificationStatus: 'Verified',
-                            inspectionCompletedAt: new Date().toISOString(),
-                            inspectionCompletedBy: 'admin'
-                          })
-                        });
-                        
-                        // Close modal and refresh data
-                        setShowInspectionModal(false);
-                        setInspectionImages([]);
-                        setCurrentInspectionProduct(null);
-                        await loadAdminData(); // Refresh main data
-                        
-                        showToast(`Đã hoàn thành kiểm định xe thành công! Đã upload ${uploadedImages.length} hình ảnh vào tin đăng.`, "success");
-                      } catch (error) {
-                        console.error("Failed to complete inspection:", error);
-                        showToast("Không thể hoàn thành kiểm định. Vui lòng thử lại.", "error");
+                      if (inspectionImages.length === 0) {
+                        showToast("Vui lòng upload ít nhất một hình ảnh kiểm định!", "error");
+                        return;
                       }
+
+                      // Sử dụng hàm handleCompleteInspection mới
+                      await handleCompleteInspection(currentInspectionProduct.id);
                     }}
                     disabled={inspectionImages.length === 0}
                     className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -2090,8 +3320,146 @@ export const AdminDashboard = () => {
                 </div>
               </div>
             </div>
+                            </div>
+                          </div>
+                        )}
+
+      {/* Transaction Management Tab */}
+      {activeTab === "transactions" && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">
+              Quản lý giao dịch đang trong quá trình thanh toán
+            </h2>
+            <p className="text-gray-600 mb-6">
+              Quản lý các sản phẩm đã được đặt cọc thành công và đang chờ seller xác nhận.
+            </p>
+            
+            {/* Transaction Stats */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div className="flex items-center">
+                  <Clock className="h-8 w-8 text-yellow-600 mr-3" />
+                            <div>
+                    <p className="text-sm font-medium text-yellow-900">Đang trong quá trình thanh toán</p>
+                    <p className="text-2xl font-bold text-yellow-600">
+                      {allListings.filter(product => product.status === 'reserved').length}
+                              </p>
+                            </div>
+                            </div>
+              </div>
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                <div className="flex items-center">
+                  <CheckCircle className="h-8 w-8 text-orange-600 mr-3" />
+                            <div>
+                    <p className="text-sm font-medium text-orange-900">Chờ admin duyệt</p>
+                    <p className="text-2xl font-bold text-orange-600">0</p>
+                            </div>
+                          </div>
+                        </div>
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div className="flex items-center">
+                  <DollarSign className="h-8 w-8 text-green-600 mr-3" />
+                            <div>
+                    <p className="text-sm font-medium text-green-900">Đã hoàn tất</p>
+                    <p className="text-2xl font-bold text-green-600">
+                      {allListings.filter(product => product.status === 'sold').length}
+                              </p>
+                            </div>
+                            </div>
+                      </div>
+                  </div>
+
+            {/* Reserved and Sold Products List */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-gray-900">Quản lý giao dịch (Đang trong quá trình thanh toán & Đã hoàn tất)</h3>
+              {allListings.filter(product => product.status === 'reserved' || product.status === 'sold').length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {allListings.filter(product => product.status === 'reserved' || product.status === 'sold').map((product) => (
+                    <div key={product.id || product.productId} className={`border rounded-lg p-4 ${product.status === 'reserved' ? 'border-yellow-200 bg-yellow-50' : 'border-blue-200 bg-blue-50'}`}>
+                      <div className="flex items-start space-x-3">
+                        <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0">
+                          {product.images && product.images.length > 0 ? (
+                            <img
+                              className="w-full h-full object-cover"
+                              src={product.images[0]}
+                              alt={product.title || product.name}
+                              onError={(e) => {
+                                console.log("Image failed to load:", product.images[0]);
+                                e.target.style.display = 'none';
+                                e.target.nextSibling.style.display = 'flex';
+                              }}
+                            />
+                          ) : null}
+                          <div 
+                            className={`w-full h-full rounded-lg flex items-center justify-center ${product.status === 'reserved' ? 'bg-yellow-200' : 'bg-blue-200'} ${product.images && product.images.length > 0 ? 'hidden' : ''}`}
+                            style={{ display: product.images && product.images.length > 0 ? 'none' : 'flex' }}
+                          >
+                            {product.status === 'reserved' ? <Clock className="h-6 w-6 text-yellow-600" /> : <DollarSign className="h-6 w-6 text-blue-600" />}
+                          </div>
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="font-medium text-gray-900 line-clamp-2">
+                            {product.title || product.name}
+                          </h4>
+                          <p className="text-lg font-bold text-blue-600 mt-1">
+                            {formatPrice(product.price)}
+                          </p>
+                          <div className="flex items-center mt-2">
+                            {product.status === 'reserved' ? <Clock className="h-4 w-4 text-yellow-600 mr-1" /> : <DollarSign className="h-4 w-4 text-blue-600 mr-1" />}
+                            <span className={`text-sm ${product.status === 'reserved' ? 'text-yellow-600' : 'text-blue-600'}`}>
+                              {product.status === 'reserved' ? 'Đang trong quá trình thanh toán' : 'Đã hoàn tất'}
+                            </span>
+                          </div>
+                          <div className="mt-2 text-sm text-gray-600">
+                            <p>Seller ID: {product.sellerId}</p>
+                            <p>Ngày tạo: {formatDate(product.createdAt || product.createdDate)}</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-4 flex space-x-2">
+                        {product.status === 'reserved' && (
+                          <button
+                            onClick={() => handleAdminConfirm(product.id || product.productId)}
+                            className="flex-1 bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                          >
+                            Xác nhận giao dịch thành công
+                          </button>
+                        )}
+                        {product.status === 'reserved' && (
+                          <button
+                            onClick={() => handleMarkTransactionFailed(product.id || product.productId)}
+                            className="flex-1 bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
+                          >
+                            Giao dịch không thành công
+                          </button>
+                        )}
+                        {product.status === 'sold' && (
+                          <button
+                            onClick={() => handleViewDetails(product)}
+                            className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                          >
+                            Xem chi tiết
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <Clock className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-600">Chưa có sản phẩm nào đang trong quá trình thanh toán hoặc đã hoàn tất</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
+      )}
+
+      {/* Reports Management Tab */}
+      {activeTab === "reports" && (
+        <AdminReports />
       )}
 
       </div>

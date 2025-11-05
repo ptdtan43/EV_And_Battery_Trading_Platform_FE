@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { CheckCircle, Clock, CreditCard, Calendar, User, Package } from "lucide-react";
+import { CheckCircle, Clock, CreditCard, Calendar, User, Package, Shield } from "lucide-react";
 import { useToast } from "../contexts/ToastContext";
+import { apiRequest } from "../lib/api";
 
 const PaymentSuccess = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { showToast } = useToast();
-  const [countdown, setCountdown] = useState(5);
+  const [countdown, setCountdown] = useState(3); // ✅ Giảm từ 5s xuống 3s
   const [paymentData, setPaymentData] = useState(null);
+  const [paymentType, setPaymentType] = useState(null); // ✅ Track payment type
 
   // Parse URL parameters
   const urlParams = new URLSearchParams(location.search);
@@ -21,45 +23,110 @@ const PaymentSuccess = () => {
   const isSuccess = vnpResponseCode === '00';
 
   useEffect(() => {
-    // Set payment data from URL params
-    if (vnpTxnRef) {
-      setPaymentData({
-        paymentId: vnpTxnRef,
-        amount: vnpAmount ? parseInt(vnpAmount) / 100 : null, // VNPay amount is in cents
-        transactionNo: vnpTransactionNo,
-        responseCode: vnpResponseCode,
-        responseMessage: vnpResponseMessage,
-        timestamp: new Date().toISOString(),
-        success: isSuccess
-      });
-    }
+    const loadPaymentDetails = async () => {
+      // Set payment data from URL params
+      if (vnpTxnRef) {
+        const basicData = {
+          paymentId: vnpTxnRef,
+          amount: vnpAmount ? parseInt(vnpAmount) / 100 : null, // VNPay amount is in cents
+          transactionNo: vnpTransactionNo,
+          responseCode: vnpResponseCode,
+          responseMessage: vnpResponseMessage,
+          timestamp: new Date().toISOString(),
+          success: isSuccess
+        };
+        
+        setPaymentData(basicData);
 
-    // Show toast notification for success
-    if (isSuccess && vnpTxnRef) {
-      showToast({
-        type: 'success',
-        title: 'Thanh toán thành công!',
-        message: `Giao dịch ${vnpTxnRef} đã được xử lý thành công.`,
-        duration: 5000
-      });
-    }
-
-    // Start countdown for redirect
-    if (isSuccess) {
-      const timer = setInterval(() => {
-        setCountdown((prev) => {
-          if (prev <= 1) {
-            clearInterval(timer);
-            navigate('/');
-            return 0;
+        // ✅ Fetch payment details from API to get payment type
+        try {
+          const payment = await apiRequest(`/api/Payment/${vnpTxnRef}`);
+          if (payment) {
+            const type = payment.PaymentType || payment.paymentType || 'Deposit';
+            setPaymentType(type);
+            
+            // Update payment data with full details
+            setPaymentData({
+              ...basicData,
+              paymentType: type,
+              productId: payment.ProductId || payment.productId
+            });
           }
-          return prev - 1;
-        });
-      }, 1000);
+        } catch (error) {
+          console.warn('Could not fetch payment details:', error);
+          // Default to Deposit if can't fetch
+          setPaymentType('Deposit');
+        }
+      }
 
-      return () => clearInterval(timer);
-    }
-  }, [isSuccess, navigate, vnpTxnRef, vnpAmount, vnpTransactionNo, vnpResponseCode, vnpResponseMessage, showToast]);
+      // Show toast notification for success with specific message
+      if (isSuccess && vnpTxnRef) {
+        // Wait a bit for payment type to be loaded
+        setTimeout(() => {
+          const type = paymentType || 'Deposit';
+          const title = type === 'Verification' 
+            ? '✅ Thanh toán kiểm định thành công!' 
+            : '🎉 Thanh toán đặt cọc thành công!';
+          const message = type === 'Verification'
+            ? `Yêu cầu kiểm định của bạn đã được thanh toán. Admin sẽ xác nhận trong thời gian sớm nhất.`
+            : `Bạn đã đặt cọc thành công. Vui lòng liên hệ người bán để hoàn tất giao dịch.`;
+            
+          showToast({
+            type: 'success',
+            title: title,
+            message: message,
+            duration: 6000
+          });
+
+          // Notify opener (homepage) if opened in a new tab/window
+          try {
+            if (window.opener && typeof window.opener.postMessage === 'function') {
+              window.opener.postMessage({
+                type: 'EVTB_PAYMENT_SUCCESS',
+                payload: {
+                  paymentId: vnpTxnRef,
+                  amount: vnpAmount,
+                  transactionNo: vnpTransactionNo,
+                  paymentType: type
+                }
+              }, '*');
+            }
+          } catch (_) {}
+        }, 500);
+      }
+
+      // Start countdown for redirect
+      if (isSuccess) {
+        const timer = setInterval(() => {
+          setCountdown((prev) => {
+            if (prev <= 1) {
+              clearInterval(timer);
+              // ✅ Redirect to homepage with payment success params
+              const redirectParams = new URLSearchParams({
+                payment_success: 'true',
+                payment_id: vnpTxnRef || '',
+                payment_type: paymentType || 'Deposit',
+                amount: vnpAmount || '0',
+                transaction_no: vnpTransactionNo || ''
+              });
+              navigate(`/?${redirectParams.toString()}`);
+
+              // Attempt to close the tab after redirecting opener
+              setTimeout(() => {
+                try { window.close(); } catch (_) {}
+              }, 100);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+
+        return () => clearInterval(timer);
+      }
+    };
+
+    loadPaymentDetails();
+  }, [isSuccess, navigate, vnpTxnRef, vnpAmount, vnpTransactionNo, vnpResponseCode, vnpResponseMessage, showToast, paymentType]);
 
   const formatAmount = (amount) => {
     if (!amount) return 'N/A';
@@ -158,23 +225,41 @@ const PaymentSuccess = () => {
           {/* Success Header */}
           <div className="bg-gradient-to-r from-green-500 to-emerald-600 px-6 py-8 text-center">
             <div className="mx-auto flex items-center justify-center h-20 w-20 rounded-full bg-white/20 backdrop-blur-sm mb-4">
-              <CheckCircle className="h-10 w-10 text-white" />
+              {paymentType === 'Verification' ? (
+                <Shield className="h-10 w-10 text-white" />
+              ) : (
+                <CheckCircle className="h-10 w-10 text-white" />
+              )}
             </div>
-            <h1 className="text-3xl font-bold text-white mb-2">Thanh toán thành công!</h1>
-            <p className="text-green-100">Giao dịch của bạn đã được xử lý thành công</p>
+            <h1 className="text-3xl font-bold text-white mb-2">
+              {paymentType === 'Verification' ? 'Thanh toán kiểm định thành công!' : 'Thanh toán đặt cọc thành công!'}
+            </h1>
+            <p className="text-green-100">
+              {paymentType === 'Verification' 
+                ? 'Yêu cầu kiểm định đã được gửi đến admin' 
+                : 'Giao dịch đặt cọc đã được xử lý thành công'}
+            </p>
           </div>
 
           {/* Success Animation */}
           <div className="px-6 py-6">
             <div className="text-center mb-6">
               <div className="inline-flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mb-4 animate-pulse">
-                <CheckCircle className="h-8 w-8 text-green-600" />
+                {paymentType === 'Verification' ? (
+                  <Shield className="h-8 w-8 text-green-600" />
+                ) : (
+                  <CheckCircle className="h-8 w-8 text-green-600" />
+                )}
               </div>
               <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                Cảm ơn bạn đã mua hàng!
+                {paymentType === 'Verification' 
+                  ? 'Yêu cầu kiểm định đã được gửi!' 
+                  : 'Cảm ơn bạn đã đặt cọc!'}
               </h2>
               <p className="text-gray-600">
-                Chúng tôi sẽ gửi email xác nhận đến địa chỉ email của bạn.
+                {paymentType === 'Verification'
+                  ? 'Admin sẽ kiểm tra và xác nhận yêu cầu kiểm định của bạn trong thời gian sớm nhất.'
+                  : 'Vui lòng liên hệ người bán để hoàn tất giao dịch và nhận xe.'}
               </p>
             </div>
 

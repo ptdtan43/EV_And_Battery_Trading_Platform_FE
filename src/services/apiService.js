@@ -7,7 +7,7 @@ class ApiService {
   }
 
   // ==================== AUTHENTICATION APIs ====================
-  
+
   async login(credentials) {
     return apiRequest('/api/Auth/login', {
       method: 'POST',
@@ -43,7 +43,7 @@ class ApiService {
   }
 
   // ==================== USER APIs ====================
-  
+
   async getUserById(userId) {
     return apiRequest(`/api/User/${userId}`);
   }
@@ -66,7 +66,7 @@ class ApiService {
   }
 
   // ==================== PRODUCT APIs ====================
-  
+
   async getAllProducts() {
     return apiRequest('/api/Product');
   }
@@ -113,7 +113,7 @@ class ApiService {
   }
 
   // ==================== PRODUCT IMAGE APIs ====================
-  
+
   async getProductImages(productId) {
     return apiRequest(`/api/ProductImage/product/${productId}`);
   }
@@ -139,7 +139,7 @@ class ApiService {
   }
 
   // ==================== CATEGORY APIs ====================
-  
+
   async getAllCategories() {
     return apiRequest('/api/Category');
   }
@@ -169,7 +169,7 @@ class ApiService {
   }
 
   // ==================== ORDER APIs ====================
-  
+
   async getAllOrders() {
     return apiRequest('/api/Order');
   }
@@ -203,7 +203,7 @@ class ApiService {
   }
 
   // ==================== PAYMENT APIs ====================
-  
+
   async createPayment(paymentData) {
     return apiRequest('/api/payment', {
       method: 'POST',
@@ -227,7 +227,7 @@ class ApiService {
   }
 
   // ==================== FAVORITE APIs ====================
-  
+
   async getFavoritesByUser(userId) {
     return apiRequest(`/api/Favorite/user/${userId}`);
   }
@@ -254,7 +254,7 @@ class ApiService {
   }
 
   // ==================== NOTIFICATION APIs ====================
-  
+
   async getNotificationsByUser(userId) {
     return apiRequest(`/api/Notification/user/${userId}`);
   }
@@ -279,7 +279,7 @@ class ApiService {
   }
 
   // ==================== VERIFICATION APIs ====================
-  
+
   async getVerificationRequests() {
     return apiRequest('/api/Verification');
   }
@@ -299,31 +299,97 @@ class ApiService {
   }
 
   // ==================== CHAT APIs ====================
-  
-  async getChatHistory(userId) {
-    return apiRequest(`/api/Chat/history/${userId}`);
+
+  // Get all chats for current user
+  async getChatHistory() {
+    return apiRequest('/api/Chat');
   }
 
-  async getChatMessages(conversationId) {
-    return apiRequest(`/api/Chat/messages/${conversationId}`);
+  // Get specific chat by ID
+  async getChatById(chatId) {
+    return apiRequest(`/api/Chat/${chatId}`);
   }
 
-  async sendMessage(messageData) {
-    return apiRequest('/api/Chat/send', {
+  // Create new chat
+  async createChat(user1Id, user2Id) {
+    return apiRequest('/api/Chat', {
       method: 'POST',
-      body: JSON.stringify(messageData)
+      body: JSON.stringify({ user1Id, user2Id })
     });
   }
 
-  async createConversation(participants) {
-    return apiRequest('/api/Chat/conversation', {
+  // Start chat with another user (simpler method)
+  async startChatWith(otherUserId) {
+    return apiRequest(`/api/Chat/start-chat/${otherUserId}`, {
+      method: 'POST'
+    });
+  }
+
+  // Delete chat
+  async deleteChat(chatId) {
+    return apiRequest(`/api/Chat/${chatId}`, {
+      method: 'DELETE'
+    });
+  }
+
+  // ==================== MESSAGE APIs ====================
+
+  // Get all messages sent by current user
+  async getMyMessages() {
+    return apiRequest('/api/Message');
+  }
+
+  // Get messages for a specific chat
+  async getChatMessages(chatId) {
+    return apiRequest(`/api/Message/chat/${chatId}`);
+  }
+
+  // Get message by ID
+  async getMessageById(messageId) {
+    return apiRequest(`/api/Message/${messageId}`);
+  }
+
+  // Get unread messages
+  async getUnreadMessages() {
+    return apiRequest('/api/Message/unread');
+  }
+
+  // Get unread message count
+  async getUnreadMessageCount() {
+    return apiRequest('/api/Message/unread-count');
+  }
+
+  // Send message
+  async sendMessage(chatId, senderId, content) {
+    return apiRequest('/api/Message', {
       method: 'POST',
-      body: JSON.stringify({ participants })
+      body: JSON.stringify({ chatId, senderId, content })
+    });
+  }
+
+  // Mark message as read
+  async markMessageAsRead(messageId) {
+    return apiRequest(`/api/Message/${messageId}/read`, {
+      method: 'PUT'
+    });
+  }
+
+  // Mark all messages in chat as read
+  async markChatMessagesAsRead(chatId) {
+    return apiRequest(`/api/Message/chat/${chatId}/read-all`, {
+      method: 'PUT'
+    });
+  }
+
+  // Delete message
+  async deleteMessage(messageId) {
+    return apiRequest(`/api/Message/${messageId}`, {
+      method: 'DELETE'
     });
   }
 
   // ==================== REVIEW APIs ====================
-  
+
   async getReviewsByProduct(productId) {
     return apiRequest(`/api/Review/product/${productId}`);
   }
@@ -353,7 +419,7 @@ class ApiService {
   }
 
   // ==================== STATISTICS APIs ====================
-  
+
   async getDashboardStats(userId) {
     return apiRequest(`/api/Statistics/dashboard/${userId}`);
   }
@@ -371,7 +437,7 @@ class ApiService {
   }
 
   // ==================== SEARCH APIs ====================
-  
+
   async searchProducts(searchParams) {
     return apiRequest('/api/Search/products', {
       method: 'POST',
@@ -387,7 +453,7 @@ class ApiService {
   }
 
   // ==================== UTILITY METHODS ====================
-  
+
   async healthCheck() {
     return apiRequest('/api/Health');
   }
@@ -398,7 +464,7 @@ class ApiService {
 
   // Batch operations
   async batchRequest(requests) {
-    const promises = requests.map(request => 
+    const promises = requests.map(request =>
       apiRequest(request.path, request.options)
     );
     return Promise.allSettled(promises);

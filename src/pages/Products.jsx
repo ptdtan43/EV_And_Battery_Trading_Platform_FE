@@ -48,7 +48,12 @@ export const Products = () => {
       setLoading(true);
       const response = await apiRequest('/api/Product');
       if (Array.isArray(response)) {
-        setProducts(response);
+        // Filter out sold products
+        const availableProducts = response.filter(product => {
+          const status = String(product.status || "").toLowerCase();
+          return status !== "sold";
+        });
+        setProducts(availableProducts);
       }
     } catch (error) {
       console.error('Error loading products:', error);

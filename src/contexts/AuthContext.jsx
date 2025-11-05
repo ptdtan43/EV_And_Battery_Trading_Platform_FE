@@ -59,18 +59,35 @@ export const AuthProvider = ({ children }) => {
           try {
             const parsed = JSON.parse(raw);
             console.log("🔄 Loading user from localStorage:", parsed?.user);
-            setUser(parsed?.user || null);
-            setProfile(parsed?.profile || null);
-            console.log("✅ User loaded successfully from localStorage");
+            console.log("🔍 Token present:", !!parsed?.token);
+            console.log("🔍 Token length:", parsed?.token?.length || 0);
+            
+            // Check if token is valid before setting user
+            if (parsed?.token && parsed?.user) {
+              setUser(parsed.user);
+              setProfile(parsed?.profile || null);
+              console.log("✅ User loaded successfully from localStorage");
+            } else {
+              console.warn("⚠️ Invalid auth data - missing token or user");
+              localStorage.removeItem("evtb_auth");
+              setUser(null);
+              setProfile(null);
+            }
           } catch (parseError) {
             console.warn("Corrupted auth data, clearing localStorage");
             localStorage.removeItem("evtb_auth");
+            setUser(null);
+            setProfile(null);
           }
         } else {
           console.log("📭 No auth data found in localStorage");
+          setUser(null);
+          setProfile(null);
         }
       } catch (error) {
         console.error("Error loading auth data:", error);
+        setUser(null);
+        setProfile(null);
       } finally {
         setLoading(false);
       }
@@ -413,14 +430,20 @@ export const AuthProvider = ({ children }) => {
 
         console.log("Register response:", data);
 
-        localStorage.setItem("evtb_auth", JSON.stringify(session));
-        setUser(session.user);
-        setProfile(session.profile || null);
-        console.log(
-          "✅ User registered and logged in successfully:",
-          session.user
-        );
-        return session;
+        // Ensure we have both token and user before saving
+        if (session?.token && session?.user) {
+          localStorage.setItem("evtb_auth", JSON.stringify(session));
+          setUser(session.user);
+          setProfile(session.profile || null);
+          console.log(
+            "✅ User registered and logged in successfully:",
+            session.user
+          );
+          return session;
+        } else {
+          console.error("❌ Cannot save registration session - missing token or user");
+          throw new Error("Registration failed - missing authentication data");
+        }
       }
     }
 
@@ -444,14 +467,20 @@ export const AuthProvider = ({ children }) => {
           .substr(2, 9)}`;
       }
 
-      localStorage.setItem("evtb_auth", JSON.stringify(session));
-      setUser(session.user);
-      setProfile(session.profile || null);
-      console.log(
-        "✅ User registered and auto-logged in successfully:",
-        session.user
-      );
-      return session;
+      // Ensure we have both token and user before saving
+      if (session?.token && session?.user) {
+        localStorage.setItem("evtb_auth", JSON.stringify(session));
+        setUser(session.user);
+        setProfile(session.profile || null);
+        console.log(
+          "✅ User registered and auto-logged in successfully:",
+          session.user
+        );
+        return session;
+      } else {
+        console.error("❌ Cannot save auto-login session - missing token or user");
+        throw new Error("Auto-login failed - missing authentication data");
+      }
     } catch (loginError) {
       console.error("Auto-login after register failed:", loginError);
       throw new Error(
@@ -645,9 +674,18 @@ export const AuthProvider = ({ children }) => {
     );
     console.log("🔍 Final session token length:", session?.token?.length || 0);
 
-    localStorage.setItem("evtb_auth", JSON.stringify(session));
-    setUser(session.user);
-    setProfile(session.profile || null);
+    // Ensure we have both token and user before saving
+    if (session?.token && session?.user) {
+      localStorage.setItem("evtb_auth", JSON.stringify(session));
+      setUser(session.user);
+      setProfile(session.profile || null);
+      console.log("✅ Session saved to localStorage and state");
+    } else {
+      console.error("❌ Cannot save session - missing token or user");
+      console.error("Token present:", !!session?.token);
+      console.error("User present:", !!session?.user);
+      throw new Error("Login failed - missing authentication data");
+    }
 
     console.log("Final session to return:", session);
     console.log("==================");
@@ -655,10 +693,19 @@ export const AuthProvider = ({ children }) => {
     return session;
   };
 
+  // Check if user is admin based on role
+  const isAdmin = user?.role === 'admin' || 
+                  user?.role === 'Admin' || 
+                  user?.role === 1 || 
+                  user?.roleId === 1 ||
+                  user?.email === 'admin@evtrading.com' ||
+                  user?.email === 'admin@gmail.com';
+
   const value = {
     user,
     profile,
     loading,
+    isAdmin,
     signIn,
     signUp,
     signOut,
