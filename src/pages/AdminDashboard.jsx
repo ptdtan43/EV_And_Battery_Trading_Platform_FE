@@ -22,10 +22,12 @@ import {
   Camera,
   Bell,
   Flag,
+  LogOut,
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
 import { formatPrice, formatDate } from "../utils/formatters";
 import { useToast } from "../contexts/ToastContext";
+import { useAuth } from "../contexts/AuthContext";
 import { notifyPostApproved, notifyPostRejected } from "../lib/notificationApi";
 import { rejectProduct, approveProduct } from "../lib/productApi";
 import { RejectProductModal } from "../components/admin/RejectProductModal";
@@ -38,6 +40,7 @@ export const AdminDashboard = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { show: showToast } = useToast();
+  const { signOut } = useAuth();
   const [activeTab, setActiveTab] = useState(() => {
     try {
       return sessionStorage.getItem('admin_active_tab') || "dashboard";
@@ -1913,6 +1916,16 @@ export const AdminDashboard = () => {
                 {activeTab === "reports" && "Xem xét và xử lý các báo cáo vi phạm từ người dùng"}
               </p>
             </div>
+            <button
+              onClick={() => {
+                signOut();
+                navigate("/");
+              }}
+              className="flex items-center space-x-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors duration-200 shadow-md hover:shadow-lg"
+            >
+              <LogOut className="h-5 w-5" />
+              <span>Đăng xuất</span>
+            </button>
           </div>
         </div>
 

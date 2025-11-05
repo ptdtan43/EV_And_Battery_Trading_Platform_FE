@@ -24,6 +24,7 @@ import {
   XCircle,
   Clock,
   Flag,
+  AlertCircle,
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
 import { createOrder } from "../lib/orderApi";
@@ -1405,6 +1406,21 @@ export const ProductDetail = () => {
                       ? "Sản phẩm trên 300 triệu - cọc 10 triệu để gặp mặt trực tiếp"
                       : "Sản phẩm dưới 300 triệu - cọc 5 triệu để gặp mặt trực tiếp"}
                   </p>
+                </div>
+              </div>
+
+              {/* Important Notice */}
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <div className="flex items-start">
+                  <AlertCircle className="h-5 w-5 text-amber-600 mr-2 mt-0.5 flex-shrink-0" />
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-amber-900 mb-1">
+                      Lưu ý quan trọng:
+                    </p>
+                    <p className="text-xs text-amber-800 leading-relaxed">
+                      Sau khi thanh toán cọc thành công, vui lòng liên hệ với người bán qua tính năng chat để thỏa thuận ngày giờ gặp mặt. Sau đó, xin hãy liên hệ với Admin qua số điện thoại <span className="font-semibold">0373111370</span> để Admin chốt lịch hẹn cho cả hai bên gặp mặt tại kho và tiến hành giao dịch trực tiếp.
+                    </p>
+                  </div>
                 </div>
               </div>
 
