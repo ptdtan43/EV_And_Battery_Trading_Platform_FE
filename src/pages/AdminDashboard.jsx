@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Users,
   Package,
@@ -34,8 +35,16 @@ import { getUserNotifications, getUnreadCount, notifyUserVerificationCompleted }
 import { forceSendNotificationsForAllSuccessfulPayments, sendNotificationsForKnownPayments, sendNotificationsForVerifiedProducts } from "../lib/verificationNotificationService";
 
 export const AdminDashboard = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
   const { show: showToast } = useToast();
-  const [activeTab, setActiveTab] = useState("dashboard"); // dashboard, vehicles, batteries, inspections, transactions, reports
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      return sessionStorage.getItem('admin_active_tab') || "dashboard";
+    } catch (_) {
+      return "dashboard";
+    }
+  }); // dashboard, vehicles, batteries, inspections, transactions, reports, users
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalListings: 0,
@@ -72,6 +81,54 @@ export const AdminDashboard = () => {
   const [expandedDetails, setExpandedDetails] = useState(false);
   const [processingIds, setProcessingIds] = useState(new Set());
   const [skipImageLoading, setSkipImageLoading] = useState(false); // Add flag to skip image loading if causing issues
+  // Users management state
+  const [users, setUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersPage, setUsersPage] = useState(1);
+  const [usersPageSize, setUsersPageSize] = useState(10);
+  const [usersTotalPages, setUsersTotalPages] = useState(1);
+  const [usersSearch, setUsersSearch] = useState("");
+  const [usersRole, setUsersRole] = useState(""); // '', 'admin', 'user'
+  const [usersStatus, setUsersStatus] = useState(""); // '', 'active', 'suspended', 'deleted'
+  const [showStatusModal, setShowStatusModal] = useState(false);
+  const [pendingStatusUserId, setPendingStatusUserId] = useState(null);
+  const [pendingStatus, setPendingStatus] = useState('active');
+  const [pendingStatusReason, setPendingStatusReason] = useState(''); // legacy free-text
+  const [pendingStatusReasonCode, setPendingStatusReasonCode] = useState('');
+  const [pendingStatusReasonNote, setPendingStatusReasonNote] = useState('');
+
+  const suspendedReasonOptions = [
+    { code: 'SPAM_CONTENT', label: 'Đăng nội dung spam/quảng cáo' },
+    { code: 'FRAUD_SUSPECT', label: 'Nghi ngờ gian lận/giả mạo' },
+    { code: 'VIOLATE_POLICY', label: 'Vi phạm điều khoản sử dụng' },
+    { code: 'ABUSE_HARASS', label: 'Quấy rối/Ngôn ngữ thù hằn' },
+    { code: 'FAKE_INFO', label: 'Cung cấp thông tin sai lệch' },
+    { code: 'MULTI_ACCOUNT', label: 'Nhiều tài khoản trái quy định' },
+    { code: 'CHARGEBACK_RISK', label: 'Rủi ro thanh toán/chargeback' },
+    { code: 'PENDING_VERIFICATION', label: 'Chờ xác minh danh tính' },
+    { code: 'SECURITY_RISK', label: 'Rủi ro bảo mật' },
+    { code: 'OTHER', label: 'Lý do khác' },
+  ];
+
+  const deletedReasonOptions = [
+    { code: 'USER_REQUEST', label: 'Người dùng yêu cầu xóa' },
+    { code: 'PERMANENT_VIOLATION', label: 'Vi phạm nghiêm trọng/đã tái phạm' },
+    { code: 'LEGAL_COMPLIANCE', label: 'Theo yêu cầu pháp lý' },
+    { code: 'INACTIVE_LONG', label: 'Không hoạt động quá lâu' },
+    { code: 'FRAUD_CONFIRMED', label: 'Xác nhận gian lận' },
+    { code: 'DATA_PURGE', label: 'Dọn dẹp dữ liệu' },
+    { code: 'OTHER', label: 'Lý do khác' },
+  ];
+
+  const getReasonTextForUser = (user) => {
+    const status = (user.status || user.Status || '').toString().toLowerCase();
+    const code = user.reasonCode || user.ReasonCode;
+    const note = user.reasonNote || user.ReasonNote || user.reason || user.Reason || user.accountStatusReason || user.AccountStatusReason;
+    if (!status) return note || '';
+    const list = status === 'deleted' ? deletedReasonOptions : suspendedReasonOptions;
+    const found = list.find(x => x.code === code);
+    return note || (found ? found.label : '');
+  };
 
   // Reject modal state
   const [rejectModal, setRejectModal] = useState({
@@ -89,6 +146,128 @@ export const AdminDashboard = () => {
   const [inspectionImages, setInspectionImages] = useState([]);
   const [inspectionFiles, setInspectionFiles] = useState([]);
   const [currentInspectionProduct, setCurrentInspectionProduct] = useState(null);
+
+  // Reset to dashboard when arriving from admin logo click
+  useEffect(() => {
+    if (location?.state?.resetDashboard) {
+      setActiveTab("dashboard");
+      // Clear state to avoid repeated resets on future renders
+      navigate('/admin', { replace: true, state: {} });
+    }
+  }, [location?.state, navigate]);
+
+  // Persist selected tab so back navigation returns to the same tab
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('admin_active_tab', activeTab);
+    } catch (_) {}
+  }, [activeTab]);
+
+  // Users API helpers
+  const loadUsers = async (opts = {}) => {
+    const { page = usersPage, pageSize = usersPageSize, search = usersSearch, role = usersRole, status = usersStatus } = opts;
+    try {
+      setUsersLoading(true);
+      const params = new URLSearchParams();
+      if (search) params.set('search', search);
+      if (role) params.set('role', role);
+      if (status) params.set('status', status);
+      params.set('page', String(page));
+      params.set('pageSize', String(pageSize));
+      params.set('sort', 'createdAt:desc');
+      const res = await apiRequest(`/api/admin/users?${params.toString()}`);
+      setUsers(res.Items || res.items || []);
+      const meta = res.Meta || res.meta || {};
+      setUsersPage(meta.Page || meta.page || page);
+      setUsersPageSize(meta.PageSize || meta.pageSize || pageSize);
+      setUsersTotalPages(meta.TotalPages || meta.totalPages || 1);
+    } catch (e) {
+      console.error('Load users failed', e);
+      showToast({ title: 'Lỗi', description: 'Không tải được danh sách người dùng', type: 'error' });
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
+  const updateUserRole = async (userId, role) => {
+    // Optimistic update: update UI immediately
+    const oldUsers = [...users];
+    setUsers(prev => prev.map(u => {
+      const id = u.id || u.Id;
+      if (id === userId) {
+        return { ...u, role: role, Role: role };
+      }
+      return u;
+    }));
+    
+    try {
+      await apiRequest(`/api/admin/users/${userId}/role`, { method: 'PUT', body: { role } });
+      showToast({ title: 'Thành công', description: 'Đã cập nhật vai trò', type: 'success' });
+      // No need to reload - optimistic update already done
+    } catch (e) {
+      console.error('Update role failed', e);
+      // Rollback on error
+      setUsers(oldUsers);
+      showToast({ title: 'Lỗi', description: 'Không cập nhật được vai trò', type: 'error' });
+    }
+  };
+
+  const updateUserStatus = async (userId, status) => {
+    // Optimistic update: update UI immediately
+    const reasonLabel = (() => {
+      const list = status === 'deleted' ? deletedReasonOptions : suspendedReasonOptions;
+      const found = list.find(x => x.code === pendingStatusReasonCode);
+      return found ? found.label : '';
+    })();
+    
+    const oldUsers = [...users];
+    setUsers(prev => prev.map(u => {
+      const id = u.id || u.Id;
+      if (id === userId) {
+        return {
+          ...u,
+          status: status,
+          Status: status,
+          reasonCode: pendingStatusReasonCode,
+          reasonNote: pendingStatusReasonNote,
+          reason: pendingStatusReasonNote || reasonLabel || pendingStatusReason,
+          ReasonCode: pendingStatusReasonCode,
+          ReasonNote: pendingStatusReasonNote,
+          Reason: pendingStatusReasonNote || reasonLabel || pendingStatusReason,
+        };
+      }
+      return u;
+    }));
+    
+    try {
+      await apiRequest(`/api/admin/users/${userId}/status`, { 
+        method: 'PUT', 
+        body: { 
+          status, 
+          reasonCode: pendingStatusReasonCode || undefined, 
+          reasonNote: pendingStatusReasonNote || undefined,
+          // legacy compatibility
+          reason: pendingStatusReasonNote || reasonLabel || pendingStatusReason || undefined,
+        } 
+      });
+      showToast({ title: 'Thành công', description: 'Đã cập nhật trạng thái', type: 'success' });
+      // Only reload if needed for server-synced data
+      // await loadUsers();
+    } catch (e) {
+      console.error('Update status failed', e);
+      // Rollback on error
+      setUsers(oldUsers);
+      showToast({ title: 'Lỗi', description: 'Không cập nhật được trạng thái', type: 'error' });
+    }
+  };
+
+  // No inline modal for user detail; we open seller profile in a new tab instead
+
+  useEffect(() => {
+    if (activeTab === 'users') {
+      loadUsers({ page: 1 });
+    }
+  }, [activeTab]);
 
   // Notification state
   const [notifications, setNotifications] = useState([]);
@@ -486,20 +665,7 @@ export const AdminDashboard = () => {
               // Reload notifications to show the new ones
               await loadAdminNotifications();
               
-              // Auto-show notification dropdown
-              setShowNotifications(true);
-              
-              // Show success toast
-              showToast({
-                title: '🔔 Thông báo tự động',
-                description: `Đã tự động gửi ${notificationsSent} thông báo kiểm định cho admin`,
-                type: 'success',
-              });
-              
-              // Auto-hide notification dropdown after 10 seconds
-              setTimeout(() => {
-                setShowNotifications(false);
-              }, 10000);
+              // Do not auto-open dropdown or show toast; icon bell already indicates updates
             }
           } catch (error) {
             console.error('❌ Error auto-sending notifications:', error);
@@ -1624,18 +1790,18 @@ export const AdminDashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 overflow-x-hidden">
       {/* Sidebar */}
       <div className="fixed left-0 top-0 h-full w-64 bg-white shadow-lg z-10">
         {/* Logo Section */}
-        <div className="p-6 border-b border-gray-200">
+        <div className="px-6 py-4">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
               <Car className="h-6 w-6 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-gray-900">EV Market</h1>
-              <p className="text-sm text-gray-500">Cổng quản trị</p>
+              <h1 className="text-xl font-bold text-gray-900 leading-tight">EV Market</h1>
+              <p className="text-sm text-gray-500 leading-tight">Cổng quản trị</p>
             </div>
           </div>
         </div>
@@ -1650,12 +1816,6 @@ export const AdminDashboard = () => {
               <h3 className="font-semibold text-gray-900">Quản trị viên</h3>
               <p className="text-sm text-gray-500">Quản trị cấp cao</p>
             </div>
-          </div>
-          <div className="mt-3 flex items-center justify-between">
-            <div className="flex-1 bg-gray-200 rounded-full h-2">
-              <div className="bg-green-500 h-2 rounded-full" style={{ width: '95%' }}></div>
-            </div>
-            <span className="text-xs text-gray-500 ml-2">95% thời gian hoạt động</span>
           </div>
         </div>
 
@@ -1697,6 +1857,17 @@ export const AdminDashboard = () => {
             </div>
             <div 
               className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
+                activeTab === "users" 
+                  ? "bg-blue-50 text-blue-600" 
+                  : "text-gray-600 hover:bg-gray-50"
+              }`}
+              onClick={() => setActiveTab("users")}
+            >
+              <Users className="h-5 w-5" />
+              <span>Quản lý người dùng</span>
+            </div>
+            <div 
+              className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
                 activeTab === "transactions" 
                   ? "bg-blue-50 text-blue-600" 
                   : "text-gray-600 hover:bg-gray-50"
@@ -1717,31 +1888,12 @@ export const AdminDashboard = () => {
               <Flag className="h-5 w-5" />
               <span>Báo cáo vi phạm</span>
             </div>
-            <div className="flex items-center space-x-3 p-3 text-gray-600 hover:bg-gray-50 rounded-lg cursor-pointer">
-              <Users className="h-5 w-5" />
-              <span>Quản lý người dùng</span>
-            </div>
           </div>
         </nav>
-
-        {/* Tips Section */}
-        <div className="absolute bottom-20 left-4 right-4">
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-            <div className="flex items-start space-x-3">
-              <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
-                <span className="text-yellow-600 text-sm">💡</span>
-              </div>
-              <div>
-                <p className="text-sm text-yellow-800 font-medium">Mẹo</p>
-                <p className="text-xs text-yellow-700">Phản hồi nhanh giúp tăng mức độ hài lòng của khách hàng.</p>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Main Content */}
-      <div className="ml-64 p-8">
+      <div className="ml-64 p-8 overflow-x-hidden">
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center justify-between">
@@ -1760,128 +1912,6 @@ export const AdminDashboard = () => {
                 {activeTab === "transactions" && "Quản lý giao dịch hoàn tất và xác nhận từ người bán"}
                 {activeTab === "reports" && "Xem xét và xử lý các báo cáo vi phạm từ người dùng"}
               </p>
-            </div>
-            <div className="flex items-center space-x-2">
-              {/* Notification Bell */}
-              <div className="relative">
-              <button
-                  onClick={() => setShowNotifications(!showNotifications)}
-                  className="relative p-2 text-gray-600 hover:text-blue-600 transition-colors"
-                  title="Thông báo"
-                >
-                  <Bell className="h-5 w-5" />
-                  {unreadNotificationCount > 0 && (
-                    <div className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full min-w-[16px] h-[16px] flex items-center justify-center">
-                      {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
-                    </div>
-                  )}
-                </button>
-                
-                {/* Notification Dropdown */}
-                {showNotifications && (
-                  <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-lg shadow-lg border border-gray-200 z-50 max-h-96 overflow-y-auto">
-                    <div className="p-4 border-b border-gray-200">
-                      <h3 className="text-lg font-semibold text-gray-900">Thông báo</h3>
-                      <p className="text-sm text-gray-500">{notifications.length} thông báo</p>
-                    </div>
-                    
-                    <div className="max-h-64 overflow-y-auto">
-                      {notifications.length === 0 ? (
-                        <div className="p-4 text-center text-gray-500">
-                          <Bell className="h-8 w-8 mx-auto mb-2 text-gray-300" />
-                          <p>Không có thông báo nào</p>
-                        </div>
-                      ) : (
-                        notifications.map((notification) => (
-                          <div
-                            key={notification.id || notification.notificationId}
-                            className={`p-4 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
-                              !notification.isRead ? 'bg-blue-50' : ''
-                            }`}
-                            onClick={() => {
-                              // Handle notification click
-                              if (notification.notificationType === 'verification_payment_success' && notification.metadata?.productId) {
-                                // Find the product and show inspection modal
-                                const product = allListings.find(p => getId(p) === notification.metadata.productId);
-                                if (product) {
-                                  setCurrentInspectionProduct(product);
-                                  setShowInspectionModal(true);
-                                  setShowNotifications(false);
-                                }
-                              }
-                            }}
-                          >
-                            <div className="flex items-start space-x-3">
-                              <div className={`w-2 h-2 rounded-full mt-2 ${
-                                !notification.isRead ? 'bg-blue-500' : 'bg-gray-300'
-                              }`} />
-                              <div className="flex-1">
-                                <h4 className="text-sm font-medium text-gray-900">
-                                  {notification.title}
-                                </h4>
-                                <p className="text-sm text-gray-600 mt-1">
-                                  {notification.content}
-                                </p>
-                                <p className="text-xs text-gray-400 mt-2">
-                                  {notification.metadata?.formattedDate || 
-                                   formatDate(notification.createdAt || notification.created_date)}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                    
-                    <div className="p-4 border-t border-gray-200">
-                      <button
-                        onClick={() => {
-                          setShowNotifications(false);
-                          // Navigate to full notifications page if needed
-                        }}
-                        className="w-full text-center text-sm text-blue-600 hover:text-blue-800"
-                      >
-                        Xem tất cả thông báo
-              </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Auto-send notifications button - hidden as it's now automatic */}
-              {/* <button
-                onClick={handleForceSendNotifications}
-                className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                title="Gửi thông báo cho thanh toán kiểm định thành công"
-              >
-                <Bell className="h-4 w-4" />
-                <span>Gửi thông báo</span>
-              </button> */}
-
-              <button
-                onClick={refreshData}
-                disabled={loading}
-                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {loading ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Activity className="h-4 w-4" />
-                )}
-                <span>Làm mới</span>
-              </button>
-              
-              {skipImageLoading && (
-              <button
-                  onClick={() => {
-                    setSkipImageLoading(false);
-                    refreshData();
-                  }}
-                  className="flex items-center space-x-2 px-3 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors text-sm"
-                >
-                  <span>Bật tải hình ảnh</span>
-              </button>
-              )}
             </div>
           </div>
         </div>
@@ -2078,8 +2108,323 @@ export const AdminDashboard = () => {
         </div>
         )}
 
-            {/* Filters and Search - Hide on reports tab */}
-            {activeTab !== "reports" && (
+        {/* Users Management */}
+        {activeTab === 'users' && (
+          <div className="bg-white rounded-2xl shadow-lg p-6 mb-8 border border-gray-100">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
+              <div className="flex-1">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+                  <input
+                    type="text"
+                    placeholder="Tìm theo tên, email, số điện thoại"
+                    value={usersSearch}
+                    onChange={(e) => setUsersSearch(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') loadUsers({ page: 1, search: e.target.value }); }}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <select
+                  value={usersRole}
+                  onChange={(e) => { setUsersRole(e.target.value); loadUsers({ page: 1, role: e.target.value }); }}
+                  className="px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="">Tất cả vai trò</option>
+                  <option value="admin">Quản trị viên</option>
+                  <option value="user">Người dùng</option>
+                </select>
+                <select
+                  value={usersStatus}
+                  onChange={(e) => { setUsersStatus(e.target.value); loadUsers({ page: 1, status: e.target.value }); }}
+                  className="px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="">Tất cả trạng thái</option>
+                  <option value="active">Đang hoạt động</option>
+                  <option value="suspended">Đã tạm khóa</option>
+                  <option value="deleted">Đã xóa</option>
+                </select>
+                <button
+                  onClick={() => loadUsers({ page: 1 })}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  disabled={usersLoading}
+                >
+                  {usersLoading ? 'Đang tải...' : 'Làm mới'}
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <h3 className="text-base font-semibold text-gray-900 mb-3">Tài khoản đang hoạt động</h3>
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Họ tên</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Email</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Vai trò</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Trạng thái</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Ngày tạo</th>
+                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500">Chi tiết</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-100">
+                  {(() => {
+                    const activeUsersList = users.filter(u => {
+                      const st = (u.status || u.Status || 'active').toString().toLowerCase();
+                      return st === 'active' || st === '';
+                    });
+                    return activeUsersList.map((u) => (
+                    <tr key={u.id || u.Id}>
+                      <td className="px-4 py-3 text-sm text-gray-900">{u.fullName || u.FullName || '-'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{u.email || u.Email}</td>
+                      <td className="px-4 py-3 text-sm">
+                        {(() => {
+                          const role = (u.role || u.Role || 'user').toString().toLowerCase();
+                          // Map sub_admin to user, only show 2 roles: admin and user
+                          const normalizedRole = role === 'admin' ? 'admin' : 'user';
+                          const label = normalizedRole === 'admin' ? 'Quản trị viên' : 'Người dùng';
+                          const cls = normalizedRole === 'admin' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800';
+                          return <span className={`px-2 py-1 text-xs font-medium rounded-full ${cls}`}>{label}</span>;
+                        })()}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <select
+                          title={getReasonTextForUser(u) || undefined}
+                          defaultValue={(u.status || u.Status || 'active').toLowerCase()}
+                          onChange={(e) => {
+                            const id = u.id || u.Id;
+                            const next = e.target.value;
+                            if (next === 'suspended' || next === 'deleted') {
+                              setPendingStatusUserId(id);
+                              setPendingStatus(next);
+                              setPendingStatusReason('');
+                              setShowStatusModal(true);
+                              // revert UI select until confirmed
+                              e.target.value = (u.status || u.Status || 'active').toLowerCase();
+                            } else {
+                              updateUserStatus(id, next);
+                            }
+                          }}
+                          className="px-2 py-1 border border-gray-300 rounded"
+                        >
+                          <option value="active">Đang hoạt động</option>
+                          <option value="suspended">Đã tạm khóa</option>
+                          <option value="deleted">Đã xóa</option>
+                        </select>
+                        {(() => {
+                          const txt = getReasonTextForUser(u);
+                          const st = (u.status || u.Status || '').toString().toLowerCase();
+                          if (!txt || (st !== 'suspended' && st !== 'deleted')) return null;
+                          return (
+                            <div className="mt-1 text-xs text-gray-500 truncate" title={txt}>{txt}</div>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {u.createdAt || u.CreatedAt ? new Date(u.createdAt || u.CreatedAt).toLocaleDateString() : '-'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right">
+                        <button
+                          className="inline-flex items-center justify-center p-2 rounded hover:bg-gray-100 text-blue-600"
+                          title="Xem hồ sơ"
+                          onClick={() => {
+                            const id = u.id || u.Id;
+                            if (id) {
+                              navigate(`/seller/${id}`);
+                            } else {
+                              showToast({ title: 'Lỗi', description: 'Không xác định được ID người dùng', type: 'error' });
+                            }
+                          }}
+                        >
+                          <Eye className="h-5 w-5" />
+                        </button>
+                      </td>
+                    </tr>
+                    ));
+                  })()}
+                  {(() => {
+                    const activeUsersList = users.filter(u => {
+                      const st = (u.status || u.Status || 'active').toString().toLowerCase();
+                      return st === 'active' || st === '';
+                    });
+                    return activeUsersList.length === 0 && !usersLoading && (
+                      <tr>
+                        <td className="px-4 py-6 text-center text-sm text-gray-500" colSpan={6}>Không có tài khoản đang hoạt động</td>
+                      </tr>
+                    );
+                  })()}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Restricted accounts table */}
+            {(() => {
+              const restrictedUsersList = users.filter(u => {
+                const st = (u.status || u.Status || '').toString().toLowerCase();
+                return st === 'suspended' || st === 'deleted';
+              });
+              return (
+                <div className="overflow-x-auto mt-8">
+                  <h3 className="text-base font-semibold text-gray-900 mb-3">Các tài khoản bị hạn chế</h3>
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Họ tên</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Email</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Vai trò</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Trạng thái</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Lý do</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Ngày tạo</th>
+                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500">Chi tiết</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-100">
+                      {restrictedUsersList.map((u) => (
+                        <tr key={u.id || u.Id}>
+                          <td className="px-4 py-3 text-sm text-gray-900">{u.fullName || u.FullName || '-'}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{u.email || u.Email}</td>
+                          <td className="px-4 py-3 text-sm">
+                            {(() => {
+                              const role = (u.role || u.Role || 'user').toString().toLowerCase();
+                              // Map sub_admin to user, only show 2 roles: admin and user
+                              const normalizedRole = role === 'admin' ? 'admin' : 'user';
+                              const label = normalizedRole === 'admin' ? 'Quản trị viên' : 'Người dùng';
+                              const cls = normalizedRole === 'admin' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800';
+                              return <span className={`px-2 py-1 text-xs font-medium rounded-full ${cls}`}>{label}</span>;
+                            })()}
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            <select
+                              title={getReasonTextForUser(u) || undefined}
+                              defaultValue={(u.status || u.Status || 'suspended').toLowerCase()}
+                              onChange={(e) => {
+                                const id = u.id || u.Id;
+                                const next = e.target.value;
+                                if (next === 'suspended' || next === 'deleted') {
+                                  setPendingStatusUserId(id);
+                                  setPendingStatus(next);
+                                  setPendingStatusReason('');
+                                  setPendingStatusReasonCode('');
+                                  setPendingStatusReasonNote('');
+                                  setShowStatusModal(true);
+                                  e.target.value = (u.status || u.Status || 'suspended').toLowerCase();
+                                } else {
+                                  updateUserStatus(id, next);
+                                }
+                              }}
+                              className="px-2 py-1 border border-gray-300 rounded"
+                            >
+                              <option value="active">Khôi phục hoạt động</option>
+                              <option value="suspended">Đã tạm khóa</option>
+                              <option value="deleted">Đã xóa</option>
+                            </select>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            {(() => {
+                              const txt = getReasonTextForUser(u);
+                              return txt ? <span className="line-clamp-2" title={txt}>{txt}</span> : '-';
+                            })()}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{u.createdAt || u.CreatedAt ? new Date(u.createdAt || u.CreatedAt).toLocaleDateString() : '-'}</td>
+                          <td className="px-4 py-3 text-sm text-right">
+                            <button
+                              className="inline-flex items-center justify-center p-2 rounded hover:bg-gray-100 text-blue-600"
+                              title="Xem hồ sơ"
+                              onClick={() => {
+                                const id = u.id || u.Id;
+                                if (id) {
+                                  navigate(`/seller/${id}`);
+                                } else {
+                                  showToast({ title: 'Lỗi', description: 'Không xác định được ID người dùng', type: 'error' });
+                                }
+                              }}
+                            >
+                              <Eye className="h-5 w-5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {restrictedUsersList.length === 0 && !usersLoading && (
+                        <tr>
+                          <td className="px-4 py-6 text-center text-sm text-gray-500" colSpan={7}>Không có tài khoản bị hạn chế</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
+
+            <div className="mt-4 flex items-center justify-between">
+              <div className="text-sm text-gray-600">Trang {usersPage} / {usersTotalPages}</div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="px-3 py-2 border rounded disabled:opacity-50"
+                  disabled={usersPage <= 1 || usersLoading}
+                  onClick={() => { const p = usersPage - 1; setUsersPage(p); loadUsers({ page: p }); }}
+                >
+                  Trước
+                </button>
+                <button
+                  className="px-3 py-2 border rounded disabled:opacity-50"
+                  disabled={usersPage >= usersTotalPages || usersLoading}
+                  onClick={() => { const p = usersPage + 1; setUsersPage(p); loadUsers({ page: p }); }}
+                >
+                  Sau
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* No inline modal; using seller profile page in new tab */}
+        {showStatusModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black bg-opacity-40" onClick={() => setShowStatusModal(false)} />
+            <div className="relative bg-white w-full max-w-md rounded-2xl shadow-xl p-6 z-10">
+              <h3 className="text-lg font-semibold text-gray-900 mb-3">{pendingStatus === 'suspended' ? 'Chọn lý do tạm khóa' : 'Chọn lý do xóa'}</h3>
+              <div className="space-y-3">
+                <select
+                  value={pendingStatusReasonCode}
+                  onChange={(e) => setPendingStatusReasonCode(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg p-3"
+                >
+                  <option value="">-- Chọn lý do --</option>
+                  {(pendingStatus === 'deleted' ? deletedReasonOptions : suspendedReasonOptions).map(opt => (
+                    <option key={opt.code} value={opt.code}>{opt.label}</option>
+                  ))}
+                </select>
+                {(pendingStatusReasonCode === 'OTHER') && (
+                  <textarea
+                    value={pendingStatusReasonNote}
+                    onChange={(e) => setPendingStatusReasonNote(e.target.value)}
+                    placeholder="Nhập ghi chú bổ sung..."
+                    className="w-full border border-gray-300 rounded-lg p-3 h-24 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                )}
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button className="px-4 py-2 rounded-lg border" onClick={() => setShowStatusModal(false)}>Hủy</button>
+                <button
+                  className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                  disabled={!pendingStatusUserId || !pendingStatusReasonCode || (pendingStatusReasonCode === 'OTHER' && pendingStatusReasonNote.trim().length === 0)}
+                  onClick={async () => {
+                    const uid = pendingStatusUserId;
+                    const st = pendingStatus;
+                    setShowStatusModal(false);
+                    await updateUserStatus(uid, st);
+                  }}
+                >
+                  Xác nhận
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+            {/* Filters and Search - Hide on reports and users tabs */}
+            {activeTab !== "reports" && activeTab !== "users" && (
             <div className="bg-white rounded-2xl shadow-lg p-6 mb-8 border border-gray-100">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0 lg:space-x-6">
             <div className="flex-1">
@@ -2133,8 +2478,8 @@ export const AdminDashboard = () => {
         </div>
         )}
 
-        {/* Listings Table - Hide on inspections, transactions and reports tabs */}
-        {activeTab !== "inspections" && activeTab !== "transactions" && activeTab !== "reports" && (
+        {/* Listings Table - Hide on inspections, transactions, reports and users tabs */}
+        {activeTab !== "inspections" && activeTab !== "transactions" && activeTab !== "reports" && activeTab !== "users" && (
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200">
             <h2 className="text-xl font-semibold text-gray-900">

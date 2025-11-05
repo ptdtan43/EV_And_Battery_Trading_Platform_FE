@@ -18,6 +18,7 @@ import {
   Clock,
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
+import { useAuth } from "../contexts/AuthContext";
 import { formatPrice } from "../utils/formatters";
 import { ProductCard } from "../components/molecules/ProductCard";
 import { RatingSystem } from "../components/common/RatingSystem";
@@ -25,12 +26,14 @@ import { RatingSystem } from "../components/common/RatingSystem";
 export const SellerProfile = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { isAdmin } = useAuth ? useAuth() : { isAdmin: false };
   const [seller, setSeller] = useState(null);
   const [products, setProducts] = useState([]);
   const [pendingProducts, setPendingProducts] = useState([]);
   const [soldProducts, setSoldProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("profile");
+  const [adminUserDetail, setAdminUserDetail] = useState(null);
 
   const confirmSale = async (productId) => {
     try {
@@ -95,6 +98,17 @@ export const SellerProfile = () => {
 
       // Load seller products
       const productsData = await apiRequest(`/api/Product/seller/${id}`);
+      // If viewing as admin, also load admin user detail to show status and reason
+      try {
+        if (isAdmin) {
+          const detail = await apiRequest(`/api/admin/users/${id}`);
+          setAdminUserDetail(detail);
+        } else {
+          setAdminUserDetail(null);
+        }
+      } catch (e) {
+        console.warn('Could not load admin user detail:', e);
+      }
       const productsList = Array.isArray(productsData) ? productsData : productsData?.items || [];
       
       // ✅ Add seller name to all products
@@ -169,9 +183,14 @@ export const SellerProfile = () => {
                 <ArrowLeft className="h-5 w-5" />
               </button>
               <h1 className="text-xl font-semibold text-gray-900">
-                Profile người bán
+                Profile người dùng
               </h1>
             </div>
+            {isAdmin && adminUserDetail && (
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-gray-600">Trạng thái: {(adminUserDetail.status || adminUserDetail.Status) === 'active' ? 'Đang hoạt động' : (adminUserDetail.status || adminUserDetail.Status) === 'suspended' ? 'Đã tạm khóa' : 'Đã xóa'}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -202,6 +221,20 @@ export const SellerProfile = () => {
                   {seller.email}
                 </p>
               </div>
+              {(() => {
+                if (!isAdmin || !adminUserDetail) return null;
+                const status = (adminUserDetail.status || adminUserDetail.Status || 'active').toString().toLowerCase();
+                const reason = adminUserDetail.reason || adminUserDetail.Reason || adminUserDetail.accountStatusReason || adminUserDetail.AccountStatusReason;
+                if ((status === 'suspended' || status === 'deleted') && reason) {
+                  return (
+                    <div className="mt-4 p-3 rounded-lg bg-yellow-50 text-yellow-800 text-sm">
+                      <div className="font-medium">Lý do trạng thái</div>
+                      <div>{reason}</div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
 
               {/* Contact Info */}
               <div className="space-y-3 mb-6">

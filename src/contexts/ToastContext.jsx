@@ -24,11 +24,14 @@ export const ToastProvider = ({ children }) => {
       title: opts.title || '',
       description: opts.description || '',
       type: opts.type || 'success',
-      duration: typeof opts.duration === 'number' ? opts.duration : 3000,
+      // duration=0 => no auto-hide (manual close)
+      duration: typeof opts.duration === 'number' ? opts.duration : 0,
     };
     setToasts((prev) => [...prev, toast]);
-    const tm = setTimeout(() => remove(toast.id), toast.duration);
-    timers.current.set(toast.id, tm);
+    if (toast.duration > 0) {
+      const tm = setTimeout(() => remove(toast.id), toast.duration);
+      timers.current.set(toast.id, tm);
+    }
     return toast.id;
   }, [remove]);
 
