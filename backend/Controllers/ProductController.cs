@@ -29,6 +29,7 @@ namespace EVTB_Backend.Controllers
             try
             {
                 var products = await _context.Products
+                    .AsNoTracking()
                     .Include(p => p.Seller)
                     .Where(p => p.Status != "Sold" && p.Status != "Rejected" && p.Status != "Reserved") // Hide sold, rejected, and reserved products from public listings
                     .Select(p => new
@@ -89,6 +90,7 @@ namespace EVTB_Backend.Controllers
             try
             {
                 var product = await _context.Products
+                    .AsNoTracking()
                     .Include(p => p.Seller)
                     .FirstOrDefaultAsync(p => p.ProductId == id);
 
@@ -153,6 +155,7 @@ namespace EVTB_Backend.Controllers
             try
             {
                 var products = await _context.Products
+                    .AsNoTracking()
                     .Include(p => p.Seller)
                     .Where(p => p.SellerId == sellerId)
                     .Select(p => new
@@ -450,7 +453,10 @@ namespace EVTB_Backend.Controllers
                 // Update product fields
                 product.Title = request.Title ?? product.Title;
                 product.Description = request.Description ?? product.Description;
-                product.Price = request.Price;
+                if (request.Price.HasValue)
+                {
+                    product.Price = request.Price.Value;
+                }
                 product.ProductType = request.ProductType ?? product.ProductType;
                 product.VehicleType = request.VehicleType ?? product.VehicleType;
                 product.ManufactureYear = request.ManufactureYear ?? product.ManufactureYear;
@@ -575,7 +581,7 @@ namespace EVTB_Backend.Controllers
     {
         public string? Title { get; set; }
         public string? Description { get; set; }
-        public decimal Price { get; set; }
+        public decimal? Price { get; set; }
         public string? ProductType { get; set; }
         public string? VehicleType { get; set; }
         public int? ManufactureYear { get; set; }

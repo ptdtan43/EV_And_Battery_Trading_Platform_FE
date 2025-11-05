@@ -231,10 +231,12 @@ export const MyListings = () => {
           let images = [];
           let rejectionReason = l.rejectionReason || l.RejectionReason;
 
-          // If product is rejected, fetch rejection reason to check for [BÁO CÁO] prefix
+          // ALWAYS fetch fresh rejection reason for rejected products to ensure we have the latest data
+          // This prevents stale data from causing "Bị báo cáo" to change to "Từ chối"
           const status = getStatus(l);
-          if (status === "rejected" && !rejectionReason) {
+          if (status === "rejected") {
             try {
+              console.log(`🔄 Fetching fresh rejection reason for product ${l.id || l.productId}`);
               const detailedProduct = await apiRequest(
                 `/api/Product/${l.id || l.productId || l.Id}`
               );
@@ -242,8 +244,15 @@ export const MyListings = () => {
                 detailedProduct?.rejectionReason || 
                 detailedProduct?.RejectionReason || 
                 detailedProduct?.rejection_reason;
+              
+              console.log(`✅ Fresh rejection reason for ${l.id || l.productId}:`, {
+                reason: rejectionReason,
+                hasPrefix: rejectionReason?.startsWith("[BÁO CÁO]")
+              });
             } catch (error) {
               console.warn(`⚠️ Failed to fetch rejection reason for product ${l.id || l.productId}:`, error);
+              // Fallback to existing value if fetch fails
+              rejectionReason = l.rejectionReason || l.RejectionReason;
             }
           }
 
