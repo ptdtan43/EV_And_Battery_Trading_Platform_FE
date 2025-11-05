@@ -7,7 +7,8 @@ export const API_CONFIG = {
   DEVELOPMENT_URL: 'http://localhost:5044',
 
   // Current API URL based on environment
-  BASE_URL: (import.meta.env.VITE_API_BASE || 'http://localhost:5044').replace(/\/+$/, ''),
+  // Use empty string in dev to use Vite proxy, or full URL for production
+  BASE_URL: import.meta.env.DEV ? '' : (import.meta.env.VITE_API_BASE || 'https://ev-and-battery-trading-platform-be.onrender.com').replace(/\/+$/, ''),
 
   // API Endpoints
   ENDPOINTS: {

@@ -492,15 +492,15 @@ export const ProductDetail = () => {
     setShowPaymentModal(true);
   };
 
-  // Calculate deposit amount based on product type and price
+  // Calculate deposit amount based on product type & price
   const getDepositAmount = () => {
     const price = product?.price || 0;
-    const isBattery = String(product?.productType || '').toLowerCase() === 'battery';
-    // Battery: fixed market-friendly deposit (1,000,000 VND)
-    if (isBattery) {
-      return 1000000;
+    const type = (product?.productType || '').toLowerCase();
+    // Fixed lower deposit for batteries to match market expectations
+    if (type === 'battery') {
+      return 500000; // 500,000 VND for battery deposits
     }
-    // Vehicle: tiered deposit by price
+    // Vehicles keep tiered rule
     return price > 300000000 ? 10000000 : 5000000; // 10M if > 300M, else 5M
   };
 
@@ -886,11 +886,13 @@ export const ProductDetail = () => {
                     )}
                   </div>
 
-                  <p className="text-gray-600">
-                    {product.licensePlate ||
-                      product.license_plate ||
-                      "Biển số: N/A"}
-                  </p>
+                  {(product.productType?.toLowerCase() === 'vehicle') && (
+                    <p className="text-gray-600">
+                      {product.licensePlate ||
+                        product.license_plate ||
+                        "Biển số: N/A"}
+                    </p>
+                  )}
 
                   {/* Verification Button - Only show for vehicles, product owner, and not verified */}
                   {product.productType === "Vehicle" &&
@@ -1409,33 +1411,22 @@ export const ProductDetail = () => {
                     </span>
                   </div>
                   <p className="text-xs text-blue-600">
-                    {String(product.productType || '').toLowerCase() === 'battery'
-                      ? 'Sản phẩm Pin - cọc 1 triệu để giữ hàng và gặp mặt trực tiếp'
-                      : product.price > 300000000
-                        ? 'Sản phẩm trên 300 triệu - cọc 10 triệu để gặp mặt trực tiếp'
-                        : 'Sản phẩm dưới 300 triệu - cọc 5 triệu để gặp mặt trực tiếp'}
+                    {(product?.productType || '').toLowerCase() === 'battery'
+                      ? "Sản phẩm là pin - cọc cố định 500.000đ để giữ hàng và hẹn gặp tại kho"
+                      : (product.price > 300000000
+                          ? "Sản phẩm trên 300 triệu - cọc 10 triệu để gặp mặt trực tiếp"
+                          : "Sản phẩm dưới 300 triệu - cọc 5 triệu để gặp mặt trực tiếp")}
                   </p>
                 </div>
               </div>
 
               {/* Important Notice */}
-<<<<<<< HEAD
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                 <div className="flex items-start">
                   <AlertCircle className="h-5 w-5 text-yellow-600 mr-2 flex-shrink-0 mt-0.5" />
                   <div>
                     <h4 className="font-semibold text-yellow-900 mb-1">Lưu ý quan trọng:</h4>
                     <p className="text-sm text-yellow-800">
-=======
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                <div className="flex items-start">
-                  <AlertCircle className="h-5 w-5 text-amber-600 mr-2 mt-0.5 flex-shrink-0" />
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-amber-900 mb-1">
-                      Lưu ý quan trọng:
-                    </p>
-                    <p className="text-xs text-amber-800 leading-relaxed">
->>>>>>> origin
                       Sau khi thanh toán cọc thành công, vui lòng liên hệ với người bán qua tính năng chat để thỏa thuận ngày giờ gặp mặt. Sau đó, xin hãy liên hệ với Admin qua số điện thoại <span className="font-semibold">0373111370</span> để Admin chốt lịch hẹn cho cả hai bên gặp mặt tại kho và tiến hành giao dịch trực tiếp.
                     </p>
                   </div>

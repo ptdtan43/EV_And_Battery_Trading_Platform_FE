@@ -1,16 +1,17 @@
 // API Client chuẩn cho VNPay integration
-export const API_BASE = (import.meta.env.VITE_API_BASE || "http://localhost:5044").replace(/\/+$/, "");
+// Use empty string in dev to use Vite proxy, or full URL for production
+export const API_BASE = import.meta.env.DEV ? '' : (import.meta.env.VITE_API_BASE || "https://ev-and-battery-trading-platform-be.onrender.com").replace(/\/+$/, "");
 
 export async function apiFetch(path, init = {}, token) {
   const url = `${API_BASE}${path}`;
-  
+
   console.log("🌐 API Request:", {
     url,
     method: init.method || "GET",
     hasToken: !!token,
     body: init.body
   });
-  
+
   const config = {
     ...init,
     headers: {
@@ -23,7 +24,7 @@ export async function apiFetch(path, init = {}, token) {
 
   try {
     const res = await fetch(url, config);
-    
+
     console.log("📡 API Response:", {
       status: res.status,
       statusText: res.statusText,
@@ -33,7 +34,7 @@ export async function apiFetch(path, init = {}, token) {
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       const errorMessage = `HTTP ${res.status}: ${text || res.statusText}`;
-      
+
       // Handle specific error cases
       if (res.status === 401) {
         throw new Error("Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.");
@@ -42,7 +43,7 @@ export async function apiFetch(path, init = {}, token) {
       } else if (res.status >= 500) {
         throw new Error("Lỗi máy chủ. Vui lòng thử lại sau.");
       }
-      
+
       throw new Error(errorMessage);
     }
 
