@@ -108,7 +108,24 @@ builder.Services.AddCors(options =>
                 "http://localhost:5182")
               .AllowAnyHeader()
               .AllowAnyMethod()
-              .AllowCredentials(); // Quan trọng: cho phép credentials
+              .AllowCredentials() // Quan trọng: cho phép credentials
+              .WithExposedHeaders("*"); // Expose all headers
+    });
+    
+    // Add default policy for development
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.WithOrigins(
+                "http://localhost:5173", 
+                "http://localhost:5174",
+                "http://localhost:5177", 
+                "http://localhost:5179", 
+                "http://localhost:5181", 
+                "http://localhost:5182")
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials()
+              .WithExposedHeaders("*");
     });
 });
 
@@ -129,7 +146,8 @@ if (app.Environment.IsDevelopment())
 }
 
 // ✅ CORS MUST be called BEFORE UseHttpsRedirection and UseAuthentication
-app.UseCors("AllowFrontend");
+// Use default policy for maximum compatibility
+app.UseCors();
 
 app.UseHttpsRedirection();
 

@@ -90,7 +90,7 @@ class TokenManager {
       throw new Error("Token refresh not supported - please login again");
 
       /* UNCOMMENT WHEN BACKEND SUPPORTS REFRESH TOKEN
-      const API_BASE_URL = import.meta.env.VITE_API_BASE || "http://localhost:5044";
+      const API_BASE_URL = import.meta.env.DEV ? '' : (import.meta.env.VITE_API_BASE || "https://ev-and-battery-trading-platform-be.onrender.com");
       
       // Try to refresh token from backend
       const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {

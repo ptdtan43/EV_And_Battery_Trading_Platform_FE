@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { apiRequest, API_BASE_URL } from "../lib/api";
+import { apiRequest } from "../lib/api";
 
 const AuthContext = createContext({});
 
@@ -302,7 +302,7 @@ export const AuthProvider = ({ children }) => {
       
       // Try JSON first
       const doJsonRegister = async () => {
-        const response = await fetch(`${API_BASE_URL}/api/User/register`, {
+        const response = await fetch("/api/User/register", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -325,7 +325,7 @@ export const AuthProvider = ({ children }) => {
         form.append("Phone", phone || "");
         form.append("RoleId", String(2));
         form.append("AccountStatus", "Active");
-        const response = await fetch(`${API_BASE_URL}/api/User/register`, {
+        const response = await fetch("/api/User/register", {
           method: "POST",
           body: form
         });
