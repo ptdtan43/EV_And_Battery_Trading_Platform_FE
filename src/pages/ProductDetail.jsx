@@ -491,9 +491,15 @@ export const ProductDetail = () => {
     setShowPaymentModal(true);
   };
 
-  // Calculate deposit amount based on product price
+  // Calculate deposit amount based on product type & price
   const getDepositAmount = () => {
     const price = product?.price || 0;
+    const type = (product?.productType || '').toLowerCase();
+    // Fixed lower deposit for batteries to match market expectations
+    if (type === 'battery') {
+      return 500000; // 500,000 VND for battery deposits
+    }
+    // Vehicles keep tiered rule
     return price > 300000000 ? 10000000 : 5000000; // 10M if > 300M, else 5M
   };
 
@@ -879,11 +885,13 @@ export const ProductDetail = () => {
                     )}
                   </div>
 
-                  <p className="text-gray-600">
-                    {product.licensePlate ||
-                      product.license_plate ||
-                      "Biển số: N/A"}
-                  </p>
+                  {(product.productType?.toLowerCase() === 'vehicle') && (
+                    <p className="text-gray-600">
+                      {product.licensePlate ||
+                        product.license_plate ||
+                        "Biển số: N/A"}
+                    </p>
+                  )}
 
                   {/* Verification Button - Only show for vehicles, product owner, and not verified */}
                   {product.productType === "Vehicle" &&
@@ -1402,9 +1410,11 @@ export const ProductDetail = () => {
                     </span>
                   </div>
                   <p className="text-xs text-blue-600">
-                    {product.price > 300000000
-                      ? "Sản phẩm trên 300 triệu - cọc 10 triệu để gặp mặt trực tiếp"
-                      : "Sản phẩm dưới 300 triệu - cọc 5 triệu để gặp mặt trực tiếp"}
+                    {(product?.productType || '').toLowerCase() === 'battery'
+                      ? "Sản phẩm là pin - cọc cố định 500.000đ để giữ hàng và hẹn gặp tại kho"
+                      : (product.price > 300000000
+                          ? "Sản phẩm trên 300 triệu - cọc 10 triệu để gặp mặt trực tiếp"
+                          : "Sản phẩm dưới 300 triệu - cọc 5 triệu để gặp mặt trực tiếp")}
                   </p>
                 </div>
               </div>

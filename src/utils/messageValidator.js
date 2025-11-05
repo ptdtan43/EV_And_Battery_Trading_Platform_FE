@@ -125,27 +125,50 @@ const detectPhoneNumberInWords = (text) => {
  * Phát hiện số điện thoại dạng số
  */
 const detectPhoneNumber = (text) => {
-    // Các pattern số điện thoại Việt Nam
-    const phonePatterns = [
-        /0\d{9,10}/g, // 0xxxxxxxxx hoặc 0xxxxxxxxxx
-        /\+84\d{9,10}/g, // +84xxxxxxxxx
-        /84\d{9,10}/g, // 84xxxxxxxxx
-        /\(\d{3,4}\)\s*\d{3,4}\s*\d{3,4}/g, // (0xxx) xxx xxx
-        /\d{3,4}[\s\-\.]\d{3,4}[\s\-\.]\d{3,4}/g, // xxx-xxx-xxx hoặc xxx.xxx.xxx
-    ];
+    if (!text) return false;
 
-    for (const pattern of phonePatterns) {
-        const matches = text.match(pattern);
-        if (matches && matches.length > 0) {
-            // Kiểm tra xem có phải số điện thoại hợp lệ không (10-11 số)
-            for (const match of matches) {
-                const digits = match.replace(/\D/g, '');
-                if (digits.length >= 10 && digits.length <= 11) {
+    // 1) Các chuỗi bắt đầu bằng 0, 84 hoặc +84 với NGĂN CÁCH tự do, tổng 8-12 chữ số
+    const candidateMatches = text.match(/(\+?84|0)(?:[\s\-\.\(\)]*\d){7,12}/g);
+    if (candidateMatches) {
+        for (const m of candidateMatches) {
+            const digits = m.replace(/\D/g, '');
+            // Cho phép: 0xxxxxxxx (>=8) hoặc 84/ +84 theo sau (>=8)
+            if (digits.startsWith('0') || digits.startsWith('84')) {
+                if (digits.length >= 8 && digits.length <= 12) {
                     return true;
                 }
             }
+            if (digits.startsWith('84') && digits.length >= 10 && digits.length <= 13) {
+                return true;
+            }
         }
     }
+
+    // 2) Dạng số liền nhau 8-12 chữ số (chặn mạnh tay để tránh lọt như 032323131)
+    const plainSequences = text.match(/(?<!\d)\d{8,12}(?!\d)/g);
+    if (plainSequences) {
+        for (const seq of plainSequences) {
+            // Ưu tiên các đầu số Việt Nam phổ biến (02,03,05,07,08,09,84)
+            if (/^(0[235789]|02|84)/.test(seq)) {
+                return true;
+            }
+        }
+    }
+
+    // 3) Dạng nhóm có dấu cách/chấm/gạch, tổng số chữ số 8-12
+    const groupedMatches = text.match(/\d{2,4}(?:[\s\-\.]\d{2,4}){2,4}/g);
+    if (groupedMatches) {
+        for (const g of groupedMatches) {
+            const digits = g.replace(/\D/g, '');
+            if (digits.length >= 8 && digits.length <= 12 && /^(0|84)/.test(digits)) {
+                return true;
+            }
+        }
+    }
+
+    // 4) Dạng (0xxx) xxx xxx
+    const parenMatches = text.match(/\(0\d{2,4}\)\s*\d{3,4}\s*\d{3,4}/g);
+    if (parenMatches && parenMatches.length) return true;
 
     return false;
 };

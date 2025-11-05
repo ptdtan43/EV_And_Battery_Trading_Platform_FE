@@ -285,207 +285,129 @@ export const AuthProvider = ({ children }) => {
       password,
       fullName,
       phone,
-      full_name: fullName,
     });
 
-    // Try FormData first since it seems to work (gets past validation)
-    let data;
-    let lastError;
+    // Backend usually expects JSON, but some builds may require FormData
+    const registerData = {
+      Email: email,
+      Password: password,
+      FullName: fullName,
+      Phone: phone || "",
+      RoleId: 2,
+      AccountStatus: "Active"
+    };
 
     try {
-      console.log("Trying FormData first (seems to work for validation)...");
-      const form = new FormData();
-      form.append("Email", email);
-      form.append("Password", password);
-      form.append("FullName", fullName);
-      form.append("Phone", phone);
-      form.append("RoleId", "2");
-      form.append("AccountStatus", "Active");
+      console.log("Sending registration request:", registerData);
+      
+      // Try JSON first
+      const doJsonRegister = async () => {
+        const response = await fetch(`${API_BASE_URL}/api/User/register`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          body: JSON.stringify(registerData)
+        });
+        const text = await response.text();
+        let data;
+        try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+        return { response, data };
+      };
 
-      data = await apiRequest("/api/User/register", {
-        method: "POST",
-        body: form,
-      });
-      console.log("FormData succeeded:", data);
-    } catch (formError) {
-      console.log("FormData failed:", formError.message);
-      lastError = formError;
+      // Fallback: some backend builds use [FromForm]
+      const doFormRegister = async () => {
+        const form = new FormData();
+        form.append("Email", email);
+        form.append("Password", password);
+        form.append("FullName", fullName);
+        form.append("Phone", phone || "");
+        form.append("RoleId", String(2));
+        form.append("AccountStatus", "Active");
+        const response = await fetch(`${API_BASE_URL}/api/User/register`, {
+          method: "POST",
+          body: form
+        });
+        const text = await response.text();
+        let data;
+        try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+        return { response, data };
+      };
 
-      // If FormData failed, try JSON formats
-      const possibleFormats = [
-        // Format 1: Direct PascalCase with Password
-        {
-          Email: email,
-          Password: password,
-          FullName: fullName,
-          Phone: phone,
-        },
-        // Format 2: With RoleId and AccountStatus
-        {
-          Email: email,
-          Password: password,
-          FullName: fullName,
-          Phone: phone,
-          RoleId: 2,
-          AccountStatus: "Active",
-        },
-        // Format 3: camelCase
-        {
-          email: email,
-          password: password,
-          fullName: fullName,
-          phone: phone,
-          roleId: 2,
-          accountStatus: "Active",
-        },
-      ];
+      let { response, data } = await doJsonRegister();
 
-      // Try each JSON format
-      for (let i = 0; i < possibleFormats.length; i++) {
-        try {
-          console.log(`Trying JSON format ${i + 1}:`, possibleFormats[i]);
-          data = await apiRequest("/api/User/register", {
-            method: "POST",
-            body: possibleFormats[i],
-          });
-          console.log(`JSON format ${i + 1} succeeded:`, data);
-          break; // Success, exit loop
-        } catch (error) {
-          console.log(`JSON format ${i + 1} failed:`, error.message);
-          lastError = error;
+      // If JSON failed with typical validation errors for missing fields, retry as FormData
+      if (!response.ok) {
+        const hasValidationMissingCreds = response.status === 400 && (
+          (data?.title && String(data.title).toLowerCase().includes("validation")) ||
+          (data?.errors && (data.errors.Email || data.errors.Password))
+        );
+
+        if (hasValidationMissingCreds) {
+          console.warn("JSON register failed with validation errors. Retrying with FormData...");
+          const retry = await doFormRegister();
+          response = retry.response;
+          data = retry.data;
         }
       }
-    }
 
-    // If all attempts failed, throw the last error
-    if (!data) {
-      throw (
-        lastError ||
-        new Error("Registration failed: All data formats rejected by server")
-      );
-    }
-
-    // Try different response formats to find what backend returns
-    const possibleResponseFormats = [
-      // Format 1: Direct response
-      data,
-      // Format 2: Nested in data
-      data?.data,
-      // Format 3: Nested in result
-      data?.result,
-      // Format 4: Double nested
-      data?.data?.data,
-      data?.data?.result,
-      data?.result?.data,
-      // Format 5: Triple nested
-      data?.data?.data?.data,
-      data?.data?.data?.result,
-      data?.result?.result,
-      data?.result?.data?.data,
-    ];
-
-    for (const format of possibleResponseFormats) {
-      if (!format) continue;
-
-      console.log("Trying response format:", format);
-
-      // Check if this format has the expected structure
-      const hasToken =
-        format?.token ||
-        format?.accessToken ||
-        format?.jwt ||
-        format?.tokenString;
-      const hasUser =
-        format?.user || format?.userId || format?.id || format?.accountId;
-
-      if (hasToken || hasUser) {
-        console.log("Found valid response format:", format);
-
-        // Normalize possible backend shapes
-        const normalizedToken =
-          format?.token ||
-          format?.accessToken ||
-          format?.jwt ||
-          format?.tokenString;
-
-        const userData = format?.user || format;
-        const normalizedUser = {
-          ...userData,
-          fullName: fixVietnameseEncoding(
-            userData.fullName || userData.full_name || userData.name || fullName
-          ),
-          email: userData.email || email,
-          phone: userData.phone || phone,
-          id: userData.userId || userData.id || userData.accountId,
-          userId: userData.userId || userData.id || userData.accountId,
-          roleId: userData.roleId || userData.role || userData.roleId,
-          roleName: userData.roleName || userData.role || userData.roleName,
-        };
-
-        const session = {
-          token: normalizedToken,
-          user: normalizedUser,
-          profile: format?.profile || null,
-        };
-
-        console.log("Register response:", data);
-
-        // Ensure we have both token and user before saving
-        if (session?.token && session?.user) {
-          localStorage.setItem("evtb_auth", JSON.stringify(session));
-          setUser(session.user);
-          setProfile(session.profile || null);
-          console.log(
-            "✅ User registered and logged in successfully:",
-            session.user
-          );
-          return session;
-        } else {
-          console.error("❌ Cannot save registration session - missing token or user");
-          throw new Error("Registration failed - missing authentication data");
+      if (!response.ok) {
+        console.error("Registration failed:", { status: response.status, statusText: response.statusText, response: data });
+        if (data?.errors) { console.error("Validation errors:", data.errors); }
+        let errorMessage = data?.message || data?.title || `Registration failed: ${response.status}`;
+        if (data?.errors) {
+          const errorDetails = Object.entries(data.errors)
+            .map(([field, messages]) => `${field}: ${Array.isArray(messages) ? messages.join(', ') : messages}`)
+            .join('; ');
+          errorMessage = `${errorMessage}. ${errorDetails}`;
         }
-      }
-    }
-
-    // Many backends don't return token on register; try auto-login to obtain token
-    try {
-      console.log(
-        "No token in registration response, attempting auto-login..."
-      );
-      const session = await signIn(email, password);
-      console.log("🔍 Auto-login session:", session);
-      console.log(
-        "🔍 Auto-login token:",
-        session?.token ? "Present" : "Missing"
-      );
-
-      // If no token, create a fallback token for development
-      if (!session?.token) {
-        console.warn("⚠️ No token from auto-login, creating fallback token");
-        session.token = `dev_token_${Date.now()}_${Math.random()
-          .toString(36)
-          .substr(2, 9)}`;
+        throw new Error(errorMessage);
       }
 
-      // Ensure we have both token and user before saving
+      console.log("✅ Registration successful:", data);
+
+      // Normalize response data
+      const normalizedToken = data?.token || data?.accessToken || data?.access_token;
+      const normalizedUser = data?.user || data?.data || data;
+
+      if (!normalizedToken) {
+        console.warn("⚠️ No token in registration response, attempting auto-login...");
+        // Try auto-login to get token
+        const session = await signIn(email, password);
+        return session;
+      }
+
+      const session = {
+        token: normalizedToken,
+        user: {
+          id: normalizedUser?.id || normalizedUser?.userId || normalizedUser?.Id,
+          userId: normalizedUser?.id || normalizedUser?.userId || normalizedUser?.Id,
+          email: normalizedUser?.email || normalizedUser?.Email || email,
+          fullName: normalizedUser?.fullName || normalizedUser?.FullName || normalizedUser?.full_name || fullName,
+          phone: normalizedUser?.phone || normalizedUser?.Phone || phone,
+          avatar: normalizedUser?.avatar || normalizedUser?.Avatar,
+          roleId: normalizedUser?.roleId || normalizedUser?.RoleId || 2,
+          roleName: normalizedUser?.roleName || normalizedUser?.RoleName || "User",
+          accountStatus: normalizedUser?.accountStatus || normalizedUser?.AccountStatus || "Active"
+        },
+        profile: null
+      };
+
+      // Save to localStorage
       if (session?.token && session?.user) {
         localStorage.setItem("evtb_auth", JSON.stringify(session));
         setUser(session.user);
         setProfile(session.profile || null);
-        console.log(
-          "✅ User registered and auto-logged in successfully:",
-          session.user
-        );
+        console.log("✅ User registered and logged in successfully:", session.user);
         return session;
       } else {
-        console.error("❌ Cannot save auto-login session - missing token or user");
-        throw new Error("Auto-login failed - missing authentication data");
+        console.error("❌ Cannot save registration session - missing token or user");
+        throw new Error("Registration failed - missing authentication data");
       }
-    } catch (loginError) {
-      console.error("Auto-login after register failed:", loginError);
-      throw new Error(
-        "Registration completed but auto-login failed. Please try logging in manually."
-      );
+    } catch (error) {
+      console.error("❌ Registration failed:", error);
+      throw error;
     }
   };
 

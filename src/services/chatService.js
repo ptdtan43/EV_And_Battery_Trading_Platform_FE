@@ -1,5 +1,6 @@
 // Chat Service - Matches backend API exactly
 import apiService from './apiService';
+import { validateMessage } from '../utils/messageValidator';
 
 class ChatService {
   // Get all chats for current user
@@ -35,6 +36,12 @@ class ChatService {
   // Send message
   async sendMessage(chatId, senderId, content) {
     try {
+      const validation = validateMessage(content);
+      if (!validation.isValid) {
+        const err = new Error(validation.warning || 'Tin nhắn không hợp lệ');
+        err.code = validation.reason || 'invalid_message';
+        throw err;
+      }
       return await apiService.sendMessage(chatId, senderId, content);
     } catch (error) {
       console.error('Failed to send message:', error);
