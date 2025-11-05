@@ -36,3 +36,47 @@ pnpm-debug.log*
 
 # Environment files
 .env
+
+# .NET / C# Build artifacts
+[Dd]ebug/
+[Rr]elease/
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.csproj.user
+*.cache
+*.dll
+*.exe
+*.pdb
+*.GeneratedMSBuildEditorConfig.editorconfig
+*.AssemblyInfo.cs
+*.AssemblyInfoInputs.cache
+*.assets.cache
+*.csproj.AssemblyReference.cache
+*.csproj.CoreCompileInputs.cache
+*.csproj.FileListAbsolute.txt
+*.sourcelink.json
+*.genruntimeconfig.cache
+*.GlobalUsings.g.cs
+*.MvcApplicationPartsAssemblyInfo.cache
+*.MvcApplicationPartsAssemblyInfo.cs
+ref/
+refint/
+staticwebassets/
+*.dgspec.json
+*.nuget.g.props
+*.nuget.g.targets
+project.assets.json
+project.nuget.cache
+*.Up2Date
+apphost.exe
+*.editorconfig
+*.json.cache
+*.build.endpoints.json
+*.build.json
+*.build.json.cache
+*.dswa.cache.json
