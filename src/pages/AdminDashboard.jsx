@@ -77,6 +77,7 @@ export const AdminDashboard = () => {
 
   const [allListings, setAllListings] = useState([]);
   const [filteredListings, setFilteredListings] = useState([]);
+  const [orders, setOrders] = useState([]); // Store all orders for transaction management
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [productTypeFilter, setProductTypeFilter] = useState("all");
@@ -84,6 +85,7 @@ export const AdminDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [expandedDetails, setExpandedDetails] = useState(false);
+  const [cancelledOrderContext, setCancelledOrderContext] = useState(null); // Track cancelled order for modal context
   const [processingIds, setProcessingIds] = useState(new Set());
   const [skipImageLoading, setSkipImageLoading] = useState(false); // Add flag to skip image loading if causing issues
   // Users management state
@@ -868,13 +870,14 @@ export const AdminDashboard = () => {
         try {
           // Use admin-reject endpoint that already exists
           // Note: Endpoint expects field "Reason" (capital R) and minimum 3 characters
-          await apiRequest(`/api/Order/${orderId}/admin-reject`, {
+          const response = await apiRequest(`/api/Order/${orderId}/admin-reject`, {
             method: 'POST',
             body: {
               Reason: cancellationReasonText  // Capital R - matches AdminRejectOrderRequest.Reason
             }
           });
           console.log('✅ Cancellation reason saved to Order:', cancellationReasonText);
+          console.log('✅ Admin-reject response:', response);
         } catch (orderError) {
           console.error('❌ Could not update order:', orderError);
           showToast({
@@ -913,10 +916,19 @@ export const AdminDashboard = () => {
   };
 
   // Handle view product details
-  const handleViewDetails = (product) => {
-    // Open product detail page in new tab
-    const productUrl = `http://localhost:5173/product/${product.id || product.productId}`;
-    window.open(productUrl, '_blank');
+  const handleViewDetails = (product, cancelledOrder = null) => {
+    // Use the same modal as Dashboard tab (expandedDetails)
+    const productId = product.id || product.productId;
+    setExpandedDetails(productId);
+    setShowModal(false);
+    // Track cancelled order context if viewing from cancelled orders
+    setCancelledOrderContext(cancelledOrder);
+  };
+
+  // Helper function to close modal and reset context
+  const closeDetailsModal = () => {
+    setExpandedDetails(false);
+    setCancelledOrderContext(null);
   };
 
   useEffect(() => {
@@ -962,6 +974,12 @@ export const AdminDashboard = () => {
   useEffect(() => {
     filterListings();
   }, [allListings, searchTerm, statusFilter, productTypeFilter, dateFilter, activeTab]);
+
+  // Helper function to handle tab change with scroll to top
+  const handleTabChange = (tabName) => {
+    setActiveTab(tabName);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const loadAdminData = async () => {
     try {
@@ -1286,6 +1304,7 @@ export const AdminDashboard = () => {
       });
 
       setAllListings(sortedListings);
+      setOrders(Array.isArray(transactions) ? transactions : []); // Store orders in state
       console.log("DEBUG: allListings set to:", sortedListings.length, "items. Content:", sortedListings.map(l => ({id: l.id, verificationStatus: l.verificationStatus, productType: l.productType})));
       
       // Cache the processed data for future use
@@ -1993,7 +2012,7 @@ export const AdminDashboard = () => {
   const openListingModal = (listing) => {
     setSelectedListing(listing);
     setCurrentImageIndex(0);
-    setExpandedDetails(false);
+    closeDetailsModal();
     setShowModal(true);
   };
 
@@ -2076,7 +2095,12 @@ export const AdminDashboard = () => {
       <div className="fixed left-0 top-0 h-full w-64 bg-white shadow-lg z-10">
         {/* Logo Section */}
         <div className="px-6 py-4">
-          <div className="flex items-center space-x-3">
+          <div 
+            className="flex items-center space-x-3 cursor-pointer hover:opacity-80 transition-opacity"
+            onClick={() => {
+              handleTabChange("dashboard");
+            }}
+          >
             <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
               <Car className="h-6 w-6 text-white" />
             </div>
@@ -2109,7 +2133,7 @@ export const AdminDashboard = () => {
                   ? "bg-blue-50 text-blue-600" 
                   : "text-gray-600 hover:bg-gray-50"
               }`}
-              onClick={() => setActiveTab("dashboard")}
+              onClick={() => handleTabChange("dashboard")}
             >
               <BarChart3 className="h-5 w-5" />
               <span className="font-medium">Bảng điều khiển</span>
@@ -2120,7 +2144,7 @@ export const AdminDashboard = () => {
                   ? "bg-blue-50 text-blue-600" 
                   : "text-gray-600 hover:bg-gray-50"
               }`}
-              onClick={() => setActiveTab("vehicles")}
+              onClick={() => handleTabChange("vehicles")}
             >
               <Car className="h-5 w-5" />
               <span>Quản lý phương tiện</span>
@@ -2131,7 +2155,7 @@ export const AdminDashboard = () => {
                   ? "bg-blue-50 text-blue-600" 
                   : "text-gray-600 hover:bg-gray-50"
               }`}
-              onClick={() => setActiveTab("batteries")}
+              onClick={() => handleTabChange("batteries")}
             >
               <Shield className="h-5 w-5" />
               <span>Quản lý pin</span>
@@ -2142,7 +2166,7 @@ export const AdminDashboard = () => {
                   ? "bg-blue-50 text-blue-600" 
                   : "text-gray-600 hover:bg-gray-50"
               }`}
-              onClick={() => setActiveTab("users")}
+              onClick={() => handleTabChange("users")}
             >
               <Users className="h-5 w-5" />
               <span>Quản lý người dùng</span>
@@ -2153,7 +2177,7 @@ export const AdminDashboard = () => {
                   ? "bg-blue-50 text-blue-600" 
                   : "text-gray-600 hover:bg-gray-50"
               }`}
-              onClick={() => setActiveTab("transactions")}
+              onClick={() => handleTabChange("transactions")}
             >
               <DollarSign className="h-5 w-5" />
               <span>Quản lý giao dịch</span>
@@ -2164,7 +2188,7 @@ export const AdminDashboard = () => {
                   ? "bg-blue-50 text-blue-600" 
                   : "text-gray-600 hover:bg-gray-50"
               }`}
-              onClick={() => setActiveTab("reports")}
+              onClick={() => handleTabChange("reports")}
             >
               <Flag className="h-5 w-5" />
               <span>Báo cáo vi phạm</span>
@@ -2190,7 +2214,7 @@ export const AdminDashboard = () => {
                 {activeTab === "dashboard" && "Tổng quan hệ thống EV Market • Cập nhật theo thời gian thực"}
                 {activeTab === "vehicles" && "Quản lý bài đăng xe và phê duyệt"}
                 {activeTab === "batteries" && "Quản lý bài đăng pin và phê duyệt"}
-                {activeTab === "transactions" && "Quản lý giao dịch hoàn tất và xác nhận từ người bán"}
+                {activeTab === "transactions" && "Quản lý các giao dịch giữa người bán và người mua"}
                 {activeTab === "reports" && "Xem xét và xử lý các báo cáo vi phạm từ người dùng"}
               </p>
             </div>
@@ -2988,7 +3012,7 @@ export const AdminDashboard = () => {
               </div>
             </div>
                         <button
-                        onClick={() => setExpandedDetails(false)}
+                        onClick={closeDetailsModal}
                         className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                 >
                         <XCircle className="h-6 w-6 text-gray-500" />
@@ -3048,7 +3072,15 @@ export const AdminDashboard = () => {
                     </div>
                       <div>
                                 <p className="text-sm text-gray-500">Trạng thái</p>
-                                <p className="font-medium">{getStatusBadge(product.status)}</p>
+                                <p className="font-medium">
+                                  {cancelledOrderContext ? (
+                                    <span className="px-2 py-1 text-xs font-medium rounded-full bg-red-100 text-red-800">
+                                      Giao dịch đã bị hủy
+                                    </span>
+                                  ) : (
+                                    getStatusBadge(product.status)
+                                  )}
+                                </p>
                           </div>
                         </div>
 
@@ -3086,14 +3118,10 @@ export const AdminDashboard = () => {
                                     <p className="font-medium">{product.mileage}</p>
                               </div>
                               </div>
-                                <div className="grid grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 gap-4">
                               <div>
                                     <p className="text-sm text-gray-500">Tình trạng</p>
                                     <p className="font-medium">{product.condition}</p>
-                              </div>
-                              <div>
-                                    <p className="text-sm text-gray-500">Màu sắc</p>
-                                    <p className="font-medium">{product.color}</p>
                               </div>
                             </div>
                               </>
@@ -3129,6 +3157,24 @@ export const AdminDashboard = () => {
                                 <p className="text-sm text-red-700 mt-1">{product.rejectionReason}</p>
                               </div>
                     )}
+
+                            {/* Show cancellation reason if viewing from cancelled orders */}
+                            {cancelledOrderContext && cancelledOrderContext.cancellationReason && (
+                              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mt-4">
+                                <div className="flex items-start space-x-2">
+                                  <AlertTriangle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
+                                  <div className="flex-1">
+                                    <p className="text-sm text-red-800 font-medium mb-1">Lý do hủy giao dịch:</p>
+                                    <p className="text-sm text-red-700">{cancelledOrderContext.cancellationReason}</p>
+                                    {cancelledOrderContext.CancelledDate && (
+                                      <p className="text-xs text-red-600 mt-2">
+                                        Ngày hủy: {formatDate(cancelledOrderContext.CancelledDate)}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -3136,7 +3182,7 @@ export const AdminDashboard = () => {
                       {/* Actions */}
                       <div className="mt-6 flex items-center justify-end space-x-3">
                         <button
-                          onClick={() => setExpandedDetails(false)}
+                          onClick={closeDetailsModal}
                           className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
                         >
                           Đóng
@@ -3145,7 +3191,7 @@ export const AdminDashboard = () => {
                           <>
                           <button
                               onClick={() => {
-                                setExpandedDetails(false);
+                                closeDetailsModal();
                                 handleApprove(product.id);
                               }}
                               disabled={processingIds.has(product.id)}
@@ -3160,7 +3206,7 @@ export const AdminDashboard = () => {
                           </button>
                             <button
                               onClick={() => {
-                                setExpandedDetails(false);
+                                closeDetailsModal();
                                 openRejectModal(product);
                               }}
                               disabled={processingIds.has(product.id)}
@@ -3275,13 +3321,6 @@ export const AdminDashboard = () => {
                   )}
 
                   <div className="pt-4">
-                    {/* Debug info */}
-                    <div className="mb-4 p-3 bg-gray-100 rounded-lg text-sm">
-                      <strong>Debug Info:</strong><br/>
-                      verificationStatus: {selectedListing.verificationStatus}<br/>
-                      status: {selectedListing.status}
-                    </div>
-                    
                     {/* Show inspection button only for products with Requested verification status */}
                     {selectedListing.verificationStatus === "Requested" && (
                             <button
@@ -3637,46 +3676,48 @@ export const AdminDashboard = () => {
         <div className="space-y-6">
           <div className="bg-white rounded-xl shadow-sm p-6">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">
-              Quản lý giao dịch đang trong quá trình thanh toán
+              Thống kê các giao dịch trong quá trình thanh toán
             </h2>
-            <p className="text-gray-600 mb-6">
-              Quản lý các sản phẩm đã được đặt cọc thành công và đang chờ seller xác nhận.
-            </p>
             
             {/* Transaction Stats */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                 <div className="flex items-center">
                   <Clock className="h-8 w-8 text-yellow-600 mr-3" />
-                            <div>
+                  <div>
                     <p className="text-sm font-medium text-yellow-900">Đang trong quá trình thanh toán</p>
                     <p className="text-2xl font-bold text-yellow-600">
                       {allListings.filter(product => product.status === 'reserved').length}
-                              </p>
-                            </div>
-                            </div>
+                    </p>
+                  </div>
+                </div>
               </div>
-              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                <div className="flex items-center">
-                  <CheckCircle className="h-8 w-8 text-orange-600 mr-3" />
-                            <div>
-                    <p className="text-sm font-medium text-orange-900">Chờ admin duyệt</p>
-                    <p className="text-2xl font-bold text-orange-600">0</p>
-                            </div>
-                          </div>
-                        </div>
               <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                 <div className="flex items-center">
                   <DollarSign className="h-8 w-8 text-green-600 mr-3" />
-                            <div>
+                  <div>
                     <p className="text-sm font-medium text-green-900">Đã hoàn tất</p>
                     <p className="text-2xl font-bold text-green-600">
                       {allListings.filter(product => product.status === 'sold').length}
-                              </p>
-                            </div>
-                            </div>
-                      </div>
+                    </p>
                   </div>
+                </div>
+              </div>
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <div className="flex items-center">
+                  <XCircle className="h-8 w-8 text-red-600 mr-3" />
+                  <div>
+                    <p className="text-sm font-medium text-red-900">Đã từ chối</p>
+                    <p className="text-2xl font-bold text-red-600">
+                      {orders.filter(order => {
+                        const status = (order.status || order.orderStatus || order.Status || order.OrderStatus || '').toLowerCase();
+                        return status === 'cancelled' || status === 'failed';
+                      }).length}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             {/* Reserved and Sold Products List */}
             <div className="space-y-4">
@@ -3761,6 +3802,141 @@ export const AdminDashboard = () => {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Cancelled Orders List */}
+          <div className="bg-white rounded-xl shadow-sm p-6 mt-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Quản lý giao dịch (Đã bị từ chối)</h3>
+            {(() => {
+              const cancelledOrders = orders.filter(order => {
+                const status = (order.status || order.orderStatus || order.Status || order.OrderStatus || '').toLowerCase();
+                return (status === 'cancelled' || status === 'failed') && order.cancellationReason;
+              });
+
+              if (cancelledOrders.length === 0) {
+                return (
+                  <div className="text-center py-8">
+                    <XCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600">Chưa có giao dịch nào bị từ chối</p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {cancelledOrders.map((order) => {
+                    // Find the product for this order
+                    const productId = order.productId || order.ProductId || order.product?.productId || order.product?.id;
+                    const product = allListings.find(p => (p.id || p.productId) == productId);
+                    
+                    // Debug: Log order object to see available date fields
+                    console.log('🔍 Cancelled order date fields:', {
+                      orderId: order.orderId || order.OrderId || order.id,
+                      CancelledDate: order.CancelledDate, // Backend sets this (PascalCase)
+                      cancelledDate: order.cancelledDate, // camelCase variant
+                      cancellationDate: order.cancellationDate,
+                      updatedDate: order.updatedDate,
+                      updatedAt: order.updatedAt,
+                      createdDate: order.createdDate,
+                      createdAt: order.createdAt,
+                      allKeys: Object.keys(order).filter(k => k.toLowerCase().includes('date') || k.toLowerCase().includes('time'))
+                    });
+                    
+                    return (
+                      <div key={order.orderId || order.OrderId || order.id} className="border border-red-200 bg-red-50 rounded-lg p-4">
+                        <div className="flex items-start space-x-3">
+                          <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0">
+                            {product && product.images && product.images.length > 0 ? (
+                              <img
+                                className="w-full h-full object-cover"
+                                src={product.images[0]}
+                                alt={product.title || product.name || 'Sản phẩm'}
+                                onError={(e) => {
+                                  e.target.style.display = 'none';
+                                  e.target.nextSibling.style.display = 'flex';
+                                }}
+                              />
+                            ) : null}
+                            <div 
+                              className="w-full h-full rounded-lg flex items-center justify-center bg-red-200"
+                              style={{ display: (!product || !product.images || product.images.length === 0) ? 'flex' : 'none' }}
+                            >
+                              <XCircle className="h-6 w-6 text-red-600" />
+                            </div>
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="font-medium text-gray-900 line-clamp-2">
+                              {product ? (product.title || product.name || 'Sản phẩm không tìm thấy') : 'Sản phẩm không tìm thấy'}
+                            </h4>
+                            <p className="text-lg font-bold text-red-600 mt-1">
+                              {product ? formatPrice(product.price) : order.totalAmount ? formatPrice(order.totalAmount) : 'N/A'}
+                            </p>
+                            <div className="flex items-center mt-2">
+                              <XCircle className="h-4 w-4 text-red-600 mr-1" />
+                              <span className="text-sm text-red-600">Đã từ chối</span>
+                            </div>
+                            <div className="mt-2 text-sm text-gray-600">
+                              <p>Order ID: {order.orderId || order.OrderId || order.id}</p>
+                              {(() => {
+                                // Try to find a valid date from various possible fields
+                                // Priority: CancelledDate (backend sets this when admin rejects) > cancellationDate > updatedDate/updatedAt
+                                const dateFields = [
+                                  order.CancelledDate, // Backend sets this when admin rejects (PascalCase)
+                                  order.cancelledDate, // camelCase variant
+                                  order.cancellationDate,
+                                  order.CancellationDate,
+                                  // If order is cancelled, updatedDate/updatedAt should reflect when it was cancelled
+                                  order.updatedDate,
+                                  order.updatedAt,
+                                  order.UpdatedDate,
+                                  order.modifiedDate,
+                                  order.modifiedAt
+                                ];
+                                
+                                const validDate = dateFields.find(date => {
+                                  if (!date) return false;
+                                  const dateObj = new Date(date);
+                                  return !isNaN(dateObj.getTime());
+                                });
+                                
+                                if (validDate) {
+                                  return <p>Ngày hủy: {formatDate(validDate)}</p>;
+                                }
+                                // If no date found but order has cancellation reason, 
+                                // it means it was recently cancelled but date not yet synced
+                                // Show "Chưa xác định" for now
+                                return <p>Ngày hủy: Chưa xác định</p>;
+                              })()}
+                            </div>
+                            {order.cancellationReason && (
+                              <div className="mt-3 p-3 bg-red-100 border border-red-200 rounded-lg">
+                                <div className="flex items-start space-x-2">
+                                  <AlertTriangle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
+                                  <div className="flex-1">
+                                    <p className="text-xs font-medium text-red-900 mb-1">Lý do từ chối:</p>
+                                    <p className="text-xs text-red-800">{order.cancellationReason}</p>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        {product && (
+                          <div className="mt-4">
+                            <button
+                              onClick={() => handleViewDetails(product, order)}
+                              className="w-full bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
+                            >
+                              Xem chi tiết sản phẩm
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
