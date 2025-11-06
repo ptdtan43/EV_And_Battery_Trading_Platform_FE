@@ -63,15 +63,19 @@ export async function apiRequest(path, { method = "GET", body, headers } = {}) {
 
   const isFormData = (typeof FormData !== 'undefined') && body instanceof FormData;
 
-  // Debug logging for all requests with token
-  if (token) {
+  // Don't send token for auth endpoints (login, register, forgot-password)
+  const isAuthEndpoint = path.includes('/login') || path.includes('/register') || path.includes('/forgot-password');
+  const shouldSendToken = token && !isAuthEndpoint;
+
+  // Debug logging for all requests
+  if (import.meta.env.DEV) {
     console.log('=== API REQUEST DEBUG ===');
     console.log('URL:', url);
     console.log('Method:', method);
     console.log('Body:', body);
     console.log('Is FormData:', isFormData);
-    console.log('Token:', token ? 'Present' : 'Missing');
-    console.log('Token length:', token?.length || 0);
+    console.log('Is Auth Endpoint:', isAuthEndpoint);
+    console.log('Token:', shouldSendToken ? 'Present' : 'Not sending');
   }
 
   const res = await fetch(url, {
@@ -79,9 +83,9 @@ export async function apiRequest(path, { method = "GET", body, headers } = {}) {
     headers: {
       Accept: 'application/json',
       ...(isFormData ? {} : { "Content-Type": "application/json" }),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      // Don't spread headers here to avoid overriding Authorization
-      ...(headers && !headers.Authorization ? headers : {}),
+      ...(shouldSendToken ? { Authorization: `Bearer ${token}` } : {}),
+      // Merge custom headers (but don't override Content-Type or Authorization)
+      ...(headers || {}),
     },
     body: body ? (isFormData ? body : (typeof body === 'string' ? body : JSON.stringify(body))) : undefined,
   });
@@ -94,10 +98,11 @@ export async function apiRequest(path, { method = "GET", body, headers } = {}) {
     console.log('Headers:', {
       Accept: 'application/json',
       ...(isFormData ? {} : { "Content-Type": "application/json" }),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(shouldSendToken ? { Authorization: `Bearer ${token}` } : {}),
       ...(headers || {}),
     });
-    console.log('Body:', body);
+    console.log('Body object:', body);
+    console.log('Body stringified:', body ? (isFormData ? '[FormData]' : JSON.stringify(body)) : 'null');
     console.log('Is FormData:', isFormData);
     console.groupEnd();
   }

@@ -18,12 +18,13 @@ export default defineConfig({
     }
   },
   server: {
-    port: 5173, // Force port 5173 to match backend CORS
+    port: 5174, // Match current frontend port
     proxy: {
       '/api': {
-        target: 'https://ev-and-battery-trading-platform-be.onrender.com',
+        target: 'http://localhost:5044', // ✅ Local backend
         changeOrigin: true,
-        secure: true,
+        secure: false, // HTTP for localhost
+        rewrite: (path) => path, // Keep /api prefix
       },
     },
   },

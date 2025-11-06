@@ -7,7 +7,9 @@ class SignalRService {
     this.isConnected = false;
     this.listeners = new Map();
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 5;
+    this.maxReconnectAttempts = 10; // Tăng số lần reconnect
+    this.healthCheckInterval = null;
+    this.connectionStateListeners = new Set();
   }
 
   /**
@@ -21,7 +23,7 @@ class SignalRService {
 
     try {
       const baseURL = import.meta.env.VITE_API_BASE || "http://localhost:5044";
-      
+
       console.log("🔗 Building SignalR connection to:", `${baseURL}/chatHub`);
 
       // Backend đã fix CORS với AllowCredentials, dùng accessTokenFactory
@@ -35,15 +37,15 @@ class SignalRService {
                 console.warn("⚠️ accessTokenFactory: No auth data in localStorage");
                 return "";
               }
-              
+
               const parsed = JSON.parse(authData);
               const currentToken = parsed?.token;
-              
+
               if (!currentToken) {
                 console.warn("⚠️ accessTokenFactory: No token in evtb_auth");
                 return "";
               }
-              
+
               console.log("🎫 Providing token to SignalR (length):", currentToken.length);
               return currentToken;
             } catch (error) {
@@ -52,18 +54,24 @@ class SignalRService {
             }
           },
           skipNegotiation: false,
-          transport: signalR.HttpTransportType.WebSockets | 
-                     signalR.HttpTransportType.ServerSentEvents | 
-                     signalR.HttpTransportType.LongPolling
+          transport: signalR.HttpTransportType.WebSockets |
+            signalR.HttpTransportType.ServerSentEvents |
+            signalR.HttpTransportType.LongPolling
         })
         .withAutomaticReconnect({
           nextRetryDelayInMilliseconds: (retryContext) => {
             if (retryContext.previousRetryCount >= this.maxReconnectAttempts) {
               console.log("❌ Max reconnect attempts reached");
-              return null;
+              return null; // Stop reconnecting
             }
+            // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, max 60s
             const delay = Math.min(1000 * Math.pow(2, retryContext.previousRetryCount), 60000);
-            console.log(`⏳ Reconnect attempt ${retryContext.previousRetryCount + 1} in ${delay}ms`);
+            console.log(`⏳ Reconnect attempt ${retryContext.previousRetryCount + 1}/${this.maxReconnectAttempts} in ${delay}ms`);
+            this.notifyListeners("reconnecting", {
+              attempt: retryContext.previousRetryCount + 1,
+              maxAttempts: this.maxReconnectAttempts,
+              delay
+            });
             return delay;
           }
         })
@@ -81,6 +89,9 @@ class SignalRService {
       console.log("✅ SignalR connected successfully!");
       console.log("📊 Connection ID:", this.connection.connectionId);
       console.log("📊 Connection State:", this.getState());
+
+      // Start health check
+      this.startHealthCheck();
 
       return this.connection;
     } catch (error) {
@@ -117,6 +128,8 @@ class SignalRService {
       this.reconnectAttempts = 0;
       console.log("✅ SignalR reconnected", connectionId);
       this.notifyListeners("reconnected", { connectionId });
+      // Restart health check
+      this.startHealthCheck();
     });
 
     // Receive message
@@ -231,11 +244,54 @@ class SignalRService {
   }
 
   /**
+   * Start health check ping to ensure connection is alive
+   */
+  startHealthCheck() {
+    // Clear existing interval
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+    }
+
+    // Ping every 30 seconds to check connection
+    this.healthCheckInterval = setInterval(async () => {
+      if (this.connection && this.isConnected) {
+        try {
+          // Try to invoke a simple method to check connection
+          // If connection is dead, this will throw
+          const state = this.getState();
+          if (state !== "Connected") {
+            console.warn("⚠️ Health check: Connection state is", state);
+            this.isConnected = false;
+            this.notifyListeners("connectionLost", { state });
+          }
+        } catch (error) {
+          console.error("❌ Health check failed:", error);
+          this.isConnected = false;
+          this.notifyListeners("connectionLost", { error });
+        }
+      }
+    }, 30000); // Check every 30 seconds
+  }
+
+  /**
+   * Stop health check
+   */
+  stopHealthCheck() {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
+  }
+
+  /**
    * Disconnect from SignalR
    */
   async disconnect() {
     if (this.connection) {
       try {
+        // Stop health check
+        this.stopHealthCheck();
+
         await this.connection.stop();
         this.isConnected = false;
         this.listeners.clear();

@@ -4,6 +4,7 @@ import { X, Send, MessageCircle } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 import { useToast } from "../../contexts/ToastContext";
 import { apiRequest } from "../../lib/api";
+import { validateAndShowWarning } from "../../utils/messageValidator";
 
 export const ChatModal = ({ isOpen, onClose, seller, product }) => {
   const navigate = useNavigate();
@@ -15,6 +16,11 @@ export const ChatModal = ({ isOpen, onClose, seller, product }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!message.trim() || sending) return;
+
+    // Validate message trước khi gửi
+    if (!validateAndShowWarning(message, showToast)) {
+      return; // Dừng lại nếu tin nhắn không hợp lệ
+    }
 
     setSending(true);
     try {

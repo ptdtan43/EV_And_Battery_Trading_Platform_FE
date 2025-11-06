@@ -1,13 +1,20 @@
 using EVTB_Backend.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.PropertyNamingPolicy = null; // Use PascalCase (default)
+        options.JsonSerializerOptions.PropertyNameCaseInsensitive = true; // Allow case-insensitive matching
+    });
+builder.Services.AddSignalR();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -41,9 +48,20 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ClockSkew = TimeSpan.Zero
         };
         
-        // Add event handlers for debugging
+        // Add event handlers for debugging and SignalR token from query
         options.Events = new JwtBearerEvents
         {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/chatHub"))
+                {
+                    context.Token = accessToken!;
+                }
+                return Task.CompletedTask;
+            },
             OnAuthenticationFailed = context =>
             {
                 Console.WriteLine($"JWT Authentication failed: {context.Exception.Message}");
@@ -90,7 +108,24 @@ builder.Services.AddCors(options =>
                 "http://localhost:5182")
               .AllowAnyHeader()
               .AllowAnyMethod()
-              .AllowCredentials(); // Quan trọng: cho phép credentials
+              .AllowCredentials() // Quan trọng: cho phép credentials
+              .WithExposedHeaders("*"); // Expose all headers
+    });
+    
+    // Add default policy for development
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.WithOrigins(
+                "http://localhost:5173", 
+                "http://localhost:5174",
+                "http://localhost:5177", 
+                "http://localhost:5179", 
+                "http://localhost:5181", 
+                "http://localhost:5182")
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials()
+              .WithExposedHeaders("*");
     });
 });
 
@@ -111,7 +146,8 @@ if (app.Environment.IsDevelopment())
 }
 
 // ✅ CORS MUST be called BEFORE UseHttpsRedirection and UseAuthentication
-app.UseCors("AllowFrontend");
+// Use default policy for maximum compatibility
+app.UseCors();
 
 app.UseHttpsRedirection();
 
@@ -120,5 +156,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+// SignalR hub endpoint
+app.MapHub<EVTB_Backend.RealTime.ChatHub>("/chatHub");
 
 app.Run();

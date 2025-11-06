@@ -47,7 +47,14 @@ export const AdminReports = () => {
         data = await getReportsByStatus(filterStatus);
       }
       
-      setReports(Array.isArray(data) ? data : []);
+      // Sắp xếp theo thời gian mới nhất trước
+      const sortedData = Array.isArray(data) ? data.sort((a, b) => {
+        const dateA = new Date(a.createdDate || a.createdAt || 0);
+        const dateB = new Date(b.createdDate || b.createdAt || 0);
+        return dateB - dateA; // Mới nhất trước
+      }) : [];
+      
+      setReports(sortedData);
     } catch (error) {
       console.error("Error loading reports:", error);
       showToast({

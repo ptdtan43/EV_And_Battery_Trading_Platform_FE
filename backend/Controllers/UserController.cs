@@ -12,6 +12,7 @@ namespace EVTB_Backend.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [ApiExplorerSettings(IgnoreApi = false)]
     public class UserController : ControllerBase
     {
         private readonly EVTBContext _context;
@@ -103,17 +104,100 @@ namespace EVTB_Backend.Controllers
         /// Đăng ký người dùng mới
         /// </summary>
         [HttpPost("register")]
-        public async Task<ActionResult<object>> Register([FromBody] RegisterRequest request)
+        public async Task<ActionResult<object>> Register([FromBody] RegisterRequest? request = null)
         {
             try
             {
-                if (!ModelState.IsValid)
+                _logger.LogInformation($"🔍 Request Content-Type: {Request.ContentType}");
+                _logger.LogInformation($"🔍 Request HasFormContentType: {Request.HasFormContentType}");
+                _logger.LogInformation($"🔍 Request object is null: {request == null}");
+                
+                // If request is null, try to read from body manually
+                if (request == null)
                 {
-                    var errors = ModelState.Values
-                        .SelectMany(v => v.Errors)
-                        .Select(e => e.ErrorMessage)
-                        .ToList();
-                    return BadRequest(new { message = "Dữ liệu không hợp lệ", errors });
+                    _logger.LogInformation("📋 Request is null, reading body manually");
+                    
+                    // Enable buffering if not already enabled
+                    if (!Request.Body.CanSeek)
+                    {
+                        Request.EnableBuffering();
+                    }
+                    
+                    Request.Body.Position = 0;
+                    string rawBody;
+                    using (var reader = new StreamReader(Request.Body, System.Text.Encoding.UTF8, leaveOpen: true))
+                    {
+                        rawBody = await reader.ReadToEndAsync();
+                    }
+                    Request.Body.Position = 0;
+                    
+                    _logger.LogInformation($"🔍 Raw request body length: {rawBody?.Length ?? 0}");
+                    if (!string.IsNullOrWhiteSpace(rawBody))
+                    {
+                        var preview = rawBody.Length > 500 ? rawBody.Substring(0, 500) : rawBody;
+                        _logger.LogInformation($"🔍 Raw request body preview: {preview}");
+                        
+                        try
+                        {
+                            var jsonOptions = new System.Text.Json.JsonSerializerOptions
+                            {
+                                PropertyNameCaseInsensitive = true,
+                                PropertyNamingPolicy = null // Accept PascalCase
+                            };
+                            request = System.Text.Json.JsonSerializer.Deserialize<RegisterRequest>(rawBody, jsonOptions);
+                            
+                            if (request != null)
+                            {
+                                _logger.LogInformation($"✅ Manual JSON parsing successful!");
+                                _logger.LogInformation($"   Email: '{request.Email}'");
+                                _logger.LogInformation($"   Password length: {request.Password?.Length ?? 0}");
+                                _logger.LogInformation($"   FullName: '{request.FullName}'");
+                                _logger.LogInformation($"   Phone: '{request.Phone}'");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, $"❌ Manual JSON parsing failed: {ex.Message}");
+                        }
+                    }
+                }
+                else
+                {
+                    _logger.LogInformation($"✅ Request from model binding. Email: '{request.Email}', Password length: {request.Password?.Length ?? 0}");
+                }
+                
+                // Validate required fields
+                if (request == null)
+                {
+                    _logger.LogWarning("❌ Request is null after parsing");
+                    return BadRequest(new { 
+                        message = "Dữ liệu đăng ký không hợp lệ",
+                        errors = new { 
+                            Request = new[] { "Request object is null" } 
+                        }
+                    });
+                }
+                
+                if (string.IsNullOrWhiteSpace(request.Email))
+                {
+                    _logger.LogWarning("❌ Email is empty");
+                    return BadRequest(new { 
+                        message = "Email là bắt buộc", 
+                        errors = new { 
+                            Email = new[] { "The Email field is required." } 
+                        } 
+                    });
+                }
+                
+                if (string.IsNullOrWhiteSpace(request.Password))
+                {
+                    _logger.LogWarning("❌ Password is empty");
+                    return BadRequest(new { 
+                        message = "Password là bắt buộc", 
+                        errors = new { 
+                            Password = new[] { "The Password field is required." } 
+                        } 
+                    });
                 }
 
                 _logger.LogInformation($"Registration attempt for email: {request.Email}");

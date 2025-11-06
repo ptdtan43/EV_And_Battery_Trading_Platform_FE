@@ -4,6 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { apiRequest } from "../lib/api";
 import signalRService from "../services/signalRService";
+import { validateAndShowWarning } from "../utils/messageValidator";
 import { 
   ArrowLeft, 
   Search, 
@@ -12,9 +13,7 @@ import {
   Send,
   Phone,
   Mail,
-  MoreVertical,
-  Wifi,
-  WifiOff
+  MoreVertical
 } from "lucide-react";
 import { format } from "date-fns";
 import { vi } from "date-fns/locale";
@@ -189,11 +188,17 @@ export const ChatHistory = () => {
       const unsubscribeReconnecting = signalRService.on("reconnecting", () => {
         console.log("🔄 Reconnecting to SignalR...");
         setIsConnected(false);
+        setConnectionError("Đang kết nối lại...");
       });
       const unsubscribeConnectionClosed = signalRService.on("connectionClosed", (data) => {
         console.log("🔴 SignalR connection closed", data);
         setIsConnected(false);
-        setConnectionError("Sử dụng chế độ polling");
+        setConnectionError("Mất kết nối - Sử dụng chế độ polling");
+      });
+      const unsubscribeConnectionLost = signalRService.on("connectionLost", (data) => {
+        console.log("⚠️ SignalR connection lost", data);
+        setIsConnected(false);
+        setConnectionError("Mất kết nối - Đang thử kết nối lại...");
       });
 
       // Store unsubscribe functions for cleanup
@@ -202,6 +207,7 @@ export const ChatHistory = () => {
         unsubscribeReconnected();
         unsubscribeReconnecting();
         unsubscribeConnectionClosed();
+        unsubscribeConnectionLost();
       };
     } catch (error) {
       console.error("❌ Failed to connect to SignalR:", error);
@@ -359,6 +365,11 @@ export const ChatHistory = () => {
     e.preventDefault();
     if (!newMessage.trim() || sending || !selectedChatId) return;
 
+    // Validate message trước khi gửi
+    if (!validateAndShowWarning(newMessage, showToast)) {
+      return; // Dừng lại nếu tin nhắn không hợp lệ
+    }
+
     setSending(true);
     try {
       const messageData = {
@@ -489,22 +500,22 @@ export const ChatHistory = () => {
               <h1 className="text-xl font-semibold text-gray-900">Tin nhắn</h1>
             </div>
             
-            {/* Connection Status */}
+            {/* Connection Status Indicator */}
             <div className="flex items-center space-x-2">
               {isConnected ? (
-                <div className="flex items-center space-x-1 text-green-600 text-sm" title="Real-time connected">
-                  <Wifi className="h-4 w-4" />
-                  <span className="hidden sm:inline">Real-time</span>
+                <div className="flex items-center space-x-2 px-3 py-1 bg-green-100 text-green-800 rounded-full text-xs">
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                  <span>Đã kết nối</span>
                 </div>
               ) : connectionError ? (
-                <div className="flex items-center space-x-1 text-red-600 text-sm" title={connectionError}>
-                  <WifiOff className="h-4 w-4" />
-                  <span className="hidden sm:inline">Offline</span>
+                <div className="flex items-center space-x-2 px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs">
+                  <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
+                  <span>{connectionError}</span>
                 </div>
               ) : (
-                <div className="flex items-center space-x-1 text-gray-400 text-sm" title="Connecting...">
-                  <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-                  <span className="hidden sm:inline">Đang kết nối...</span>
+                <div className="flex items-center space-x-2 px-3 py-1 bg-gray-100 text-gray-600 rounded-full text-xs">
+                  <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+                  <span>Đang kết nối...</span>
                 </div>
               )}
             </div>

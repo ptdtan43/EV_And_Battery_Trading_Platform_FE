@@ -1,9 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import {
   BrowserRouter as Router,
   Routes,
   Route,
   Navigate,
+  useLocation,
 } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { Header } from "./components/organisms/Header";
@@ -131,6 +132,13 @@ const ProtectedRoute = ({ children, adminOnly = false, userOnly = false }) => {
 
 const AppContent = () => {
   const { loading } = useAuth();
+  const location = useLocation();
+  const isAdminRoute = location.pathname.startsWith('/admin');
+
+  // Scroll to top when route changes
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [location.pathname]);
 
   // ✅ Global message listener for payment redirect - works from ANY page
   useEffect(() => {
@@ -213,7 +221,7 @@ const AppContent = () => {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Header />
+      {!isAdminRoute && <Header />}
       <main className="flex-grow">
         <Routes>
           <Route path="/" element={<HomePage />} />
@@ -365,7 +373,7 @@ const AppContent = () => {
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </main>
-      <Footer />
+      {!isAdminRoute && <Footer />}
     </div>
   );
 };

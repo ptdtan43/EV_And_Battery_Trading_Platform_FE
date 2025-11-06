@@ -839,10 +839,10 @@ export const CreateListing = () => {
       // Prepare success message with image upload status
       const imageStatus =
         images.length > 0
-          ? documentImages.length > 0
-            ? `Đã upload ${images.length} ảnh xe (Vehicle) và ${documentImages.length} ảnh giấy tờ xe (Document).`
-            : `Đã upload ${images.length} ảnh xe (Vehicle).`
-          : documentImages.length > 0
+          ? documentImages.length > 0 && formData.productType === "vehicle"
+            ? `Đã upload ${images.length} ảnh ${formData.productType === "vehicle" ? "xe (Vehicle)" : "pin (Battery)"} và ${documentImages.length} ảnh giấy tờ xe (Document).`
+            : `Đã upload ${images.length} ảnh ${formData.productType === "vehicle" ? "xe (Vehicle)" : "pin (Battery)"}.`
+          : documentImages.length > 0 && formData.productType === "vehicle"
           ? `Đã upload ${documentImages.length} ảnh giấy tờ xe (Document).`
           : "Chưa có ảnh nào được upload.";
 
@@ -965,7 +965,11 @@ export const CreateListing = () => {
             Quay lại
           </button>
           <h1 className="text-3xl font-bold text-gray-900">Đăng tin mới</h1>
-          <p className="text-gray-600 mt-2">Tạo bài đăng xe điện của bạn</p>
+          <p className="text-gray-600 mt-2">
+            {formData.productType === "vehicle"
+              ? "Tạo bài đăng xe điện của bạn"
+              : "Tạo bài đăng pin của bạn"}
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-8">
@@ -1390,14 +1394,15 @@ export const CreateListing = () => {
           {/* Product Images Upload */}
           <div className="bg-white rounded-xl shadow-sm p-6">
             <h2 className="text-xl font-semibold text-gray-900 mb-6">
-              Hình ảnh xe (Tối đa 5 ảnh)
+              {formData.productType === "battery" ? "Hình ảnh pin (Tối đa 5 ảnh)" : "Hình ảnh xe (Tối đa 5 ảnh)"}
             </h2>
             <div className="space-y-4">
               <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
                 <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                 <p className="text-gray-600 mb-4">
-                  Upload hình ảnh xe của bạn (ảnh xe sẽ được lưu với tên
-                  "Vehicle")
+                  {formData.productType === "battery"
+                    ? "Upload hình ảnh pin của bạn (ảnh sẽ được lưu với tên \"Vehicle\")"
+                    : "Upload hình ảnh xe của bạn (ảnh xe sẽ được lưu với tên \"Vehicle\")"}
                 </p>
                 <input
                   type="file"
@@ -1411,7 +1416,7 @@ export const CreateListing = () => {
                   htmlFor="image-upload"
                   className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 cursor-pointer"
                 >
-                  Chọn ảnh xe
+                  {formData.productType === "battery" ? "Chọn ảnh pin" : "Chọn ảnh xe"}
                 </label>
               </div>
 
