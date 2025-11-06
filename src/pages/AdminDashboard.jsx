@@ -23,6 +23,8 @@ import {
   Bell,
   Flag,
   LogOut,
+  X,
+  AlertTriangle,
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
 import { formatPrice, formatDate } from "../utils/formatters";
@@ -174,6 +176,28 @@ export const AdminDashboard = () => {
     isOpen: false,
     product: null,
   });
+
+  // Transaction failure modal state
+  const [transactionFailureModal, setTransactionFailureModal] = useState({
+    isOpen: false,
+    product: null,
+    reasonCode: '',
+    reasonNote: '',
+  });
+
+  // Transaction failure reason options
+  const transactionFailureReasons = [
+    { code: 'BUYER_REQUEST', label: 'Người mua yêu cầu hủy' },
+    { code: 'SELLER_CANCEL', label: 'Người bán hủy giao dịch' },
+    { code: 'PAYMENT_FAILED', label: 'Thanh toán thất bại' },
+    { code: 'PRODUCT_DAMAGED', label: 'Sản phẩm bị hư hỏng' },
+    { code: 'MISMATCH_DESCRIPTION', label: 'Sản phẩm không đúng mô tả' },
+    { code: 'FRAUD_SUSPECT', label: 'Nghi ngờ gian lận' },
+    { code: 'OUT_OF_STOCK', label: 'Sản phẩm không còn hàng' },
+    { code: 'PRICE_DISPUTE', label: 'Tranh chấp về giá' },
+    { code: 'DELIVERY_ISSUE', label: 'Vấn đề giao hàng' },
+    { code: 'OTHER', label: 'Lý do khác' },
+  ];
 
   // Inspection state
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -758,103 +782,131 @@ export const AdminDashboard = () => {
     }
   };
 
-  // Handle mark transaction as failed and refund
-  const handleMarkTransactionFailed = async (productId) => {
-    if (!window.confirm('Bạn có chắc muốn đánh dấu giao dịch này không thành công? Sản phẩm sẽ được trả về Homepage và hoàn tiền cho người mua.')) {
+  // Handle mark transaction as failed - Simple version: just save reason to CancellationReason
+  const handleMarkTransactionFailed = async (productId, failureReason = null) => {
+    // If reason is provided, proceed directly; otherwise open modal
+    if (!failureReason) {
+      const product = allListings.find(p => (p.id || p.productId) == productId);
+      setTransactionFailureModal({
+        isOpen: true,
+        product: product,
+        reasonCode: '',
+        reasonNote: '',
+      });
       return;
     }
 
     try {
       showToast({
         title: 'Đang xử lý...',
-        description: 'Đang hoàn tiền và trả sản phẩm về trang chủ',
+        description: 'Đang lưu lý do từ chối',
         type: 'info',
       });
 
-
       // Find the product to get its details
       const product = allListings.find(p => (p.id || p.productId) == productId);
-      console.log('📦 Product to return:', product);
+      console.log('📦 Product:', product);
 
-      // Update product status to 'Active' to release it back to Homepage
-      // Use PUT /api/Product/{id} to update the whole product
+      // Find the order related to this product
+      let orderId = null;
       try {
-        // Get full product details first
-        const fullProduct = await apiRequest(`/api/Product/${productId}`);
-        console.log('📦 Full product data:', fullProduct);
+        const orders = await apiRequest("/api/Order");
+        console.log('🔍 All orders:', orders);
+        console.log('🔍 Looking for order with productId:', productId);
         
-        // Update product with Active status
-        const productUpdateResponse = await apiRequest(`/api/Product/${productId}`, {
-          method: 'PUT',
-          body: {
-            ...fullProduct,
-            status: 'Active'
-          }
+        // Find order that matches productId - check multiple status values
+        const order = orders.find(o => {
+          const orderProductId = o.productId || o.ProductId || o.product?.productId || o.product?.id;
+          const orderStatus = (o.status || o.orderStatus || o.Status || o.OrderStatus || '').toLowerCase();
+          
+          console.log(`🔍 Checking order ${o.orderId}:`, {
+            orderProductId,
+            productId,
+            match: orderProductId == productId,
+            orderStatus
+          });
+          
+          // Match productId and check if order is in a cancellable state
+          return (orderProductId == productId || orderProductId === productId) && 
+                 (orderStatus === 'deposited' || orderStatus === 'pending' || orderStatus === 'reserved' || 
+                  orderStatus === 'depositpaid' || orderStatus === 'deposit_paid');
         });
-        console.log('✅ Product status updated to Active:', productUpdateResponse);
-      } catch (statusError) {
-        console.error('❌ Could not update product status:', statusError);
+        
+        if (order) {
+          orderId = order.orderId || order.OrderId || order.id;
+          console.log('✅ Found order:', orderId, 'for product:', productId, 'Status:', order.status || order.orderStatus);
+        } else {
+          console.warn('⚠️ No order found for product:', productId, 'Available orders:', orders.map(o => ({
+            orderId: o.orderId || o.OrderId,
+            productId: o.productId || o.ProductId,
+            status: o.status || o.orderStatus || o.Status || o.OrderStatus
+          })));
+        }
+      } catch (error) {
+        console.warn('⚠️ Could not find order:', error);
+      }
+
+      // Build failure reason text from ReasonCode + ReasonNote
+      const reasonCode = failureReason.reasonCode || '';
+      const reasonNote = failureReason.reasonNote || '';
+      const reasonOption = transactionFailureReasons.find(r => r.code === reasonCode);
+      let cancellationReasonText = '';
+      
+      if (reasonOption && reasonCode !== 'OTHER') {
+        cancellationReasonText = reasonOption.label;
+        if (reasonNote.trim()) {
+          cancellationReasonText += `: ${reasonNote.trim()}`;
+        }
+      } else if (reasonNote.trim()) {
+        cancellationReasonText = reasonNote.trim();
+      } else {
+        cancellationReasonText = 'Không xác định';
+      }
+
+      // Call API to save cancellation reason to Order using admin-reject endpoint
+      if (orderId) {
+        try {
+          // Use admin-reject endpoint that already exists
+          // Note: Endpoint expects field "Reason" (capital R) and minimum 3 characters
+          await apiRequest(`/api/Order/${orderId}/admin-reject`, {
+            method: 'POST',
+            body: {
+              Reason: cancellationReasonText  // Capital R - matches AdminRejectOrderRequest.Reason
+            }
+          });
+          console.log('✅ Cancellation reason saved to Order:', cancellationReasonText);
+        } catch (orderError) {
+          console.error('❌ Could not update order:', orderError);
+          showToast({
+            title: 'Lỗi',
+            description: `Không thể lưu lý do từ chối: ${orderError.message || 'Vui lòng thử lại.'}`,
+            type: 'error',
+          });
+          return;
+        }
+      } else {
         showToast({
-          title: 'Lỗi',
-          description: 'Không thể cập nhật trạng thái sản phẩm. Vui lòng thử lại.',
-          type: 'error',
+          title: 'Cảnh báo',
+          description: 'Không tìm thấy đơn hàng liên quan đến sản phẩm này.',
+          type: 'warning',
         });
         return;
       }
 
-      // Try to get payment details, but don't fail if this doesn't work
-      let refundAmount = 'N/A';
-      try {
-        const payments = await apiRequest(`/api/payment/product/${productId}`);
-        console.log('📝 Found payments for product:', payments);
-
-        if (payments && payments.length > 0) {
-          const latestPayment = payments[0];
-          refundAmount = latestPayment.amount 
-            ? (parseInt(latestPayment.amount) / 100).toLocaleString('vi-VN') 
-            : 'N/A';
-          
-          console.log('💰 Refund amount calculated:', refundAmount);
-        }
-      } catch (paymentError) {
-        console.warn('⚠️ Could not get payment details, using product price:', paymentError);
-        // Use product price as fallback (no need to divide by 100, price is already in correct unit)
-        refundAmount = product?.price ? parseInt(product.price).toLocaleString('vi-VN') : 'N/A';
-      }
-
-      // Save refund info to localStorage for banner display
-      const refundData = {
-        type: 'REFUND',
-        amount: refundAmount,
-        productTitle: product?.title || product?.name || 'Sản phẩm',
-        timestamp: Date.now()
-      };
-      localStorage.setItem('evtb_refund_success', JSON.stringify(refundData));
-      console.log('💾 Refund data saved to localStorage:', refundData);
-
       showToast({
         title: 'Thành công!',
-        description: 'Giao dịch đã được đánh dấu không thành công. Sản phẩm đã được trả về trang chủ.',
+        description: 'Lý do từ chối đã được lưu. Sản phẩm vẫn hiển thị trong danh sách quản lý giao dịch.',
         type: 'success',
       });
 
       // Reload data to update UI
       await loadAdminData();
 
-      // Show info toast about refund banner
-      setTimeout(() => {
-        showToast({
-          title: 'Hoàn tiền',
-          description: 'Người mua sẽ thấy thông báo hoàn tiền khi vào Homepage',
-          type: 'success',
-        });
-      }, 1000);
-
     } catch (error) {
       console.error('❌ Error marking transaction as failed:', error);
       showToast({
         title: 'Lỗi',
-        description: `Không thể đánh dấu giao dịch thất bại: ${error.message || 'Vui lòng thử lại.'}`,
+        description: `Không thể lưu lý do từ chối: ${error.message || 'Vui lòng thử lại.'}`,
         type: 'error',
       });
     }
@@ -2147,10 +2199,10 @@ export const AdminDashboard = () => {
                 signOut();
                 navigate("/");
               }}
-              className="flex items-center space-x-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors duration-200 shadow-md hover:shadow-lg"
+              className="p-2 text-gray-900 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+              title="Đăng xuất"
             >
               <LogOut className="h-5 w-5" />
-              <span>Đăng xuất</span>
             </button>
           </div>
         </div>
@@ -2692,8 +2744,8 @@ export const AdminDashboard = () => {
             </div>
           </div>
         )}
-            {/* Filters and Search - Hide on reports and users tabs */}
-            {activeTab !== "reports" && activeTab !== "users" && (
+            {/* Filters and Search - Hide on reports, users, and transactions tabs */}
+            {activeTab !== "reports" && activeTab !== "users" && activeTab !== "transactions" && (
             <div className="bg-white rounded-2xl shadow-lg p-6 mb-8 border border-gray-100">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0 lg:space-x-6">
             <div className="flex-1">
@@ -3716,6 +3768,179 @@ export const AdminDashboard = () => {
       {/* Reports Management Tab */}
       {activeTab === "reports" && (
         <AdminReports />
+      )}
+
+      {/* Transaction Failure Reason Modal */}
+      {transactionFailureModal.isOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4">
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-red-100 rounded-lg">
+                  <AlertTriangle className="h-6 w-6 text-red-600" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900">
+                    Đánh dấu giao dịch không thành công
+                  </h3>
+                  <p className="text-sm text-gray-600">
+                    Vui lòng nhập lý do để hoàn tiền cho người mua
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setTransactionFailureModal({ isOpen: false, product: null, reasonCode: '', reasonNote: '' })}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Product Info */}
+            {transactionFailureModal.product && (
+              <div className="p-6 border-b border-gray-200">
+                <div className="flex items-start space-x-4">
+                  {transactionFailureModal.product.images && transactionFailureModal.product.images.length > 0 && (
+                    <img
+                      src={transactionFailureModal.product.images[0]}
+                      alt={transactionFailureModal.product.title || transactionFailureModal.product.name}
+                      className="w-16 h-16 object-cover rounded-lg"
+                      onError={(e) => {
+                        e.target.style.display = 'none';
+                      }}
+                    />
+                  )}
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-gray-900">
+                      {transactionFailureModal.product.title || transactionFailureModal.product.name}
+                    </h4>
+                    <p className="text-sm text-gray-600">
+                      ID: {transactionFailureModal.product.id || transactionFailureModal.product.productId}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      Giá: {formatPrice(transactionFailureModal.product.price)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Form */}
+            <div className="p-6">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Lý do <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={transactionFailureModal.reasonCode}
+                  onChange={(e) => setTransactionFailureModal({
+                    ...transactionFailureModal,
+                    reasonCode: e.target.value,
+                    reasonNote: e.target.value !== 'OTHER' ? transactionFailureModal.reasonNote : ''
+                  })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                  required
+                >
+                  <option value="">-- Chọn lý do --</option>
+                  {transactionFailureReasons.map(reason => (
+                    <option key={reason.code} value={reason.code}>
+                      {reason.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {(transactionFailureModal.reasonCode === 'OTHER' || transactionFailureModal.reasonCode) && (
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    {transactionFailureModal.reasonCode === 'OTHER' 
+                      ? 'Mô tả chi tiết lý do' 
+                      : 'Ghi chú bổ sung (tùy chọn)'}
+                    {transactionFailureModal.reasonCode === 'OTHER' && <span className="text-red-500">*</span>}
+                  </label>
+                  <textarea
+                    value={transactionFailureModal.reasonNote}
+                    onChange={(e) => setTransactionFailureModal({
+                      ...transactionFailureModal,
+                      reasonNote: e.target.value
+                    })}
+                    placeholder={transactionFailureModal.reasonCode === 'OTHER' 
+                      ? "Nhập lý do chi tiết tại sao giao dịch không thành công..."
+                      : "Nhập ghi chú bổ sung (nếu có)..."}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
+                    rows={4}
+                    required={transactionFailureModal.reasonCode === 'OTHER'}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    {transactionFailureModal.reasonCode === 'OTHER' 
+                      ? 'Lý do này sẽ được hiển thị cho người mua và người bán'
+                      : 'Ghi chú này sẽ được lưu lại để tham khảo'}
+                  </p>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex items-center justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setTransactionFailureModal({ isOpen: false, product: null, reasonCode: '', reasonNote: '' })}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    // Validate
+                    const reasonCode = transactionFailureModal.reasonCode;
+                    const reasonNote = transactionFailureModal.reasonNote;
+                    
+                    if (!reasonCode) {
+                      showToast({
+                        title: 'Lỗi',
+                        description: 'Vui lòng chọn lý do',
+                        type: 'error',
+                      });
+                      return;
+                    }
+                    
+                    if (reasonCode === 'OTHER' && !reasonNote.trim()) {
+                      showToast({
+                        title: 'Lỗi',
+                        description: 'Vui lòng nhập mô tả chi tiết lý do',
+                        type: 'error',
+                      });
+                      return;
+                    }
+
+                    const productId = transactionFailureModal.product?.id || transactionFailureModal.product?.productId;
+                    if (!productId) {
+                      showToast({
+                        title: 'Lỗi',
+                        description: 'Không tìm thấy thông tin sản phẩm',
+                        type: 'error',
+                      });
+                      return;
+                    }
+
+                    // Close modal and proceed with failure
+                    setTransactionFailureModal({ isOpen: false, product: null, reasonCode: '', reasonNote: '' });
+                    await handleMarkTransactionFailed(productId, {
+                      reasonCode: reasonCode,
+                      reasonNote: reasonNote
+                    });
+                  }}
+                  disabled={!transactionFailureModal.reasonCode || (transactionFailureModal.reasonCode === 'OTHER' && !transactionFailureModal.reasonNote.trim())}
+                  className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
+                >
+                  <AlertTriangle className="h-4 w-4" />
+                  <span>Xác nhận hủy giao dịch</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       </div>

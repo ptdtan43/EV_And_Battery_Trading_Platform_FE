@@ -310,3 +310,7 @@ VALUES ('VerificationFee', 50000.00, 1); -- 50k VND cho kiểm định
 ALTER TABLE [dbo].[Users] ADD [AccountStatusReason] NVARCHAR(MAX) NULL;
 
 ALTER TABLE [dbo].[Notifications] ADD [IsRead] BIT NOT NULL DEFAULT 0;
+
+ALTER TABLE [dbo].[Orders]
+ADD [CancellationReason] nvarchar(500) NULL;    
+
