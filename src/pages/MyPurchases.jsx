@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Clock, Package, Star, CheckCircle, Eye, MessageSquare } from 'lucide-react';
+import { Clock, Package, Star, CheckCircle, Eye, MessageSquare, XCircle, AlertCircle, ShoppingCart, Store } from 'lucide-react';
 import { apiRequest } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -8,8 +8,11 @@ import { useToast } from '../contexts/ToastContext';
 const MyPurchases = () => {
   const { user } = useAuth();
   const { show } = useToast();
+  const [activeTab, setActiveTab] = useState('purchases'); // 'purchases' or 'sales'
   const [purchases, setPurchases] = useState([]);
+  const [sales, setSales] = useState([]); // For seller's sold products
   const [loading, setLoading] = useState(true);
+  const [salesLoading, setSalesLoading] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [reviewData, setReviewData] = useState({
@@ -22,6 +25,12 @@ const MyPurchases = () => {
       loadPurchases();
     }
   }, [user]);
+
+  useEffect(() => {
+    if (user && activeTab === 'sales') {
+      loadSales();
+    }
+  }, [user, activeTab]);
 
   const loadPurchases = async () => {
     try {
@@ -94,15 +103,15 @@ const MyPurchases = () => {
         });
       });
       
-      // Filter to only show completed/sold purchases
+      // Filter to show completed/sold purchases AND cancelled orders
       const completedOrders = orders.filter(order => {
-        const orderStatus = order.status || order.orderStatus;
-        const productStatus = order.product?.status;
+        const orderStatus = (order.status || order.orderStatus || '').toLowerCase();
+        const productStatus = (order.product?.status || '').toLowerCase();
         
         console.log(`🔍 Order ${order.orderId} - Order status: ${orderStatus}, Product status: ${productStatus}`);
         console.log(`🔍 Order ${order.orderId} - ProductId: ${order.productId}, Product:`, order.product);
         
-        // Check if this order has valid productId (like admin dashboard shows sold products)
+        // Check if this order has valid productId
         const productId = order.product?.productId || order.product?.id || order.productId || order.product?.ProductId;
         const hasValidProductId = productId && productId !== null;
         
@@ -118,18 +127,18 @@ const MyPurchases = () => {
         
         console.log(`🔍 Order ${order.orderId} - buyerId: ${order.buyerId}, current userId: ${userId}, isCurrentUserOrder: ${isCurrentUserOrder}`);
         
-        // Only show products with "sold" status like admin dashboard
-        // Check if product status is "sold" (this is the key condition from admin dashboard)
-        const isProductSold = productStatus === 'sold' || productStatus === 'Sold' || 
-                              productStatus === 'completed' || productStatus === 'Completed' ||
-                              productStatus === 'finished' || productStatus === 'Finished' ||
-                              productStatus === 'active' || productStatus === 'Active';
+        // Show cancelled orders (to display cancellation reason)
+        const isCancelled = orderStatus === 'cancelled' || orderStatus === 'cancelled' || orderStatus === 'failed';
         
-        // Show all sold products like admin dashboard (not just current user's)
-        const shouldInclude = hasValidProductId && isProductSold;
+        // Show completed/sold products
+        const isProductSold = productStatus === 'sold' || productStatus === 'completed' || 
+                              productStatus === 'finished' || productStatus === 'active';
+        
+        // Include if: has valid productId AND (is cancelled OR is sold)
+        const shouldInclude = hasValidProductId && (isCancelled || isProductSold);
         
         if (shouldInclude) {
-          console.log(`✅ Including order ${order.orderId} - Order: ${orderStatus}, Product: ${productStatus}`);
+          console.log(`✅ Including order ${order.orderId} - Order: ${orderStatus}, Product: ${productStatus}, Cancelled: ${isCancelled}`);
         } else {
           console.log(`❌ Excluding order ${order.orderId} - Order: ${orderStatus}, Product: ${productStatus}`);
         }
@@ -201,8 +210,9 @@ const MyPurchases = () => {
               });
               return sellerId;
             })(), // Fallback to 1
-            canReview: !order.hasRating, // All orders are completed/sold after filtering
-            orderStatus: order.product?.status || order.status || order.orderStatus || 'completed'
+            canReview: !order.hasRating && (order.status || order.orderStatus || '').toLowerCase() !== 'cancelled',
+            orderStatus: order.status || order.orderStatus || order.product?.status || 'completed',
+            cancellationReason: order.cancellationReason || order.CancellationReason || null
           };
         }
         
@@ -255,8 +265,9 @@ const MyPurchases = () => {
             });
             return sellerId;
           })(), // Fallback to 1
-          canReview: !order.hasRating, // All orders are completed/sold after filtering
-          orderStatus: order.product?.status || order.status || order.orderStatus || 'completed'
+          canReview: !order.hasRating && (order.status || order.orderStatus || '').toLowerCase() !== 'cancelled',
+          orderStatus: order.status || order.orderStatus || order.product?.status || 'completed',
+          cancellationReason: order.cancellationReason || order.CancellationReason || null
         };
       }));
       
@@ -282,6 +293,88 @@ const MyPurchases = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Load seller's sales (orders where user is seller)
+  const loadSales = async () => {
+    try {
+      setSalesLoading(true);
+      const sellerId = user?.id || user?.userId || user?.accountId;
+      
+      console.log('🔍 Loading sales for seller:', sellerId);
+      
+      // Use GET /api/Order (same endpoint as MyListings.jsx uses)
+      const allOrders = await apiRequest(`/api/Order`);
+      console.log('✅ All orders loaded from /api/Order:', allOrders);
+      
+      // Filter orders by sellerId
+      const orders = Array.isArray(allOrders) ? allOrders : [];
+      const sellerOrders = orders.filter(order => {
+        const orderSellerId = order.sellerId || order.SellerId || order.seller?.id || order.seller?.userId;
+        return orderSellerId == sellerId || orderSellerId === sellerId;
+      });
+      
+      console.log(`✅ Filtered ${sellerOrders.length} orders for seller ${sellerId}`);
+      
+      // Filter completed/sold orders
+      const completedSales = sellerOrders.filter(order => {
+        const orderStatus = (order.status || order.orderStatus || order.Status || order.OrderStatus || '').toLowerCase();
+        const productStatus = (order.product?.status || '').toLowerCase();
+        
+        // Show cancelled orders (to display cancellation reason) and completed/sold products
+        const isCancelled = orderStatus === 'cancelled' || orderStatus === 'failed';
+        const isCompleted = productStatus === 'sold' || productStatus === 'completed' || orderStatus === 'completed';
+        
+        return isCancelled || isCompleted;
+      });
+      
+      // Process sales with product details
+      const salesWithDetails = await Promise.all(completedSales.map(async (order) => {
+        const productId = order.productId || order.ProductId || order.product?.productId || order.product?.id;
+        
+        if (!productId) {
+          return null;
+        }
+        
+        // Fetch images for this product
+        let productImages = [];
+        try {
+          const imageResponse = await apiRequest(`/api/ProductImage/product/${productId}`, 'GET');
+          productImages = imageResponse || [];
+        } catch (error) {
+          console.log(`❌ Failed to fetch images for product ${productId}:`, error.message);
+          productImages = [];
+        }
+        
+        return {
+          ...order,
+          productId: productId,
+          product: {
+            ...order.product,
+            images: productImages,
+            primaryImage: productImages?.[0] || null
+          },
+          buyerName: order.buyer?.fullName || order.buyerName || order.user?.fullName || 'N/A',
+          orderStatus: order.status || order.orderStatus || order.Status || order.OrderStatus,
+          cancellationReason: order.cancellationReason || order.CancellationReason || null
+        };
+      }));
+      
+      // Filter out null values
+      const validSales = salesWithDetails.filter(sale => sale !== null);
+      
+      console.log(`✅ Valid sales count: ${validSales.length}`);
+      setSales(validSales);
+    } catch (error) {
+      console.error('Error loading sales:', error);
+      show({
+        title: 'Lỗi',
+        description: 'Không thể tải danh sách sản phẩm đã bán',
+        type: 'error'
+      });
+    } finally {
+      setSalesLoading(false);
     }
   };
 
@@ -404,7 +497,7 @@ const MyPurchases = () => {
     });
   };
 
-  if (loading) {
+  if (loading && activeTab === 'purchases') {
     return (
       <div className="min-h-screen bg-gray-50 py-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -417,15 +510,68 @@ const MyPurchases = () => {
     );
   }
 
+  if (salesLoading && activeTab === 'sales') {
+    return (
+      <div className="min-h-screen bg-gray-50 py-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600">Đang tải danh sách sản phẩm đã bán...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Sản phẩm đã mua</h1>
+          <h1 className="text-3xl font-bold text-gray-900">Quản lí sản phẩm</h1>
           <p className="mt-2 text-gray-600">
-            Quản lý và đánh giá các sản phẩm bạn đã mua
+            Quản lý các sản phẩm bạn đã mua và đã bán
           </p>
         </div>
+
+        {/* Tabs */}
+        <div className="mb-6 border-b border-gray-200">
+          <nav className="-mb-px flex space-x-8">
+            <button
+              onClick={() => setActiveTab('purchases')}
+              className={`
+                py-4 px-1 border-b-2 font-medium text-sm
+                ${activeTab === 'purchases'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }
+              `}
+            >
+              <div className="flex items-center space-x-2">
+                <ShoppingCart className="h-5 w-5" />
+                <span>Sản phẩm đã mua</span>
+              </div>
+            </button>
+            <button
+              onClick={() => setActiveTab('sales')}
+              className={`
+                py-4 px-1 border-b-2 font-medium text-sm
+                ${activeTab === 'sales'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }
+              `}
+            >
+              <div className="flex items-center space-x-2">
+                <Store className="h-5 w-5" />
+                <span>Sản phẩm đã bán</span>
+              </div>
+            </button>
+          </nav>
+        </div>
+
+        {/* Tab Content */}
+        {activeTab === 'purchases' && (
+          <>
 
         {purchases.length === 0 ? (
           <div className="text-center py-12">
@@ -501,9 +647,16 @@ const MyPurchases = () => {
                         
                         {/* Status badge */}
                         <div className="absolute top-3 right-3">
-                          <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                            Đã bán
-                          </span>
+                          {((purchase.orderStatus || purchase.status || '').toLowerCase() === 'cancelled' || 
+                            (purchase.orderStatus || purchase.status || '').toLowerCase() === 'failed') ? (
+                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                              Đã hủy
+                            </span>
+                          ) : (
+                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                              Đã bán
+                            </span>
+                          )}
                         </div>
                       </div>
                     );
@@ -553,8 +706,18 @@ const MyPurchases = () => {
                       {formatPrice(purchase.totalAmount)}
                     </span>
                     <div className="flex items-center text-sm text-gray-500">
-                      <CheckCircle className="h-4 w-4 mr-1" />
-                      Đã giao dịch 
+                      {((purchase.orderStatus || purchase.status || '').toLowerCase() === 'cancelled' || 
+                        (purchase.orderStatus || purchase.status || '').toLowerCase() === 'failed') ? (
+                        <>
+                          <XCircle className="h-4 w-4 mr-1 text-red-500" />
+                          Đã hủy
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="h-4 w-4 mr-1" />
+                          Đã giao dịch
+                        </>
+                      )}
                     </div>
                   </div>
                   
@@ -568,6 +731,26 @@ const MyPurchases = () => {
                       <p className="text-red-500 text-xs">⚠️ {purchase.error}</p>
                     )}
                   </div>
+                  
+                  {/* Show Cancellation Reason if order is cancelled */}
+                  {((purchase.orderStatus || purchase.status || '').toLowerCase() === 'cancelled' || 
+                    (purchase.orderStatus || purchase.status || '').toLowerCase() === 'failed') && 
+                    purchase.cancellationReason && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 mt-4">
+                      <div className="flex items-start space-x-2">
+                        <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
+                        <div className="flex-1">
+                          <h4 className="font-semibold text-red-900 mb-1">Giao dịch đã bị hủy</h4>
+                          <p className="text-sm text-red-800 mb-1">
+                            <span className="font-medium">Lý do:</span> {purchase.cancellationReason}
+                          </p>
+                          <p className="text-xs text-red-600 mt-2">
+                            Đơn hàng này đã bị admin hủy. Sản phẩm đã được trả về trang chủ.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   
                   <div className="flex space-x-2">
                     <Link
@@ -606,6 +789,167 @@ const MyPurchases = () => {
               </div>
             ))}
           </div>
+        )}
+          </>
+        )}
+
+        {activeTab === 'sales' && (
+          <>
+            {sales.length === 0 ? (
+              <div className="text-center py-12">
+                <Store className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">Chưa có sản phẩm đã bán</h3>
+                <p className="text-gray-600 mb-6">Bạn chưa có sản phẩm nào đã bán trên EV Market</p>
+                <Link
+                  to="/my-listings"
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                >
+                  Quản lý tin đăng
+                </Link>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {sales.map((sale) => (
+                  <div key={sale.orderId} className="bg-white rounded-lg shadow-md overflow-hidden">
+                    {(() => {
+                      const product = sale.product;
+                      if (!product) {
+                        return (
+                          <div className="w-full h-48 bg-gray-200 flex items-center justify-center">
+                            <Package className="h-12 w-12 text-gray-400" />
+                          </div>
+                        );
+                      }
+
+                      const realImages = product.images || [];
+                      const primaryImage = product.primaryImage || realImages[0];
+
+                      if (primaryImage) {
+                        const imageUrl = primaryImage.imageData || primaryImage.imageUrl || primaryImage;
+                        return (
+                          <div className="w-full h-48 relative overflow-hidden">
+                            <img
+                              src={imageUrl}
+                              alt={product.title || 'Sản phẩm'}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                e.target.style.display = 'none';
+                                e.target.nextSibling.style.display = 'flex';
+                              }}
+                            />
+                            <div className="w-full h-48 bg-gradient-to-br from-blue-50 to-indigo-100 flex flex-col items-center justify-center absolute inset-0" style={{display: 'none'}}>
+                              <div className="relative z-10 text-center">
+                                <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mb-3 shadow-lg">
+                                  <Package className="h-8 w-8 text-blue-600" />
+                                </div>
+                                <h4 className="text-sm font-semibold text-gray-700 mb-1">
+                                  {product.title || 'Sản phẩm'}
+                                </h4>
+                              </div>
+                            </div>
+                            <div className="absolute top-3 right-3">
+                              {((sale.orderStatus || sale.status || '').toLowerCase() === 'cancelled' || 
+                                (sale.orderStatus || sale.status || '').toLowerCase() === 'failed') ? (
+                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                  Đã hủy
+                                </span>
+                              ) : (
+                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                  Đã bán
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="w-full h-48 bg-gradient-to-br from-blue-50 to-indigo-100 flex flex-col items-center justify-center relative overflow-hidden">
+                          <div className="relative z-10 text-center">
+                            <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mb-3 shadow-lg">
+                              <Package className="h-8 w-8 text-blue-600" />
+                            </div>
+                            <h4 className="text-sm font-semibold text-gray-700 mb-1">
+                              {product.title || 'Sản phẩm'}
+                            </h4>
+                          </div>
+                          <div className="absolute top-3 right-3">
+                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                              Đã bán
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    
+                    <div className="p-6">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                        {sale.product?.title || sale.productTitle || 'Sản phẩm không tìm thấy'}
+                      </h3>
+                      
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-xl font-bold text-green-600">
+                          {formatPrice(sale.totalAmount)}
+                        </span>
+                        <div className="flex items-center text-sm text-gray-500">
+                          {((sale.orderStatus || sale.status || '').toLowerCase() === 'cancelled' || 
+                            (sale.orderStatus || sale.status || '').toLowerCase() === 'failed') ? (
+                            <>
+                              <XCircle className="h-4 w-4 mr-1 text-red-500" />
+                              Đã hủy
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle className="h-4 w-4 mr-1" />
+                              Đã bán
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      
+                      <div className="text-sm text-gray-600 mb-4">
+                        <p>Ngày tạo: {formatDate(sale.createdDate || sale.createdAt || sale.purchaseDate)}</p>
+                        {sale.completedDate && (
+                          <p>Ngày hoàn tất: {formatDate(sale.completedDate)}</p>
+                        )}
+                        <p>Người mua: {sale.buyerName || 'N/A'}</p>
+                      </div>
+                      
+                      {/* Show Cancellation Reason if order is cancelled */}
+                      {((sale.orderStatus || sale.status || '').toLowerCase() === 'cancelled' || 
+                        (sale.orderStatus || sale.status || '').toLowerCase() === 'failed') && 
+                        sale.cancellationReason && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mt-4">
+                          <div className="flex items-start space-x-2">
+                            <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
+                            <div className="flex-1">
+                              <h4 className="font-semibold text-red-900 mb-1">Giao dịch đã bị hủy</h4>
+                              <p className="text-sm text-red-800 mb-1">
+                                <span className="font-medium">Lý do:</span> {sale.cancellationReason}
+                              </p>
+                              <p className="text-xs text-red-600 mt-2">
+                                Đơn hàng này đã bị admin hủy. Sản phẩm đã được trả về trang chủ.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className="flex space-x-2">
+                        <Link
+                          to={`/product/${sale.productId}`}
+                          className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-center text-sm font-medium flex items-center justify-center"
+                        >
+                          <Eye className="h-4 w-4 mr-1" />
+                          Xem lại
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
 
         {/* Review Modal */}

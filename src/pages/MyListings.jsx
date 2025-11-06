@@ -10,6 +10,8 @@ import {
   Package,
   AlertTriangle,
   CheckCircle,
+  XCircle,
+  Info,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { apiRequest } from "../lib/api";
@@ -31,6 +33,7 @@ export const MyListings = () => {
   const [activeTab, setActiveTab] = useState("listings"); // listings, rejected
   const [showRejectionModal, setShowRejectionModal] = useState(false);
   const [selectedRejection, setSelectedRejection] = useState(null);
+  const [sellerOrders, setSellerOrders] = useState([]); // Store seller's orders for cancellation info
 
   useEffect(() => {
     console.log("🔍 MyListings useEffect triggered:", {
@@ -39,6 +42,7 @@ export const MyListings = () => {
     });
     if (user) {
       loadListings();
+      loadSellerOrders(); // Load orders to check for cancellation reasons
     }
   }, [user]);
 
@@ -366,6 +370,111 @@ export const MyListings = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Load seller's orders to check for cancellation reasons
+  // Use GET /api/Order (same as MyPurchases.jsx) to get cancellationReason
+  const loadSellerOrders = async () => {
+    try {
+      const sellerId = user?.id || user?.accountId || user?.userId;
+      if (!sellerId) {
+        console.warn('⚠️ No sellerId found, cannot load orders');
+        return;
+      }
+
+      console.log('🔍 Loading seller orders for sellerId:', sellerId);
+      
+      // Use GET /api/Order (same endpoint as MyPurchases.jsx uses)
+      // This endpoint returns cancellationReason properly
+      const allOrders = await apiRequest(`/api/Order`);
+      console.log('✅ All orders loaded from /api/Order:', allOrders);
+      
+      // Filter orders by sellerId
+      const orders = Array.isArray(allOrders) ? allOrders : [];
+      const sellerOrdersFiltered = orders.filter(order => {
+        const orderSellerId = order.sellerId || order.SellerId || order.seller?.id || order.seller?.userId;
+        return orderSellerId == sellerId || orderSellerId === sellerId;
+      });
+      
+      console.log(`✅ Filtered ${sellerOrdersFiltered.length} orders for seller ${sellerId} out of ${orders.length} total orders`);
+      
+      // Store ALL orders (not just cancelled) so we can match by productId
+      // We'll filter cancelled ones when displaying
+      setSellerOrders(sellerOrdersFiltered);
+      
+      // Log cancelled orders for debugging
+      const cancelledOrders = sellerOrdersFiltered.filter(order => {
+        const status = (order.status || order.orderStatus || order.Status || order.OrderStatus || '').toLowerCase();
+        const hasReason = order.cancellationReason || order.CancellationReason;
+        return status === 'cancelled' && hasReason;
+      });
+      
+      console.log('🔍 All seller orders:', sellerOrdersFiltered.length);
+      console.log('🔍 Cancelled orders with reason:', cancelledOrders.length);
+      cancelledOrders.forEach(order => {
+        console.log(`📦 Order ${order.orderId || order.OrderId}:`, {
+          productId: order.productId || order.ProductId || order.product?.productId || order.product?.id,
+          status: order.status || order.orderStatus || order.Status || order.OrderStatus,
+          cancellationReason: order.cancellationReason || order.CancellationReason,
+          sellerId: order.sellerId || order.SellerId
+        });
+      });
+    } catch (error) {
+      console.error("❌ Error loading seller orders:", error);
+    }
+  };
+
+  // Get cancellation reason for a product
+  // Same logic as MyPurchases.jsx - get cancellationReason directly from order
+  const getCancellationReasonForProduct = (productId) => {
+    if (!productId || sellerOrders.length === 0) {
+      console.log(`⚠️ No cancellation reason for product ${productId}:`, {
+        hasProductId: !!productId,
+        sellerOrdersCount: sellerOrders.length
+      });
+      return null;
+    }
+    
+    // Try multiple ways to match productId (same as MyPurchases.jsx)
+    const productIdNum = parseInt(productId);
+    
+    const order = sellerOrders.find(o => {
+      // Match productId from various possible fields (same as MyPurchases.jsx)
+      const orderProductId = o.productId || o.ProductId || o.product?.productId || o.product?.id;
+      const orderProductIdNum = orderProductId ? parseInt(orderProductId) : null;
+      
+      // Match by productId
+      const matchesId = orderProductId == productId || 
+                        orderProductId === productId ||
+                        orderProductIdNum === productIdNum;
+      
+      // Check if order is cancelled and has reason
+      const status = (o.status || o.orderStatus || o.Status || o.OrderStatus || '').toLowerCase();
+      const isCancelled = status === 'cancelled';
+      const hasReason = o.cancellationReason || o.CancellationReason;
+      
+      if (matchesId) {
+        console.log(`🔍 Order ${o.orderId} matches product ${productId}:`, {
+          matchesId,
+          isCancelled,
+          hasReason,
+          status,
+          cancellationReason: o.cancellationReason || o.CancellationReason
+        });
+      }
+      
+      return matchesId && isCancelled && hasReason;
+    });
+    
+    if (order) {
+      // Get cancellationReason same way as MyPurchases.jsx does
+      const reason = order.cancellationReason || order.CancellationReason || null;
+      console.log(`✅ Found cancellation reason for product ${productId}:`, reason);
+      return reason;
+    }
+    
+    console.log(`⚠️ No cancellation reason found for product ${productId}`);
+    return null;
   };
 
   const handleDelete = async (listingId) => {
@@ -702,6 +811,46 @@ export const MyListings = () => {
                           })}
                         </span>
                       </div>
+
+                      {/* Show cancellation reason if product has cancelled order and status is Active/Approved */}
+                      {(() => {
+                        const listingId = getListingId(listing);
+                        const listingStatus = getStatus(listing);
+                        const cancellationReason = getCancellationReasonForProduct(listingId);
+                        
+                        // Debug log for approved/active products
+                        if (listingStatus === "approved" || listingStatus === "active") {
+                          console.log(`🔍 Product ${listingId} (${listing.title}):`, {
+                            status: listingStatus,
+                            hasCancellationReason: !!cancellationReason,
+                            cancellationReason: cancellationReason,
+                            sellerOrdersCount: sellerOrders.length
+                          });
+                        }
+                        
+                        // Show if product is approved/active AND has cancellation reason
+                        if ((listingStatus === "approved" || listingStatus === "active") && cancellationReason) {
+                          return (
+                            <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                              <div className="flex items-start space-x-2">
+                                <AlertTriangle className="h-4 w-4 text-orange-600 mt-0.5 flex-shrink-0" />
+                                <div className="flex-1">
+                                  <p className="text-xs font-medium text-orange-900 mb-1">
+                                    ⚠️ Đơn hàng đã bị admin hủy
+                                  </p>
+                                  <p className="text-xs text-orange-800">
+                                    <span className="font-medium">Lý do:</span> {cancellationReason}
+                                  </p>
+                                  <p className="text-xs text-orange-600 mt-1">
+                                    Sản phẩm đã được trả về trang chủ để bạn có thể bán lại.
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
 
                       <div className="mylistings-card-actions">
                         <Link

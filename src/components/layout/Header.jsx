@@ -138,7 +138,7 @@ export const Header = () => {
                         onClick={handleMyPurchasesClick}
                       >
                         <ShoppingBag className="h-4 w-4 mr-2" />
-                        Sản phẩm đã mua
+                        Quản lí sản phẩm
                       </Link>
                     )}
                     {!isAdmin && (
