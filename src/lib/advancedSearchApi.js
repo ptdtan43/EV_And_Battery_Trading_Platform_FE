@@ -109,6 +109,14 @@ const clientSideAdvancedSearch = async (filters) => {
                 }
             }
 
+            // Filter by license plate
+            if (filters.licensePlate) {
+                const productLicensePlate = String(product.licensePlate || product.license_plate || "").toLowerCase();
+                if (!productLicensePlate.includes(filters.licensePlate.toLowerCase())) {
+                    return false;
+                }
+            }
+
             if (filters.year && product.year !== parseInt(filters.year)) {
                 return false;
             }

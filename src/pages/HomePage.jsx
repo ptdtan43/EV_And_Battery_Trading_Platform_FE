@@ -696,10 +696,45 @@ export const HomePage = () => {
         // Tìm kiếm tổng quát theo hãng xe, mẫu xe hoặc biển số trong dữ liệu cục bộ
         results = searchProducts(searchQuery.trim(), allProducts);
         searchType = "hãng xe, mẫu xe hoặc biển số";
+        
+        // Nếu đang ở tab "Xe điện", tự động filter chỉ xe và ưu tiên search theo biển số
+        if (selectedCategory === "vehicle") {
+          // Filter chỉ xe điện
+          results = results.filter(product => {
+            const productTypeLower = (product.productType || product.ProductType || "").toLowerCase();
+            return productTypeLower === "vehicle" || productTypeLower === "xe";
+          });
+          
+          // Kiểm tra xem query có phải biển số không (format: XX-X hoặc có dấu gạch ngang)
+          const query = searchQuery.trim();
+          const looksLikeLicensePlate = /^[0-9]{2}[A-Z]-[0-9]{5}$/i.test(query) || 
+                                        /^[0-9]{2}[A-Z]/i.test(query) || 
+                                        query.includes('-');
+          
+          if (looksLikeLicensePlate) {
+            // Ưu tiên tìm theo biển số bằng API nếu có thể
+            try {
+              const licensePlateResults = await searchProductsByLicensePlate(query);
+              if (licensePlateResults && licensePlateResults.length > 0) {
+                // Filter chỉ xe điện
+                const vehicleResults = licensePlateResults.filter(product => {
+                  const productTypeLower = (product.productType || product.ProductType || "").toLowerCase();
+                  return productTypeLower === "vehicle" || productTypeLower === "xe";
+                });
+                if (vehicleResults.length > 0) {
+                  results = vehicleResults;
+                  searchType = "biển số xe";
+                }
+              }
+            } catch (error) {
+              console.log("⚠️ License plate API search failed, using local search:", error);
+            }
+          }
+        }
       }
       
-      // Lọc theo loại sản phẩm nếu được chọn
-      if (productType && productType !== "license-plate" && productType !== "") {
+      // Lọc theo loại sản phẩm nếu được chọn (trừ khi đã filter ở trên)
+      if (productType && productType !== "license-plate" && productType !== "" && selectedCategory !== "vehicle") {
         results = results.filter(product => {
           const productTypeLower = (product.productType || product.ProductType || "").toLowerCase();
           return productTypeLower === productType;
