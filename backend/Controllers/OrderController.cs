@@ -144,6 +144,10 @@ namespace EVTB_Backend.Controllers
                         orderStatus = o.OrderStatus,
                         completedDate = o.CompletedDate ?? DateTime.MinValue,
                         createdAt = o.CreatedAt,
+                        sellerConfirmed = o.SellerConfirmed,
+                        sellerConfirmedDate = o.SellerConfirmedDate ?? DateTime.MinValue,
+                        adminConfirmed = o.AdminConfirmed,
+                        adminConfirmedDate = o.AdminConfirmedDate ?? DateTime.MinValue,
                         hasRating = _context.Ratings.Any(r => r.OrderId == o.OrderId)
                     })
                     .OrderByDescending(o => o.createdAt)
@@ -159,7 +163,7 @@ namespace EVTB_Backend.Controllers
         }
 
         /// <summary>
-        /// Lấy danh sách orders của user
+        /// Lấy danh sách orders của user (hoặc tất cả orders nếu là admin)
         /// </summary>
         [HttpGet]
         [Authorize]
@@ -174,8 +178,19 @@ namespace EVTB_Backend.Controllers
                     return Unauthorized(new { message = "Không thể xác định người dùng" });
                 }
 
-                var orders = await _context.Orders
-                    .Where(o => o.UserId == userId)
+                // Check if user is admin
+                var user = await _context.Users.FindAsync(userId);
+                bool isAdmin = user != null && user.RoleId == 1;
+
+                var query = _context.Orders.AsQueryable();
+                
+                // If not admin, only return user's orders
+                if (!isAdmin)
+                {
+                    query = query.Where(o => o.UserId == userId);
+                }
+
+                var orders = await query
                     .Select(o => new
                     {
                         orderId = o.OrderId,
@@ -185,7 +200,10 @@ namespace EVTB_Backend.Controllers
                         depositAmount = o.DepositAmount,
                         totalAmount = o.TotalAmount,
                         createdAt = o.CreatedAt,
-                        updatedAt = o.UpdatedAt
+                        updatedAt = o.UpdatedAt,
+                        adminNotes = o.AdminNotes,
+                        refundOption = o.RefundOption,
+                        cancellationReason = o.AdminNotes // For backward compatibility
                     })
                     .OrderByDescending(o => o.createdAt)
                     .ToListAsync();
@@ -527,6 +545,87 @@ namespace EVTB_Backend.Controllers
         }
 
         /// <summary>
+        /// Admin rejects/cancels transaction
+        /// </summary>
+        [HttpPost("{id}/admin-reject")]
+        [Authorize]
+        public async Task<ActionResult<object>> AdminRejectTransaction(int id, [FromBody] AdminRejectRequest request)
+        {
+            try
+            {
+                // Get user ID from JWT token
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(new { message = "Không thể xác định người dùng" });
+                }
+
+                // Check if user is admin (roleId = 1)
+                var user = await _context.Users.FindAsync(userId);
+                if (user == null || user.RoleId != 1)
+                {
+                    return Forbid("Chỉ admin mới có quyền hủy giao dịch");
+                }
+
+                var order = await _context.Orders
+                    .Include(o => o.Product)
+                    .Include(o => o.User)
+                    .Include(o => o.Seller)
+                    .FirstOrDefaultAsync(o => o.OrderId == id);
+
+                if (order == null)
+                {
+                    return NotFound(new { message = "Không tìm thấy đơn hàng" });
+                }
+
+                // Validate reason
+                if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Length < 3)
+                {
+                    return BadRequest(new { message = "Lý do hủy phải có ít nhất 3 ký tự" });
+                }
+
+                // Update order status
+                order.OrderStatus = "Cancelled";
+                order.AdminNotes = request.Reason;
+                order.RefundOption = request.RefundOption;
+                order.UpdatedAt = DateTime.UtcNow;
+
+                // Update product status back to Active
+                if (order.Product != null)
+                {
+                    order.Product.Status = "Active";
+                    order.Product.UpdatedAt = DateTime.UtcNow;
+                }
+
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation($"Order {id} rejected by admin {userId}. Reason: {request.Reason}, Refund: {request.RefundOption}");
+
+                // Prepare response
+                var response = new
+                {
+                    message = "Đã hủy giao dịch thành công",
+                    orderId = order.OrderId,
+                    productId = order.ProductId,
+                    buyerId = order.UserId,
+                    sellerId = order.SellerId,
+                    orderStatus = order.OrderStatus,
+                    reason = request.Reason,
+                    refundOption = request.RefundOption,
+                    refundAmount = request.RefundOption == "refund" ? order.DepositAmount : 0,
+                    cancelledAt = DateTime.UtcNow
+                };
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error admin rejecting transaction for order {id}");
+                return StatusCode(500, new { message = "Có lỗi xảy ra khi hủy giao dịch" });
+            }
+        }
+
+        /// <summary>
         /// Get orders waiting for admin confirmation
         /// </summary>
         [HttpGet("admin-pending")]
@@ -587,6 +686,56 @@ namespace EVTB_Backend.Controllers
         /// <summary>
         /// Lấy danh sách đơn hàng đã hoàn tất của user
         /// </summary>
+        [HttpGet("user/{userId}/completed")]
+        [Authorize]
+        public async Task<ActionResult<object>> GetUserCompletedOrders(int userId)
+        {
+            try
+            {
+                // Verify user can access their own orders
+                var currentUserIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+                if (currentUserIdClaim == null || !int.TryParse(currentUserIdClaim.Value, out int currentUserId))
+                {
+                    return Unauthorized(new { message = "Không thể xác định người dùng" });
+                }
+
+                if (currentUserId != userId)
+                {
+                    return Forbid("Bạn chỉ có thể xem đơn hàng của mình");
+                }
+
+                var orders = await _context.Orders
+                    .Include(o => o.Product)
+                    .Include(o => o.Seller)
+                    .Include(o => o.User)
+                    .Where(o => o.UserId == userId && o.OrderStatus == "completed")
+                    .Select(o => new
+                    {
+                        orderId = o.OrderId,
+                        productId = o.ProductId,
+                        productTitle = o.Product?.Title ?? "Unknown",
+                        productImages = new string[0], // Empty array instead of null
+                        sellerId = o.SellerId ?? 0,
+                        sellerName = o.Seller?.FullName ?? "Unknown",
+                        sellerEmail = o.Seller?.Email ?? "Unknown",
+                        sellerPhone = o.Seller?.Phone ?? "Unknown",
+                        depositAmount = o.DepositAmount,
+                        totalAmount = o.TotalAmount,
+                        completedDate = o.CompletedDate ?? DateTime.MinValue,
+                        createdAt = o.CreatedAt,
+                        hasRating = _context.Ratings.Any(r => r.OrderId == o.OrderId)
+                    })
+                    .OrderByDescending(o => o.completedDate)
+                    .ToListAsync();
+
+                return Ok(orders);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting user completed orders");
+                return StatusCode(500, new { message = "Có lỗi xảy ra khi lấy danh sách đơn hàng đã hoàn tất" });
+            }
+        }
     }
 
     // DTOs
@@ -601,6 +750,12 @@ namespace EVTB_Backend.Controllers
     public class UpdateOrderRequest
     {
         public string? OrderStatus { get; set; }
+    }
+
+    public class AdminRejectRequest
+    {
+        public string Reason { get; set; } = string.Empty;
+        public string RefundOption { get; set; } = "refund"; // "refund" or "no_refund"
     }
 
     public class AdminConfirmRequest

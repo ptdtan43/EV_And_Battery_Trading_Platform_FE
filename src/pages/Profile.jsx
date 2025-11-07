@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { apiRequest } from '../lib/api';
 import { useToast } from '../contexts/ToastContext';
+import { batchFetchProductImages } from '../utils/imageLoader';
 import { 
   Edit3, Save, X, User, Mail, Phone, Calendar, 
   Package, Eye, Heart, Award, Shield, 
@@ -30,9 +31,14 @@ export const Profile = () => {
     soldListings: 0,
     totalViews: 0,
     memberSince: '',
-    responseRate: 95
+    responseRate: 95,
+    pendingOrders: 0, // Buyer orders pending payment
+    purchasedCount: 0 // Completed purchases
   });
   const [userProducts, setUserProducts] = useState([]);
+  const [buyerOrders, setBuyerOrders] = useState([]); // Orders where user is buyer
+  const [purchasedProducts, setPurchasedProducts] = useState([]); // Completed purchases
+  const [sellerPendingOrders, setSellerPendingOrders] = useState([]); // Orders where user is seller and waiting for admin
   const [activeTab, setActiveTab] = useState("profile");
   const [reviews, setReviews] = useState([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
@@ -53,6 +59,8 @@ export const Profile = () => {
       
       // Load user stats
       loadUserStats();
+      loadBuyerOrders(); // Load buyer orders for "đang thanh toán" and "đã mua"
+      loadSellerPendingOrders(); // Load seller orders waiting for admin confirmation
     }
   }, [user, profile]);
 
@@ -82,26 +90,66 @@ export const Profile = () => {
         const data = await apiRequest(`/api/Product/seller/${userId}`);
         const items = Array.isArray(data) ? data : data?.items || [];
         
-        // Store all products for display
-        setUserProducts(items);
+        // ✅ FIX: Batch fetch images for all products to avoid DbContext concurrency issues
+        const productIds = items.map(item => item.id || item.productId || item.ProductId).filter(Boolean);
+        console.log(`🖼️ Batch fetching images for ${productIds.length} products in Profile...`);
+        const imagesMap = await batchFetchProductImages(productIds, 5);
+        console.log(`✅ Loaded images for ${imagesMap.size} products in Profile`);
         
-        const totalListings = items.length;
-        const activeListings = items.filter(item => {
+        // ✅ FIX: Map images from batch-fetched map to products
+        const productsWithImages = items.map((product) => {
+          const productId = product.id || product.productId || product.ProductId;
+          let images = [];
+          
+          // Get images from batch-fetched map
+          if (productId && imagesMap.has(productId)) {
+            const fetchedImages = imagesMap.get(productId);
+            if (Array.isArray(fetchedImages) && fetchedImages.length > 0) {
+              images = fetchedImages.map(
+                (img) =>
+                  img.imageData ||
+                  img.imageUrl ||
+                  img.url ||
+                  img.ImageData ||
+                  img.ImageUrl ||
+                  img.Url ||
+                  img
+              ).filter(Boolean);
+            }
+          }
+          
+          // Fallback to images in product object if available
+          if (images.length === 0 && product.images && Array.isArray(product.images)) {
+            images = product.images;
+          }
+          
+          return {
+            ...product,
+            images: images,
+            primaryImage: images?.[0] || null
+          };
+        });
+        
+        // Store all products for display
+        setUserProducts(productsWithImages);
+        
+        const totalListings = productsWithImages.length;
+        const activeListings = productsWithImages.filter(item => {
           const status = (item.status || item.Status || '').toLowerCase();
           return status === 'approved' || status === 'active';
         }).length;
         
-        const reservedListings = items.filter(item => {
+        const reservedListings = productsWithImages.filter(item => {
           const status = (item.status || item.Status || '').toLowerCase();
           return status === 'reserved';
         }).length;
         
-        const soldListings = items.filter(item => {
+        const soldListings = productsWithImages.filter(item => {
           const status = (item.status || item.Status || '').toLowerCase();
           return status === 'sold';
         }).length;
         
-        const totalViews = items.reduce((sum, item) => 
+        const totalViews = productsWithImages.reduce((sum, item) => 
           sum + (item.viewsCount || item.views_count || 0), 0
         );
         
@@ -124,6 +172,204 @@ export const Profile = () => {
         localStorage.removeItem("evtb_auth");
         window.location.href = '/login';
       }
+    }
+  };
+
+  // ✅ NEW: Load buyer orders for "đang thanh toán" and "đã mua" sections
+  const loadBuyerOrders = async () => {
+    try {
+      const userId = user?.id || user?.userId || user?.accountId || profile?.id || profile?.userId;
+      if (!userId) return;
+
+      // Check if token exists
+      const authData = localStorage.getItem("evtb_auth");
+      if (!authData) return;
+      
+      const parsed = JSON.parse(authData);
+      if (!parsed?.token) return;
+
+      console.log('🛒 Loading buyer orders for userId:', userId);
+      
+      // Load buyer orders
+      const orders = await apiRequest(`/api/Order/buyer`);
+      const ordersArray = Array.isArray(orders) ? orders : [];
+      
+      console.log(`✅ Loaded ${ordersArray.length} buyer orders`);
+      console.log('🔍 Sample buyer order:', ordersArray[0] || 'No orders');
+      
+      // Get product IDs for batch image fetching
+      const productIds = ordersArray
+        .map(order => order.productId || order.product?.productId || order.product?.id)
+        .filter(Boolean);
+      
+      console.log(`🖼️ Batch fetching images for ${productIds.length} products from orders...`);
+      const imagesMap = await batchFetchProductImages(productIds, 5);
+      console.log(`✅ Loaded images for ${imagesMap.size} products from orders`);
+      
+      // Process orders with images
+      const ordersWithDetails = ordersArray.map((order) => {
+        const productId = order.productId || order.product?.productId || order.product?.id;
+        const orderStatus = (order.status || order.orderStatus || '').toLowerCase();
+        let images = [];
+        
+        // Get images from batch-fetched map
+        if (productId && imagesMap.has(productId)) {
+          const fetchedImages = imagesMap.get(productId);
+          if (Array.isArray(fetchedImages) && fetchedImages.length > 0) {
+            images = fetchedImages.map(
+              (img) =>
+                img.imageData ||
+                img.imageUrl ||
+                img.url ||
+                img.ImageData ||
+                img.ImageUrl ||
+                img.Url ||
+                img
+            ).filter(Boolean);
+          }
+        }
+        
+        return {
+          ...order,
+          productId: productId,
+          product: {
+            ...order.product,
+            productId: productId,
+            images: images,
+            primaryImage: images?.[0] || null
+          },
+          orderStatus: orderStatus
+        };
+      });
+      
+      // Separate pending and completed orders
+      // ✅ FIX: Include orders waiting for admin confirmation (SellerConfirmed = true, AdminConfirmed = false)
+      const pendingOrders = ordersWithDetails.filter(order => {
+        const status = (order.orderStatus || '').toLowerCase();
+        const sellerConfirmed = order.sellerConfirmed || order.SellerConfirmed || false;
+        const adminConfirmed = order.adminConfirmed || order.AdminConfirmed || false;
+        
+        console.log(`🔍 Order ${order.orderId}: status=${status}, sellerConfirmed=${sellerConfirmed}, adminConfirmed=${adminConfirmed}`);
+        
+        // Include orders that are:
+        // 1. Pending/Reserved/Processing status
+        // 2. OR SellerConfirmed but AdminConfirmed = false (waiting for admin)
+        const isPendingStatus = status === 'pending' || status === 'reserved' || status === 'processing' || status === 'depositpaid';
+        const isWaitingForAdmin = sellerConfirmed && !adminConfirmed;
+        
+        const shouldInclude = isPendingStatus || isWaitingForAdmin;
+        if (shouldInclude) {
+          console.log(`✅ Including order ${order.orderId} in pending orders`);
+        }
+        
+        return shouldInclude;
+      });
+      
+      const completedOrders = ordersWithDetails.filter(order => {
+        const status = order.orderStatus;
+        const productStatus = (order.product?.status || '').toLowerCase();
+        return status === 'completed' || status === 'sold' || productStatus === 'sold';
+      });
+      
+      setBuyerOrders(pendingOrders);
+      setPurchasedProducts(completedOrders);
+      
+      // Update stats - don't double count reservedListings
+      setUserStats(prev => ({
+        ...prev,
+        pendingOrders: pendingOrders.length,
+        purchasedCount: completedOrders.length
+      }));
+      
+      console.log(`✅ Processed ${pendingOrders.length} pending orders and ${completedOrders.length} completed purchases`);
+    } catch (error) {
+      console.log('Could not load buyer orders:', error);
+    }
+  };
+
+  // ✅ NEW: Load seller orders waiting for admin confirmation
+  const loadSellerPendingOrders = async () => {
+    try {
+      const userId = user?.id || user?.userId || user?.accountId || profile?.id || profile?.userId;
+      if (!userId) return;
+
+      // Check if token exists
+      const authData = localStorage.getItem("evtb_auth");
+      if (!authData) return;
+      
+      const parsed = JSON.parse(authData);
+      if (!parsed?.token) return;
+
+      console.log('🏪 Loading seller pending orders for userId:', userId);
+      
+      // Load all orders and filter for seller's orders waiting for admin
+      const allOrders = await apiRequest(`/api/Order`);
+      const ordersArray = Array.isArray(allOrders) ? allOrders : [];
+      
+      // Filter orders where user is seller and waiting for admin confirmation
+      const sellerOrders = ordersArray.filter(order => {
+        const orderSellerId = order.sellerId || order.SellerId || order.seller?.id || order.Seller?.id;
+        const sellerConfirmed = order.sellerConfirmed || order.SellerConfirmed || false;
+        const adminConfirmed = order.adminConfirmed || order.AdminConfirmed || false;
+        
+        return orderSellerId === userId && sellerConfirmed && !adminConfirmed;
+      });
+      
+      console.log(`✅ Found ${sellerOrders.length} seller orders waiting for admin confirmation`);
+      
+      if (sellerOrders.length === 0) {
+        setSellerPendingOrders([]);
+        return;
+      }
+      
+      // Get product IDs for batch image fetching
+      const productIds = sellerOrders
+        .map(order => order.productId || order.product?.productId || order.product?.id)
+        .filter(Boolean);
+      
+      console.log(`🖼️ Batch fetching images for ${productIds.length} products from seller orders...`);
+      const imagesMap = await batchFetchProductImages(productIds, 5);
+      console.log(`✅ Loaded images for ${imagesMap.size} products from seller orders`);
+      
+      // Process orders with images
+      const ordersWithDetails = sellerOrders.map((order) => {
+        const productId = order.productId || order.product?.productId || order.product?.id;
+        let images = [];
+        
+        // Get images from batch-fetched map
+        if (productId && imagesMap.has(productId)) {
+          const fetchedImages = imagesMap.get(productId);
+          if (Array.isArray(fetchedImages) && fetchedImages.length > 0) {
+            images = fetchedImages.map(
+              (img) =>
+                img.imageData ||
+                img.imageUrl ||
+                img.url ||
+                img.ImageData ||
+                img.ImageUrl ||
+                img.Url ||
+                img
+            ).filter(Boolean);
+          }
+        }
+        
+        return {
+          ...order,
+          productId: productId,
+          product: {
+            ...order.product,
+            productId: productId,
+            images: images,
+            primaryImage: images?.[0] || null
+          }
+        };
+      });
+      
+      setSellerPendingOrders(ordersWithDetails);
+      
+      console.log(`✅ Processed ${ordersWithDetails.length} seller orders waiting for admin`);
+    } catch (error) {
+      console.log('Could not load seller pending orders:', error);
     }
   };
 
@@ -399,7 +645,17 @@ export const Profile = () => {
                     : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
               >
-                Đang thanh toán ({userStats.reservedListings})
+                Đang thanh toán ({userStats.reservedListings + (userStats.pendingOrders || 0) + sellerPendingOrders.length})
+              </button>
+              <button
+                onClick={() => setActiveTab("purchased")}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === "purchased"
+                    ? "border-blue-500 text-blue-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Đã mua ({userStats.purchasedCount})
               </button>
               <button
                 onClick={() => setActiveTab("sold")}
@@ -540,35 +796,62 @@ export const Profile = () => {
                     {userProducts.filter(item => {
                       const status = (item.status || item.Status || '').toLowerCase();
                       return status === 'approved' || status === 'active';
-                    }).map((product, index) => (
-                      <div key={product.id || product.productId || index} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                        <div className="flex items-start space-x-3">
-                          <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center">
-                            <Package className="h-6 w-6 text-gray-400" />
-                          </div>
-                          <div className="flex-1">
-                            <h4 className="font-medium text-gray-900 line-clamp-2">
-                              {product.title || product.name}
-                            </h4>
-                            <p className="text-lg font-bold text-blue-600 mt-1">
-                              {formatPrice(product.price)}
-                            </p>
-                            <div className="flex items-center mt-2">
-                              <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
-                              <span className="text-sm text-green-600">Đang bán</span>
+                    }).map((product, index) => {
+                      // ✅ FIX: Get product image
+                      const images = product.images || [];
+                      const primaryImage = product.primaryImage || images[0];
+                      const imageUrl = primaryImage?.imageData || primaryImage?.imageUrl || primaryImage?.url || primaryImage;
+                      
+                      return (
+                        <div key={product.id || product.productId || index} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                          <div className="flex items-start space-x-3">
+                            {/* ✅ FIX: Display product image instead of placeholder */}
+                            {imageUrl ? (
+                              <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0">
+                                <img
+                                  src={imageUrl}
+                                  alt={product.title || product.name || 'Sản phẩm'}
+                                  className="w-full h-full object-cover"
+                                  loading="lazy"
+                                  onError={(e) => {
+                                    // Fallback to placeholder if image fails to load
+                                    e.target.style.display = 'none';
+                                    e.target.nextSibling.style.display = 'flex';
+                                  }}
+                                />
+                                <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center hidden">
+                                  <Package className="h-6 w-6 text-gray-400" />
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center flex-shrink-0">
+                                <Package className="h-6 w-6 text-gray-400" />
+                              </div>
+                            )}
+                            <div className="flex-1">
+                              <h4 className="font-medium text-gray-900 line-clamp-2">
+                                {product.title || product.name}
+                              </h4>
+                              <p className="text-lg font-bold text-blue-600 mt-1">
+                                {formatPrice(product.price)}
+                              </p>
+                              <div className="flex items-center mt-2">
+                                <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
+                                <span className="text-sm text-green-600">Đang bán</span>
+                              </div>
                             </div>
                           </div>
+                          <div className="mt-3">
+                            <Link
+                              to={`/product/${product.id || product.productId}`}
+                              className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                            >
+                              Xem chi tiết →
+                            </Link>
+                          </div>
                         </div>
-                        <div className="mt-3">
-                          <Link
-                            to={`/product/${product.id || product.productId}`}
-                            className="text-blue-600 hover:text-blue-700 text-sm font-medium"
-                          >
-                            Xem chi tiết →
-                          </Link>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="text-center py-8">
@@ -582,50 +865,302 @@ export const Profile = () => {
             {activeTab === "reserved" && (
               <div className="bg-white rounded-xl shadow-lg p-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                  Sản phẩm đang trong quá trình thanh toán ({userStats.reservedListings})
+                  Sản phẩm đang trong quá trình thanh toán ({userStats.reservedListings + (userStats.pendingOrders || 0) + sellerPendingOrders.length})
                 </h3>
+                
+                {/* Seller products (reserved) */}
                 {userProducts.filter(item => {
                   const status = (item.status || item.Status || '').toLowerCase();
                   return status === 'reserved';
-                }).length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                }).length > 0 && (
+                  <div className="mb-6">
+                    <h4 className="text-md font-medium text-gray-700 mb-3">Sản phẩm bạn đang bán</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {userProducts.filter(item => {
+                        const status = (item.status || item.Status || '').toLowerCase();
+                        return status === 'reserved';
+                      }).map((product) => {
+                        const images = product.images || [];
+                        const primaryImage = product.primaryImage || images[0];
+                        const imageUrl = primaryImage?.imageData || primaryImage?.imageUrl || primaryImage?.url || primaryImage;
+                        
+                        return (
+                          <div key={product.id || product.productId} className="border border-orange-200 rounded-lg p-4 bg-orange-50">
+                            <div className="flex items-start space-x-3">
+                              {imageUrl ? (
+                                <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0">
+                                  <img
+                                    src={imageUrl}
+                                    alt={product.title || product.name || 'Sản phẩm'}
+                                    className="w-full h-full object-cover"
+                                    loading="lazy"
+                                    onError={(e) => {
+                                      e.target.style.display = 'none';
+                                      e.target.nextSibling.style.display = 'flex';
+                                    }}
+                                  />
+                                  <div className="w-16 h-16 bg-orange-200 rounded-lg flex items-center justify-center hidden">
+                                    <Clock className="h-6 w-6 text-orange-600" />
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="w-16 h-16 bg-orange-200 rounded-lg flex items-center justify-center flex-shrink-0">
+                                  <Clock className="h-6 w-6 text-orange-600" />
+                                </div>
+                              )}
+                              <div className="flex-1">
+                                <h4 className="font-medium text-gray-900 line-clamp-2">
+                                  {product.title || product.name}
+                                </h4>
+                                <p className="text-lg font-bold text-blue-600 mt-1">
+                                  {formatPrice(product.price)}
+                                </p>
+                                <div className="flex items-center mt-2">
+                                  <Clock className="h-4 w-4 text-orange-600 mr-1" />
+                                  <span className="text-sm text-orange-600">Đang trong quá trình thanh toán</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="mt-4">
+                              <Link
+                                to={`/product/${product.id || product.productId}`}
+                                className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium text-center block"
+                              >
+                                Xem chi tiết
+                              </Link>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Seller orders waiting for admin confirmation */}
+                {sellerPendingOrders.length > 0 && (
+                  <div className="mb-6">
+                    {(userProducts.filter(item => {
+                      const status = (item.status || item.Status || '').toLowerCase();
+                      return status === 'reserved';
+                    }).length > 0) && <h4 className="text-md font-medium text-gray-700 mb-3 mt-6">Sản phẩm đang chờ admin xác nhận</h4>}
                     {userProducts.filter(item => {
                       const status = (item.status || item.Status || '').toLowerCase();
                       return status === 'reserved';
-                    }).map((product) => (
-                      <div key={product.id || product.productId} className="border border-orange-200 rounded-lg p-4 bg-orange-50">
-                        <div className="flex items-start space-x-3">
-                          <div className="w-16 h-16 bg-orange-200 rounded-lg flex items-center justify-center">
-                            <Clock className="h-6 w-6 text-orange-600" />
-                          </div>
-                          <div className="flex-1">
-                            <h4 className="font-medium text-gray-900 line-clamp-2">
-                              {product.title || product.name}
-                            </h4>
-                            <p className="text-lg font-bold text-blue-600 mt-1">
-                              {formatPrice(product.price)}
-                            </p>
-                            <div className="flex items-center mt-2">
-                              <Clock className="h-4 w-4 text-orange-600 mr-1" />
-                              <span className="text-sm text-orange-600">Đang trong quá trình thanh toán</span>
+                    }).length === 0 && <h4 className="text-md font-medium text-gray-700 mb-3">Sản phẩm đang chờ admin xác nhận</h4>}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {sellerPendingOrders.map((order) => {
+                        const product = order.product || {};
+                        const images = product.images || [];
+                        const primaryImage = product.primaryImage || images[0];
+                        const imageUrl = primaryImage?.imageData || primaryImage?.imageUrl || primaryImage?.url || primaryImage;
+                        
+                        return (
+                          <div key={order.orderId || order.id} className="border border-orange-200 rounded-lg p-4 bg-orange-50">
+                            <div className="flex items-start space-x-3">
+                              {imageUrl ? (
+                                <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0">
+                                  <img
+                                    src={imageUrl}
+                                    alt={product.title || product.name || 'Sản phẩm'}
+                                    className="w-full h-full object-cover"
+                                    loading="lazy"
+                                    onError={(e) => {
+                                      e.target.style.display = 'none';
+                                      e.target.nextSibling.style.display = 'flex';
+                                    }}
+                                  />
+                                  <div className="w-16 h-16 bg-orange-200 rounded-lg flex items-center justify-center hidden">
+                                    <Clock className="h-6 w-6 text-orange-600" />
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="w-16 h-16 bg-orange-200 rounded-lg flex items-center justify-center flex-shrink-0">
+                                  <Clock className="h-6 w-6 text-orange-600" />
+                                </div>
+                              )}
+                              <div className="flex-1">
+                                <h4 className="font-medium text-gray-900 line-clamp-2">
+                                  {product.title || product.name || 'Sản phẩm'}
+                                </h4>
+                                <p className="text-lg font-bold text-blue-600 mt-1">
+                                  {formatPrice(order.totalAmount || order.price || product.price)}
+                                </p>
+                                <div className="flex items-center mt-2">
+                                  <Clock className="h-4 w-4 text-orange-600 mr-1" />
+                                  <span className="text-sm text-orange-600">Đang chờ admin xác nhận</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="mt-4">
+                              <Link
+                                to={`/product/${order.productId || product.productId}`}
+                                className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium text-center block"
+                              >
+                                Xem chi tiết
+                              </Link>
                             </div>
                           </div>
-                        </div>
-                        <div className="mt-4">
-                          <Link
-                            to={`/product/${product.id || product.productId}`}
-                            className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium text-center block"
-                          >
-                            Xem chi tiết
-                          </Link>
-                        </div>
-                      </div>
-                    ))}
+                        );
+                      })}
+                    </div>
                   </div>
-                ) : (
+                )}
+                
+                {/* Buyer orders (pending) */}
+                {buyerOrders.length > 0 && (
+                  <div>
+                    {(userProducts.filter(item => {
+                      const status = (item.status || item.Status || '').toLowerCase();
+                      return status === 'reserved';
+                    }).length > 0 || sellerPendingOrders.length > 0) && <h4 className="text-md font-medium text-gray-700 mb-3 mt-6">Sản phẩm bạn đang mua</h4>}
+                    {userProducts.filter(item => {
+                      const status = (item.status || item.Status || '').toLowerCase();
+                      return status === 'reserved';
+                    }).length === 0 && sellerPendingOrders.length === 0 && <h4 className="text-md font-medium text-gray-700 mb-3">Sản phẩm bạn đang mua</h4>}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {buyerOrders.map((order) => {
+                        const product = order.product || {};
+                        const images = product.images || [];
+                        const primaryImage = product.primaryImage || images[0];
+                        const imageUrl = primaryImage?.imageData || primaryImage?.imageUrl || primaryImage?.url || primaryImage;
+                        
+                        return (
+                          <div key={order.orderId || order.id} className="border border-orange-200 rounded-lg p-4 bg-orange-50">
+                            <div className="flex items-start space-x-3">
+                              {imageUrl ? (
+                                <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0">
+                                  <img
+                                    src={imageUrl}
+                                    alt={product.title || product.name || 'Sản phẩm'}
+                                    className="w-full h-full object-cover"
+                                    loading="lazy"
+                                    onError={(e) => {
+                                      e.target.style.display = 'none';
+                                      e.target.nextSibling.style.display = 'flex';
+                                    }}
+                                  />
+                                  <div className="w-16 h-16 bg-orange-200 rounded-lg flex items-center justify-center hidden">
+                                    <Clock className="h-6 w-6 text-orange-600" />
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="w-16 h-16 bg-orange-200 rounded-lg flex items-center justify-center flex-shrink-0">
+                                  <Clock className="h-6 w-6 text-orange-600" />
+                                </div>
+                              )}
+                              <div className="flex-1">
+                                <h4 className="font-medium text-gray-900 line-clamp-2">
+                                  {product.title || product.name || 'Sản phẩm'}
+                                </h4>
+                                <p className="text-lg font-bold text-blue-600 mt-1">
+                                  {formatPrice(order.totalAmount || order.price || product.price)}
+                                </p>
+                                <div className="flex items-center mt-2">
+                                  <Clock className="h-4 w-4 text-orange-600 mr-1" />
+                                  <span className="text-sm text-orange-600">Đang trong quá trình thanh toán</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="mt-4">
+                              <Link
+                                to={`/product/${order.productId || product.productId}`}
+                                className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium text-center block"
+                              >
+                                Xem chi tiết
+                              </Link>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Empty state */}
+                {userProducts.filter(item => {
+                  const status = (item.status || item.Status || '').toLowerCase();
+                  return status === 'reserved';
+                }).length === 0 && sellerPendingOrders.length === 0 && buyerOrders.length === 0 && (
                   <div className="text-center py-8">
                     <Clock className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                     <p className="text-gray-600">Chưa có sản phẩm nào đang trong quá trình thanh toán</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === "purchased" && (
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                  Sản phẩm đã mua ({userStats.purchasedCount})
+                </h3>
+                {purchasedProducts.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {purchasedProducts.map((order) => {
+                      const product = order.product || {};
+                      const images = product.images || [];
+                      const primaryImage = product.primaryImage || images[0];
+                      const imageUrl = primaryImage?.imageData || primaryImage?.imageUrl || primaryImage?.url || primaryImage;
+                      
+                      // ✅ FIX: Handle date formatting
+                      const orderDate = order.createdDate || order.createdAt || order.created_date || order.orderDate;
+                      const formattedDate = orderDate ? new Date(orderDate).toLocaleDateString('vi-VN') : 'Chưa cập nhật';
+                      
+                      return (
+                        <div key={order.orderId || order.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                          <div className="flex items-start space-x-3">
+                            {/* ✅ FIX: Display product image */}
+                            {imageUrl ? (
+                              <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0">
+                                <img
+                                  src={imageUrl}
+                                  alt={product.title || product.name || 'Sản phẩm'}
+                                  className="w-full h-full object-cover"
+                                  loading="lazy"
+                                  onError={(e) => {
+                                    e.target.style.display = 'none';
+                                    e.target.nextSibling.style.display = 'flex';
+                                  }}
+                                />
+                                <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center hidden">
+                                  <Package className="h-6 w-6 text-gray-400" />
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center flex-shrink-0">
+                                <Package className="h-6 w-6 text-gray-400" />
+                              </div>
+                            )}
+                            <div className="flex-1">
+                              <h4 className="font-medium text-gray-900 line-clamp-2">
+                                {product.title || product.name || 'Sản phẩm'}
+                              </h4>
+                              <p className="text-lg font-bold text-blue-600 mt-1">
+                                {formatPrice(order.totalAmount || order.price || product.price)}
+                              </p>
+                              <div className="flex items-center mt-2">
+                                <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
+                                <span className="text-sm text-green-600">Đã mua</span>
+                                <span className="text-sm text-gray-500 ml-2">• {formattedDate}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-3">
+                            <Link
+                              to={`/product/${order.productId || product.productId}`}
+                              className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                            >
+                              Xem chi tiết →
+                            </Link>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600">Chưa có sản phẩm nào đã mua</p>
                   </div>
                 )}
               </div>
@@ -644,35 +1179,66 @@ export const Profile = () => {
                     {userProducts.filter(item => {
                       const status = (item.status || item.Status || '').toLowerCase();
                       return status === 'sold';
-                    }).map((product) => (
-                      <div key={product.id || product.productId} className="border border-gray-200 rounded-lg p-4">
-                        <div className="flex items-start space-x-3">
-                          <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center">
-                            <Package className="h-6 w-6 text-gray-400" />
+                    }).map((product) => {
+                      // ✅ FIX: Get product image
+                      const productId = product.id || product.productId || product.ProductId;
+                      const images = product.images || [];
+                      const primaryImage = product.primaryImage || images[0];
+                      const imageUrl = primaryImage?.imageData || primaryImage?.imageUrl || primaryImage?.url || primaryImage;
+                      
+                      // ✅ FIX: Handle date formatting
+                      const updateDate = product.updatedAt || product.updated_at || product.createdAt || product.createdDate;
+                      const formattedDate = updateDate ? new Date(updateDate).toLocaleDateString('vi-VN') : 'Chưa cập nhật';
+                      
+                      return (
+                        <div key={product.id || product.productId} className="border border-gray-200 rounded-lg p-4">
+                          <div className="flex items-start space-x-3">
+                            {/* ✅ FIX: Display product image instead of placeholder */}
+                            {imageUrl ? (
+                              <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0">
+                                <img
+                                  src={imageUrl}
+                                  alt={product.title || product.name || 'Sản phẩm'}
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    // Fallback to placeholder if image fails to load
+                                    e.target.style.display = 'none';
+                                    e.target.nextSibling.style.display = 'flex';
+                                  }}
+                                />
+                                <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center" style={{display: 'none'}}>
+                                  <Package className="h-6 w-6 text-gray-400" />
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center flex-shrink-0">
+                                <Package className="h-6 w-6 text-gray-400" />
+                              </div>
+                            )}
+                            <div className="flex-1">
+                              <h4 className="font-medium text-gray-900 line-clamp-2">
+                                {product.title || product.name}
+                              </h4>
+                              <p className="text-lg font-bold text-green-600 mt-1">
+                                {formatPrice(product.price)}
+                              </p>
+                              <div className="flex items-center mt-2">
+                                <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
+                                <span className="text-sm text-green-600">Đã bán</span>
+                              </div>
+                              <div className="text-xs text-gray-500 mt-1">
+                                Cập nhật: {formattedDate}
+                              </div>
+                            </div>
                           </div>
-                          <div className="flex-1">
-                            <h4 className="font-medium text-gray-900 line-clamp-2">
-                              {product.title || product.name}
-                            </h4>
-                            <p className="text-lg font-bold text-green-600 mt-1">
-                              {formatPrice(product.price)}
-                            </p>
-                            <div className="flex items-center mt-2">
-                              <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
-                              <span className="text-sm text-green-600">Đã bán</span>
-                            </div>
-                            <div className="text-xs text-gray-500 mt-1">
-                              Cập nhật: {new Date(product.updatedAt || product.updated_at).toLocaleDateString('vi-VN')}
-                            </div>
+                          <div className="mt-3">
+                            <span className="text-gray-500 text-sm">
+                              Sản phẩm này đã được bán và không còn hiển thị công khai
+                            </span>
                           </div>
                         </div>
-                        <div className="mt-3">
-                          <span className="text-gray-500 text-sm">
-                            Sản phẩm này đã được bán và không còn hiển thị công khai
-                          </span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="text-center py-8">

@@ -26,7 +26,8 @@ class SignalRService {
 
       console.log("🔗 Building SignalR connection to:", `${baseURL}/chatHub`);
 
-      // Backend đã fix CORS với AllowCredentials, dùng accessTokenFactory
+      // ✅ FIX: Backend đã fix CORS với AllowCredentials, dùng accessTokenFactory
+      // ✅ FIX: Pass token via query string for better CORS compatibility
       this.connection = new signalR.HubConnectionBuilder()
         .withUrl(`${baseURL}/chatHub`, {
           accessTokenFactory: () => {
@@ -53,10 +54,12 @@ class SignalRService {
               return "";
             }
           },
-          skipNegotiation: false,
+          skipNegotiation: false, // ✅ Keep negotiation for CORS compatibility
           transport: signalR.HttpTransportType.WebSockets |
             signalR.HttpTransportType.ServerSentEvents |
-            signalR.HttpTransportType.LongPolling
+            signalR.HttpTransportType.LongPolling,
+          // ✅ FIX: Ensure credentials are sent for CORS
+          withCredentials: true
         })
         .withAutomaticReconnect({
           nextRetryDelayInMilliseconds: (retryContext) => {
