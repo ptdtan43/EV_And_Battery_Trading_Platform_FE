@@ -130,26 +130,33 @@ export const Profile = () => {
           };
         });
         
-        // Store all products for display
-        setUserProducts(productsWithImages);
+        // ✅ Sort products by CreatedDate (newest first) - backend already sorts, but ensure frontend also sorts
+        const sortedProducts = productsWithImages.sort((a, b) => {
+          const dateA = new Date(a.createdDate || a.CreatedDate || a.created_date || 0);
+          const dateB = new Date(b.createdDate || b.CreatedDate || b.created_date || 0);
+          return dateB - dateA; // Descending order (newest first)
+        });
         
-        const totalListings = productsWithImages.length;
-        const activeListings = productsWithImages.filter(item => {
+        // Store all products for display
+        setUserProducts(sortedProducts);
+        
+        const totalListings = sortedProducts.length;
+        const activeListings = sortedProducts.filter(item => {
           const status = (item.status || item.Status || '').toLowerCase();
           return status === 'approved' || status === 'active';
         }).length;
         
-        const reservedListings = productsWithImages.filter(item => {
+        const reservedListings = sortedProducts.filter(item => {
           const status = (item.status || item.Status || '').toLowerCase();
           return status === 'reserved';
         }).length;
         
-        const soldListings = productsWithImages.filter(item => {
+        const soldListings = sortedProducts.filter(item => {
           const status = (item.status || item.Status || '').toLowerCase();
           return status === 'sold';
         }).length;
         
-        const totalViews = productsWithImages.reduce((sum, item) => 
+        const totalViews = sortedProducts.reduce((sum, item) => 
           sum + (item.viewsCount || item.views_count || 0), 0
         );
         
@@ -271,17 +278,59 @@ export const Profile = () => {
         return status === 'completed' || status === 'sold' || productStatus === 'sold';
       });
       
+      console.log(`🔍 Found ${completedOrders.length} completed orders before deduplication`);
+      
+      // ✅ FIX: Remove duplicates based on productId - use Map for better performance
+      const productIdMap = new Map();
+      const uniqueCompletedOrders = [];
+      
+      for (const order of completedOrders) {
+        // Get productId from multiple possible fields
+        const productId = order.productId || 
+                         order.product?.productId || 
+                         order.product?.id ||
+                         order.ProductId ||
+                         order.product?.Id;
+        
+        if (!productId) {
+          // Keep orders without productId (shouldn't happen, but just in case)
+          uniqueCompletedOrders.push(order);
+          continue;
+        }
+        
+        // Convert to string for consistent comparison
+        const productIdStr = String(productId);
+        
+        // If we haven't seen this productId before, add it
+        if (!productIdMap.has(productIdStr)) {
+          productIdMap.set(productIdStr, true);
+          uniqueCompletedOrders.push(order);
+          console.log(`✅ Added unique order ${order.orderId} for productId ${productIdStr}`);
+        } else {
+          console.log(`⚠️ Skipped duplicate order ${order.orderId} for productId ${productIdStr}`);
+        }
+      }
+      
+      console.log(`✅ After deduplication: ${uniqueCompletedOrders.length} unique orders (removed ${completedOrders.length - uniqueCompletedOrders.length} duplicates)`);
+      
+      // ✅ Sort purchased products by date (newest first) - backend already sorts, but ensure frontend also sorts
+      const sortedPurchasedProducts = uniqueCompletedOrders.sort((a, b) => {
+        const dateA = new Date(a.completedDate || a.createdDate || a.CreatedDate || 0);
+        const dateB = new Date(b.completedDate || b.createdDate || b.CreatedDate || 0);
+        return dateB - dateA; // Descending order (newest first)
+      });
+      
       setBuyerOrders(pendingOrders);
-      setPurchasedProducts(completedOrders);
+      setPurchasedProducts(sortedPurchasedProducts);
       
       // Update stats - don't double count reservedListings
       setUserStats(prev => ({
         ...prev,
         pendingOrders: pendingOrders.length,
-        purchasedCount: completedOrders.length
+        purchasedCount: uniqueCompletedOrders.length
       }));
       
-      console.log(`✅ Processed ${pendingOrders.length} pending orders and ${completedOrders.length} completed purchases`);
+      console.log(`✅ Processed ${pendingOrders.length} pending orders and ${uniqueCompletedOrders.length} completed purchases (${completedOrders.length} before deduplication)`);
     } catch (error) {
       console.log('Could not load buyer orders:', error);
     }

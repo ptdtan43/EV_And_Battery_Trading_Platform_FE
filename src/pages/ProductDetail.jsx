@@ -37,6 +37,7 @@ import { VerificationButton } from "../components/common/VerificationButton";
 import { ChatModal } from "../components/common/ChatModal";
 import { ReportModal } from "../components/common/ReportModal";
 import { fetchProductImages } from "../utils/imageLoader";
+import { feeService } from "../services/feeService";
 
 // Helper function to fix Vietnamese character encoding
 const fixVietnameseEncoding = (str) => {
@@ -86,6 +87,7 @@ export const ProductDetail = () => {
   const [inspectedSet, setInspectedSet] = useState(new Set());
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [depositAmount, setDepositAmount] = useState(0);
   const [isFavorite, setIsFavorite] = useState(false);
   const [favoriteId, setFavoriteId] = useState(null);
   const [showChatModal, setShowChatModal] = useState(false);
@@ -484,17 +486,46 @@ export const ProductDetail = () => {
     setShowPaymentModal(true);
   };
 
-  // Calculate deposit amount based on product type & price
-  const getDepositAmount = () => {
+  // Calculate deposit amount based on product type & price (using dynamic fee from API)
+  const calculateDepositAmount = async () => {
+    if (!product) return 0;
+    
     const price = product?.price || 0;
     const type = (product?.productType || '').toLowerCase();
+    
     // Fixed lower deposit for batteries to match market expectations
     if (type === 'battery') {
       return 500000; // 500,000 VND for battery deposits
     }
-    // Vehicles keep tiered rule
-    return price > 300000000 ? 10000000 : 5000000; // 10M if > 300M, else 5M
+    
+    // For vehicles, use percentage from API settings
+    try {
+      const amount = await feeService.calculateDepositAmount(price, product.productType);
+      return amount;
+    } catch (error) {
+      console.error('Failed to calculate deposit amount:', error);
+      // Fallback to old calculation
+      return price > 300000000 ? 10000000 : 5000000;
+    }
   };
+
+  // Get deposit amount (synchronous version for display)
+  const getDepositAmount = () => {
+    return depositAmount || 0;
+  };
+
+  // Load deposit amount when product changes
+  useEffect(() => {
+    if (product) {
+      const loadDeposit = async () => {
+        const amount = await calculateDepositAmount();
+        setDepositAmount(amount);
+      };
+      loadDeposit();
+    } else {
+      setDepositAmount(0);
+    }
+  }, [product?.id, product?.price, product?.productType]);
 
   // Handle payment deposit
   const onPayDeposit = async () => {
@@ -570,13 +601,31 @@ export const ProductDetail = () => {
         throw new Error("Bạn không thể mua sản phẩm của chính mình!");
       }
 
-      const depositAmount = getDepositAmount();
+      const depositAmount = await calculateDepositAmount();
       const totalAmount = product?.price || 0;
 
       // Validate product data
       if (!product?.id) {
         throw new Error("Không tìm thấy thông tin sản phẩm");
       }
+
+      // VNPay validation: Amount must be between 5,000 and 999,999,999 VND
+      const VNPAY_MIN_AMOUNT = 5000;
+      const VNPAY_MAX_AMOUNT = 999999999;
+      
+      if (depositAmount < VNPAY_MIN_AMOUNT) {
+        throw new Error(`Số tiền đặt cọc (${formatPrice(depositAmount)}) quá nhỏ. VNPay yêu cầu tối thiểu ${formatPrice(VNPAY_MIN_AMOUNT)}`);
+      }
+      
+      if (depositAmount > VNPAY_MAX_AMOUNT) {
+        throw new Error(`Số tiền đặt cọc (${formatPrice(depositAmount)}) quá lớn. VNPay chỉ chấp nhận tối đa ${formatPrice(VNPAY_MAX_AMOUNT)}. Vui lòng liên hệ admin để xử lý.`);
+      }
+      
+      console.log("[VNPay] Validated deposit amount:", {
+        amount: depositAmount,
+        formatted: formatPrice(depositAmount),
+        isValid: depositAmount >= VNPAY_MIN_AMOUNT && depositAmount <= VNPAY_MAX_AMOUNT
+      });
 
       // Create order first if not exists
       let orderId = currentOrderId;
@@ -886,26 +935,33 @@ export const ProductDetail = () => {
                     </p>
                   )}
 
-                  {/* Verification Button - Only show for vehicles, product owner, and not verified */}
-                  {product.productType === "Vehicle" &&
-                    product.verificationStatus !== "Verified" && (
-                      <div className="mt-4">
-                        <VerificationButton
-                          productId={
-                            product.id || product.productId || product.Id
-                          }
-                          currentStatus={
-                            product.verificationStatus || "NotRequested"
-                          }
-                          isOwner={
-                            user &&
-                            (user.id || user.userId || user.accountId) ===
-                              (product.sellerId || product.userId)
-                          }
-                          disabled={loading}
-                        />
-                      </div>
-                    )}
+                  {/* Verification Button - Only show for vehicles, product owner, not verified, and not sold */}
+                  {(() => {
+                    const productStatus = String(product.status || "").toLowerCase();
+                    const isSold = productStatus === "sold";
+                    return (
+                      product.productType === "Vehicle" &&
+                      product.verificationStatus !== "Verified" &&
+                      !isSold && (
+                        <div className="mt-4">
+                          <VerificationButton
+                            productId={
+                              product.id || product.productId || product.Id
+                            }
+                            currentStatus={
+                              product.verificationStatus || "NotRequested"
+                            }
+                            isOwner={
+                              user &&
+                              (user.id || user.userId || user.accountId) ===
+                                (product.sellerId || product.userId)
+                            }
+                            disabled={loading}
+                          />
+                        </div>
+                      )
+                    );
+                  })()}
                 </div>
                 <div className="text-right">
                   <p className="text-3xl font-bold text-blue-600">
@@ -1405,9 +1461,7 @@ export const ProductDetail = () => {
                   <p className="text-xs text-blue-600">
                     {(product?.productType || '').toLowerCase() === 'battery'
                       ? "Sản phẩm là pin - cọc cố định 500.000đ để giữ hàng và hẹn gặp tại kho"
-                      : (product.price > 300000000
-                          ? "Sản phẩm trên 300 triệu - cọc 10 triệu để gặp mặt trực tiếp"
-                          : "Sản phẩm dưới 300 triệu - cọc 5 triệu để gặp mặt trực tiếp")}
+                      : `Sản phẩm - cọc ${formatPrice(depositAmount)} để gặp mặt trực tiếp`}
                   </p>
                 </div>
               </div>

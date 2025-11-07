@@ -6,7 +6,7 @@
 const SOCIAL_MEDIA_KEYWORDS = [
     'zalo', 'zal', 'zl', 'za lo', 'za-lo',
     'facebook', 'fb', 'face', 'face book',
-    'instagram', 'ig', 'insta', 'insta gram',
+    'instagram', 'ig', 'insta', 'insta gram', 'ins', // ✅ Thêm 'ins' để chặn
     'telegram', 'tg', 'tele gram',
     'viber', 'whatsapp', 'wa', 'whats app',
     'messenger', 'msg', 'mes sen ger',
@@ -14,6 +14,18 @@ const SOCIAL_MEDIA_KEYWORDS = [
     'skype', 'discord', 'snapchat', 'snap chat',
     'tiktok', 'twitter', 'x.com', 'tik tok',
     'linkedin', 'pinterest', 'youtube', 'you tube'
+];
+
+// ✅ Whitelist các từ thông thường không nên bị chặn
+const ALLOWED_WORDS = [
+    'alo', 'hello', 'hi', 'xin chào', 'chào', 'chao',
+    'ok', 'okay', 'oke', 'oki', 'okie',
+    'vâng', 'vang', 'dạ', 'da',
+    'cảm ơn', 'cam on', 'thanks', 'thank you',
+    'không sao', 'khong sao', 'không có gì', 'khong co gi',
+    'được', 'duoc', 'đc', 'dc',
+    'ừ', 'u', 'ừm', 'um', 'uhm',
+    'bye', 'tạm biệt', 'tam biet'
 ];
 
 // Các từ số bằng chữ Việt Nam
@@ -229,37 +241,81 @@ const detectSocialMediaKeywords = (text) => {
         // Loại bỏ khoảng trắng trong keyword để so sánh
         const keywordClean = keyword.replace(/\s+/g, '');
 
-        // Kiểm tra 1: Từ đầy đủ trong text gốc với word boundary
+        // ✅ Kiểm tra 1: Từ đầy đủ trong text gốc với word boundary (ưu tiên nhất)
         const regexWordBoundary = new RegExp(`\\b${keyword.replace(/\s+/g, '')}\\b`, 'i');
         if (regexWordBoundary.test(text)) {
             console.log(`🚫 Detected keyword "${keyword}" in text: "${text}"`);
             return true;
         }
 
-        // Kiểm tra 2: Từ trong danh sách words (đã tách)
+        // ✅ Kiểm tra 2: Từ trong danh sách words (đã tách)
         for (const word of words) {
-            if (word === keywordClean || word.includes(keywordClean) || keywordClean.includes(word)) {
-                // Đảm bảo độ dài hợp lý (tránh match sai với từ ngắn)
-                if (keywordClean.length >= 2 && word.length >= 2) {
-                    console.log(`🚫 Detected keyword "${keyword}" in word: "${word}"`);
-                    return true;
+            // Match chính xác (cho tất cả từ khóa)
+            if (word === keywordClean) {
+                console.log(`🚫 Detected keyword "${keyword}" in word: "${word}"`);
+                return true;
+            }
+            
+            // Với từ khóa ngắn (2-3 ký tự như "ins", "ig", "fb"), chỉ match chính xác
+            // Với từ khóa dài hơn, có thể match nếu word chứa keyword
+            if (keywordClean.length > 3) {
+                // Từ khóa dài: có thể match nếu word chứa keyword hoặc ngược lại
+                if (word.includes(keywordClean) || keywordClean.includes(word)) {
+                    // Đảm bảo độ dài hợp lý
+                    if (keywordClean.length >= 2 && word.length >= 2) {
+                        console.log(`🚫 Detected keyword "${keyword}" in word: "${word}"`);
+                        return true;
+                    }
                 }
             }
-        }
-
-        // Kiểm tra 3: Kiểm tra trong text normalized (đã bỏ dấu)
-        if (textNormalized.includes(keywordClean)) {
-            console.log(`🚫 Detected keyword "${keyword}" in normalized text`);
-            return true;
-        }
-
-        // Kiểm tra 4: Kiểm tra trong text lowercase gốc
-        if (textLower.includes(keywordClean)) {
-            console.log(`🚫 Detected keyword "${keyword}" in lowercase text`);
-            return true;
+            // Từ khóa ngắn (<= 3 ký tự) chỉ match chính xác (đã kiểm tra ở trên)
         }
     }
 
+    return false;
+};
+
+/**
+ * Kiểm tra xem tin nhắn có phải là từ được phép không
+ * ✅ FIX: Chỉ match chính xác hoặc match từ đơn với word boundary để tránh match "zalo" với "alo"
+ */
+const isAllowedWord = (text) => {
+    if (!text || typeof text !== 'string') return false;
+    
+    const normalized = text
+        .toLowerCase()
+        .trim()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // Bỏ dấu
+        .replace(/[.,\-_()]/g, ''); // Bỏ ký tự đặc biệt
+    
+    // Tách thành các từ để kiểm tra
+    const words = normalized.split(/\s+/).filter(w => w.length > 0);
+    
+    // Kiểm tra nếu toàn bộ tin nhắn là một từ được phép (match chính xác)
+    for (const allowed of ALLOWED_WORDS) {
+        const allowedNormalized = allowed
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[.,\-_()]/g, '');
+        
+        // ✅ Match chính xác
+        if (normalized === allowedNormalized) {
+            return true;
+        }
+        
+        // ✅ Match từ đơn với word boundary (tránh match "zalo" với "alo")
+        // Chỉ match nếu từ được phép là một từ đơn trong tin nhắn
+        if (words.length === 1 && words[0] === allowedNormalized) {
+            return true;
+        }
+        
+        // ✅ Match nếu tin nhắn ngắn và chứa từ được phép như một từ riêng biệt
+        if (words.length <= 2 && words.includes(allowedNormalized)) {
+            return true;
+        }
+    }
+    
     return false;
 };
 
@@ -286,6 +342,25 @@ export const validateMessage = (message) => {
         };
     }
 
+    // ✅ FIX: Kiểm tra từ khóa mạng xã hội TRƯỚC whitelist để chặn mọi tin nhắn có từ khóa mạng xã hội
+    // Điều này đảm bảo "ok ins", "qua ins" đều bị chặn vì chứa "ins"
+    if (detectSocialMediaKeywords(trimmed)) {
+        return {
+            isValid: false,
+            reason: 'social_media',
+            warning: '⚠️ Không được phép đề cập đến các nền tảng mạng xã hội khác. Vui lòng sử dụng tính năng chat của hệ thống để giao dịch an toàn.'
+        };
+    }
+
+    // Kiểm tra link
+    if (detectLinks(trimmed)) {
+        return {
+            isValid: false,
+            reason: 'links',
+            warning: '⚠️ Không được phép gửi link trong tin nhắn. Vui lòng sử dụng tính năng chat của hệ thống để trao đổi.'
+        };
+    }
+
     // Kiểm tra số điện thoại dạng số
     if (detectPhoneNumber(trimmed)) {
         return {
@@ -304,21 +379,13 @@ export const validateMessage = (message) => {
         };
     }
 
-    // Kiểm tra link
-    if (detectLinks(trimmed)) {
+    // ✅ Kiểm tra whitelist SAU khi đã chắc chắn không có từ khóa mạng xã hội
+    // Chỉ cho phép các từ thông thường nếu không chứa từ khóa mạng xã hội
+    if (isAllowedWord(trimmed)) {
         return {
-            isValid: false,
-            reason: 'links',
-            warning: '⚠️ Không được phép gửi link trong tin nhắn. Vui lòng sử dụng tính năng chat của hệ thống để trao đổi.'
-        };
-    }
-
-    // Kiểm tra từ khóa mạng xã hội
-    if (detectSocialMediaKeywords(trimmed)) {
-        return {
-            isValid: false,
-            reason: 'social_media',
-            warning: '⚠️ Không được phép đề cập đến các nền tảng mạng xã hội khác. Vui lòng sử dụng tính năng chat của hệ thống để giao dịch an toàn.'
+            isValid: true,
+            reason: null,
+            warning: null
         };
     }
 

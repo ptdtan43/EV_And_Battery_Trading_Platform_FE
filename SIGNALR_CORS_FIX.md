@@ -141,3 +141,4 @@ Sau khi fix:
 3. **Token phải hợp lệ** để SignalR có thể authenticate
 4. **Polling mode** sẽ tự động fallback nếu SignalR không kết nối được
 
+
