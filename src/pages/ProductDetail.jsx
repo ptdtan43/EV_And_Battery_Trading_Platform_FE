@@ -36,6 +36,7 @@ import { toggleFavorite, isProductFavorited } from "../lib/favoriteApi";
 import { VerificationButton } from "../components/common/VerificationButton";
 import { ChatModal } from "../components/common/ChatModal";
 import { ReportModal } from "../components/common/ReportModal";
+import { fetchProductImages } from "../utils/imageLoader";
 
 // Helper function to fix Vietnamese character encoding
 const fixVietnameseEncoding = (str) => {
@@ -191,20 +192,14 @@ export const ProductDetail = () => {
       console.log("[ProductDetail] Raw product data:", productData);
       console.log("[ProductDetail] Normalized product:", normalizedProduct);
 
-      // Check if product is sold or reserved
+      // ✅ FIX: Check status but don't return early - still need to load images and seller info
       const productStatus = String(normalizedProduct.status || "").toLowerCase();
       if (productStatus === "sold") {
-        console.log("[ProductDetail] Product is sold, showing sold message");
-        // Set product with sold status
-        setProduct({ ...normalizedProduct, status: "Sold" });
-        setLoading(false);
-        return;
+        console.log("[ProductDetail] Product is sold, but still loading full details");
+        normalizedProduct.status = "Sold";
       } else if (productStatus === "reserved") {
-        console.log("[ProductDetail] Product is reserved, showing reserved message");
-        // Set product with reserved status
-        setProduct({ ...normalizedProduct, status: "Reserved" });
-        setLoading(false);
-        return;
+        console.log("[ProductDetail] Product is reserved, but still loading full details");
+        normalizedProduct.status = "Reserved";
       }
 
       setProduct(normalizedProduct);
@@ -234,13 +229,11 @@ export const ProductDetail = () => {
         }
       }
 
-      // Load product images and separate product images from document images
+      // ✅ OPTIMIZED: Load product images using optimized image loader
       try {
-        const imagesData = await apiRequest(`/api/ProductImage/product/${id}`);
-        const allImages = Array.isArray(imagesData)
-          ? imagesData
-          : imagesData?.items || [];
-
+        console.log(`🖼️ Loading images for product ${id}...`);
+        const allImages = await fetchProductImages(id);
+        
         console.log("🔍 All images data:", allImages);
         console.log("🔍 First image structure:", allImages[0]);
 

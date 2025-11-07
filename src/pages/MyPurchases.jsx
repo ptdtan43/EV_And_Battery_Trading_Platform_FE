@@ -4,6 +4,7 @@ import { Clock, Package, Star, CheckCircle, Eye, MessageSquare, XCircle, AlertCi
 import { apiRequest } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import { batchFetchProductImages, fetchProductImages, preloadImage } from '../utils/imageLoader';
 
 const MyPurchases = () => {
   const { user } = useAuth();
@@ -157,17 +158,33 @@ const MyPurchases = () => {
       // Process orders - only completed ones
       console.log(`🔍 About to process ${completedOrders.length} completed orders`);
       
-      // Fetch images for all products first
-      const purchasesWithDetails = await Promise.all(completedOrders.map(async (order, index) => {
+      // ✅ OPTIMIZED: Extract all product IDs first for batch loading
+      const productIds = completedOrders
+        .map(order => {
+          if (order.product) {
+            return order.product?.productId || order.product?.id || order.productId || order.product?.ProductId;
+          }
+          return order.productId || order.product_id || order.ProductId || order.Product_ID || 
+                 order.itemId || order.item_id;
+        })
+        .filter(id => id && id !== null);
+
+      console.log(`🖼️ Batch loading images for ${productIds.length} products...`);
+      
+      // ✅ OPTIMIZED: Batch fetch all images at once
+      const imagesMap = await batchFetchProductImages(productIds, 5);
+      console.log(`✅ Loaded images for ${imagesMap.size} products`);
+
+      // ✅ Process orders with pre-loaded images
+      const purchasesWithDetails = completedOrders.map((order, index) => {
         console.log(`🔍 Processing completed order ${index} (OrderId: ${order.orderId}):`, order);
         
         // Check if product data is already included
         if (order.product) {
           console.log(`✅ Order ${index} already has product data:`, order.product);
-          console.log(`🔍 Product fields:`, Object.keys(order.product));
           
-        // Extract productId from the product object (API /api/Order/buyer structure)
-        const productId = order.product?.productId || order.product?.id || order.productId || order.product?.ProductId;
+          // Extract productId from the product object
+          const productId = order.product?.productId || order.product?.id || order.productId || order.product?.ProductId;
           
           // Skip orders with invalid product data
           if (!productId || productId === null) {
@@ -175,19 +192,8 @@ const MyPurchases = () => {
             return null;
           }
           
-          // Fetch images for this product
-          let productImages = [];
-          if (productId) {
-            try {
-              console.log(`🖼️ Fetching images for product ${productId}...`);
-              const imageResponse = await apiRequest(`/api/ProductImage/product/${productId}`, 'GET');
-              productImages = imageResponse || [];
-              console.log(`🖼️ Product ${productId} images:`, productImages);
-            } catch (error) {
-              console.log(`❌ Failed to fetch images for product ${productId}:`, error.message);
-              productImages = [];
-            }
-          }
+          // ✅ Get images from batch-loaded map
+          const productImages = imagesMap.get(productId) || [];
           
           // Update product with images
           const productWithImages = {
@@ -196,20 +202,14 @@ const MyPurchases = () => {
             primaryImage: productImages?.[0] || null
           };
             
-            return {
-              ...order,
+          return {
+            ...order,
             productId: productId,
             product: productWithImages,
             sellerId: (() => {
               const sellerId = order.sellerId || order.seller?.id || order.product?.sellerId || 1;
-              console.log(`🔍 Order ${order.orderId} sellerId calculation:`, {
-                orderSellerId: order.sellerId,
-                orderSellerIdFromSeller: order.seller?.id,
-                productSellerId: order.product?.sellerId,
-                finalSellerId: sellerId
-              });
               return sellerId;
-            })(), // Fallback to 1
+            })(),
             canReview: !order.hasRating && (order.status || order.orderStatus || '').toLowerCase() !== 'cancelled',
             orderStatus: order.status || order.orderStatus || order.product?.status || 'completed',
             cancellationReason: order.cancellationReason || order.CancellationReason || null
@@ -222,12 +222,11 @@ const MyPurchases = () => {
         
         if (!productId) {
           console.error(`❌ Order ${index} has no product data or productId:`, order);
-          console.error(`❌ Available fields:`, Object.keys(order));
-            return {
-              ...order,
+          return {
+            ...order,
             productId: null,
-              product: null,
-              canReview: false,
+            product: null,
+            canReview: false,
             error: 'No product data found',
             orderStatus: order.status || order.orderStatus || 'Unknown'
           };
@@ -235,17 +234,8 @@ const MyPurchases = () => {
         
         console.log(`✅ Found productId: ${productId} for order ${index}`);
         
-        // Fetch images for this product
-        let productImages = [];
-        try {
-          console.log(`🖼️ Fetching images for product ${productId}...`);
-          const imageResponse = await apiRequest(`/api/ProductImage/product/${productId}`, 'GET');
-          productImages = imageResponse || [];
-          console.log(`🖼️ Product ${productId} images:`, productImages);
-        } catch (error) {
-          console.log(`❌ Failed to fetch images for product ${productId}:`, error.message);
-          productImages = [];
-        }
+        // ✅ Get images from batch-loaded map
+        const productImages = imagesMap.get(productId) || [];
         
         return {
           ...order,
@@ -257,19 +247,13 @@ const MyPurchases = () => {
           },
           sellerId: (() => {
             const sellerId = order.sellerId || order.seller?.id || order.product?.sellerId || 1;
-            console.log(`🔍 Order ${order.orderId} sellerId calculation (fallback):`, {
-              orderSellerId: order.sellerId,
-              orderSellerIdFromSeller: order.seller?.id,
-              productSellerId: order.product?.sellerId,
-              finalSellerId: sellerId
-            });
             return sellerId;
-          })(), // Fallback to 1
+          })(),
           canReview: !order.hasRating && (order.status || order.orderStatus || '').toLowerCase() !== 'cancelled',
           orderStatus: order.status || order.orderStatus || order.product?.status || 'completed',
           cancellationReason: order.cancellationReason || order.CancellationReason || null
         };
-      }));
+      });
       
       // Filter out null values (orders with invalid productId)
       const validPurchases = purchasesWithDetails.filter(purchase => purchase !== null);
@@ -304,62 +288,83 @@ const MyPurchases = () => {
       
       console.log('🔍 Loading sales for seller:', sellerId);
       
-      // Use GET /api/Order (same endpoint as MyListings.jsx uses)
-      const allOrders = await apiRequest(`/api/Order`);
-      console.log('✅ All orders loaded from /api/Order:', allOrders);
+      // ✅ FIX: Load sold products directly from Product API, not just from orders
+      // This ensures we get all sold products even if orders are missing or incomplete
+      const productsData = await apiRequest(`/api/Product/seller/${sellerId}`);
+      const allProducts = Array.isArray(productsData) ? productsData : productsData?.items || [];
       
-      // Filter orders by sellerId
-      const orders = Array.isArray(allOrders) ? allOrders : [];
-      const sellerOrders = orders.filter(order => {
-        const orderSellerId = order.sellerId || order.SellerId || order.seller?.id || order.seller?.userId;
-        return orderSellerId == sellerId || orderSellerId === sellerId;
+      // Filter sold products
+      const soldProducts = allProducts.filter(product => {
+        const status = (product.status || product.Status || '').toLowerCase();
+        return status === 'sold';
       });
       
-      console.log(`✅ Filtered ${sellerOrders.length} orders for seller ${sellerId}`);
+      console.log(`✅ Found ${soldProducts.length} sold products from Product API`);
       
-      // Filter completed/sold orders
-      const completedSales = sellerOrders.filter(order => {
-        const orderStatus = (order.status || order.orderStatus || order.Status || order.OrderStatus || '').toLowerCase();
-        const productStatus = (order.product?.status || '').toLowerCase();
+      // Also get orders for additional info (buyer name, order date, etc.)
+      let ordersMap = new Map();
+      try {
+        const allOrders = await apiRequest(`/api/Order`);
+        const orders = Array.isArray(allOrders) ? allOrders : [];
+        const sellerOrders = orders.filter(order => {
+          const orderSellerId = order.sellerId || order.SellerId || order.seller?.id || order.seller?.userId;
+          return orderSellerId == sellerId || orderSellerId === sellerId;
+        });
         
-        // Show cancelled orders (to display cancellation reason) and completed/sold products
-        const isCancelled = orderStatus === 'cancelled' || orderStatus === 'failed';
-        const isCompleted = productStatus === 'sold' || productStatus === 'completed' || orderStatus === 'completed';
+        // Create a map of productId -> order for quick lookup
+        sellerOrders.forEach(order => {
+          const productId = order.productId || order.ProductId || order.product?.productId || order.product?.id;
+          if (productId) {
+            ordersMap.set(productId, order);
+          }
+        });
         
-        return isCancelled || isCompleted;
-      });
+        console.log(`✅ Found ${ordersMap.size} orders for sold products`);
+      } catch (orderError) {
+        console.log('⚠️ Could not load orders, continuing with products only:', orderError);
+      }
       
-      // Process sales with product details
-      const salesWithDetails = await Promise.all(completedSales.map(async (order) => {
-        const productId = order.productId || order.ProductId || order.product?.productId || order.product?.id;
+      // ✅ OPTIMIZED: Extract all product IDs for batch loading
+      const salesProductIds = soldProducts
+        .map(product => product.id || product.productId || product.ProductId)
+        .filter(id => id && id !== null);
+
+      console.log(`🖼️ Batch loading images for ${salesProductIds.length} sold products...`);
+      
+      // ✅ OPTIMIZED: Batch fetch all images at once
+      const salesImagesMap = await batchFetchProductImages(salesProductIds, 5);
+      console.log(`✅ Loaded images for ${salesImagesMap.size} sold products`);
+
+      // ✅ Process sold products with pre-loaded images
+      const salesWithDetails = soldProducts.map((product) => {
+        const productId = product.id || product.productId || product.ProductId;
         
         if (!productId) {
           return null;
         }
         
-        // Fetch images for this product
-        let productImages = [];
-        try {
-          const imageResponse = await apiRequest(`/api/ProductImage/product/${productId}`, 'GET');
-          productImages = imageResponse || [];
-        } catch (error) {
-          console.log(`❌ Failed to fetch images for product ${productId}:`, error.message);
-          productImages = [];
-        }
+        // ✅ Get images from batch-loaded map
+        const productImages = salesImagesMap.get(productId) || [];
+        
+        // Get order details if available
+        const order = ordersMap.get(productId);
         
         return {
-          ...order,
+          orderId: order?.orderId || order?.OrderId || null,
           productId: productId,
           product: {
-            ...order.product,
+            ...product,
             images: productImages,
             primaryImage: productImages?.[0] || null
           },
-          buyerName: order.buyer?.fullName || order.buyerName || order.user?.fullName || 'N/A',
-          orderStatus: order.status || order.orderStatus || order.Status || order.OrderStatus,
-          cancellationReason: order.cancellationReason || order.CancellationReason || null
+          totalAmount: order?.totalAmount || order?.TotalAmount || product.price || 0,
+          buyerName: order?.buyer?.fullName || order?.buyerName || order?.user?.fullName || 'N/A',
+          orderStatus: order?.status || order?.orderStatus || order?.Status || order?.OrderStatus || 'completed',
+          createdDate: order?.createdDate || order?.createdAt || order?.CreatedDate || product.createdAt || product.createdDate,
+          completedDate: order?.completedDate || order?.CompletedDate || product.updatedAt || product.updated_at,
+          cancellationReason: order?.cancellationReason || order?.CancellationReason || null
         };
-      }));
+      });
       
       // Filter out null values
       const validSales = salesWithDetails.filter(sale => sale !== null);
@@ -599,27 +604,40 @@ const MyPurchases = () => {
                     );
                   }
 
-                  // Check for real product images first
+                  // ✅ OPTIMIZED: Check for real product images first
                   const realImages = product.images || [];
                   const primaryImage = product.primaryImage || realImages[0];
                   
-                  console.log(`🖼️ Product ${product.title} - Real images:`, realImages);
-                  console.log(`🖼️ Product ${product.title} - Primary image:`, primaryImage);
-
+                  // ✅ OPTIMIZED: Handle different image formats
+                  let imageUrl = null;
                   if (primaryImage) {
-                    const imageUrl = primaryImage.imageData || primaryImage.imageUrl || primaryImage;
+                    if (typeof primaryImage === 'string') {
+                      imageUrl = primaryImage;
+                    } else {
+                      imageUrl = primaryImage.imageData || primaryImage.imageUrl || primaryImage.url || primaryImage.ImageData || primaryImage.ImageUrl;
+                    }
+                  }
+
+                  if (imageUrl) {
                     return (
-                      <div className="w-full h-48 relative overflow-hidden">
+                      <div className="w-full h-48 relative overflow-hidden bg-gray-100">
                         <img
                           src={imageUrl}
                           alt={product.title || 'Sản phẩm'}
-                          className="w-full h-full object-cover"
+                          className="w-full h-full object-cover transition-opacity duration-300"
+                          loading="lazy"
                           onError={(e) => {
-                            console.log(`❌ Real image failed to load for ${product.title}:`, primaryImage);
-                            console.log(`❌ Image URL was:`, imageUrl);
+                            console.log(`❌ Image failed to load for ${product.title}:`, imageUrl);
                             // Fallback to placeholder
                             e.target.style.display = 'none';
-                            e.target.nextSibling.style.display = 'flex';
+                            const placeholder = e.target.nextElementSibling;
+                            if (placeholder) {
+                              placeholder.style.display = 'flex';
+                            }
+                          }}
+                          onLoad={(e) => {
+                            // Ensure image is visible when loaded
+                            e.target.style.opacity = '1';
                           }}
                         />
                         
@@ -821,20 +839,39 @@ const MyPurchases = () => {
                         );
                       }
 
+                      // ✅ OPTIMIZED: Handle different image formats
                       const realImages = product.images || [];
                       const primaryImage = product.primaryImage || realImages[0];
-
+                      
+                      let imageUrl = null;
                       if (primaryImage) {
-                        const imageUrl = primaryImage.imageData || primaryImage.imageUrl || primaryImage;
+                        if (typeof primaryImage === 'string') {
+                          imageUrl = primaryImage;
+                        } else {
+                          imageUrl = primaryImage.imageData || primaryImage.imageUrl || primaryImage.url || primaryImage.ImageData || primaryImage.ImageUrl;
+                        }
+                      }
+
+                      if (imageUrl) {
                         return (
-                          <div className="w-full h-48 relative overflow-hidden">
+                          <div className="w-full h-48 relative overflow-hidden bg-gray-100">
                             <img
                               src={imageUrl}
                               alt={product.title || 'Sản phẩm'}
-                              className="w-full h-full object-cover"
+                              className="w-full h-full object-cover transition-opacity duration-300"
+                              loading="lazy"
                               onError={(e) => {
+                                console.log(`❌ Image failed to load for ${product.title}:`, imageUrl);
+                                // Fallback to placeholder
                                 e.target.style.display = 'none';
-                                e.target.nextSibling.style.display = 'flex';
+                                const placeholder = e.target.nextElementSibling;
+                                if (placeholder) {
+                                  placeholder.style.display = 'flex';
+                                }
+                              }}
+                              onLoad={(e) => {
+                                // Ensure image is visible when loaded
+                                e.target.style.opacity = '1';
                               }}
                             />
                             <div className="w-full h-48 bg-gradient-to-br from-blue-50 to-indigo-100 flex flex-col items-center justify-center absolute inset-0" style={{display: 'none'}}>

@@ -60,16 +60,23 @@ namespace EVTB_Backend.Controllers
                         createdDate = p.CreatedAt,
                         createdAt = p.CreatedAt,
                         updatedAt = p.UpdatedAt,
-                        seller = new
+                        seller = p.Seller != null ? new
                         {
                             id = p.Seller.UserId,
                             userId = p.Seller.UserId,
                             fullName = p.Seller.FullName,
                             email = p.Seller.Email,
                             phone = p.Seller.Phone
-                        }
+                        } : null
                     })
                     .ToListAsync();
+
+                // ✅ DEBUG: Log seller information for first product
+                if (products.Any())
+                {
+                    var firstProduct = products.First();
+                    _logger.LogInformation($"First product seller info - SellerId: {firstProduct.sellerId}, FullName: {firstProduct.seller?.fullName}");
+                }
 
                 _logger.LogInformation($"Retrieved {products.Count} products");
                 return Ok(products);

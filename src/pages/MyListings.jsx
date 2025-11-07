@@ -16,6 +16,7 @@ import {
 import { useAuth } from "../contexts/AuthContext";
 import { apiRequest } from "../lib/api";
 import { formatPrice, formatDate } from "../utils/formatters";
+import { batchFetchProductImages } from "../utils/imageLoader";
 import { useToast } from "../contexts/ToastContext";
 import { RejectedProducts } from "../components/user/RejectedProducts";
 import { RejectionReasonModal } from "../components/common/RejectionReasonModal";
@@ -226,132 +227,116 @@ export const MyListings = () => {
 
       const items = data;
 
-      const filtered = items
-        .filter((l) => {
-          const s = norm(l?.status || l?.Status || "");
-          return s !== "deleted" && s !== "inactive";
-        })
-        .map(async (l, index) => {
-          let images = [];
-          let rejectionReason = l.rejectionReason || l.RejectionReason;
+      const filtered = items.filter((l) => {
+        const s = norm(l?.status || l?.Status || "");
+        return s !== "deleted" && s !== "inactive";
+      });
 
-          // ALWAYS fetch fresh rejection reason for rejected products to ensure we have the latest data
-          // This prevents stale data from causing "Bị báo cáo" to change to "Từ chối"
-          const status = getStatus(l);
-          if (status === "rejected") {
-            try {
-              console.log(`🔄 Fetching fresh rejection reason for product ${l.id || l.productId}`);
-              const detailedProduct = await apiRequest(
-                `/api/Product/${l.id || l.productId || l.Id}`
-              );
-              rejectionReason = 
-                detailedProduct?.rejectionReason || 
-                detailedProduct?.RejectionReason || 
-                detailedProduct?.rejection_reason;
-              
-              console.log(`✅ Fresh rejection reason for ${l.id || l.productId}:`, {
-                reason: rejectionReason,
-                hasPrefix: rejectionReason?.startsWith("[BÁO CÁO]")
-              });
-            } catch (error) {
-              console.warn(`⚠️ Failed to fetch rejection reason for product ${l.id || l.productId}:`, error);
-              // Fallback to existing value if fetch fails
-              rejectionReason = l.rejectionReason || l.RejectionReason;
+      // ✅ FIX: Batch fetch all product images at once for better performance
+      const productIds = filtered.map((l) => l.id || l.productId || l.Id).filter(Boolean);
+      console.log(`🖼️ Batch fetching images for ${productIds.length} products...`);
+      const imagesMap = await batchFetchProductImages(productIds, 5);
+      console.log(`✅ Loaded images for ${imagesMap.size} products`);
+
+      // Process listings with images
+      const listingsWithImages = filtered.map((l) => {
+        let images = [];
+        let rejectionReason = l.rejectionReason || l.RejectionReason;
+        const productId = l.id || l.productId || l.Id;
+
+        // ALWAYS fetch fresh rejection reason for rejected products to ensure we have the latest data
+        // This prevents stale data from causing "Bị báo cáo" to change to "Từ chối"
+        const status = getStatus(l);
+        if (status === "rejected") {
+          // Note: We'll fetch rejection reason separately if needed
+          // For now, use existing rejectionReason
+        }
+
+        // ✅ FIX: Get images from batch-fetched map first
+        if (productId && imagesMap.has(productId)) {
+          const fetchedImages = imagesMap.get(productId);
+          if (Array.isArray(fetchedImages) && fetchedImages.length > 0) {
+            images = fetchedImages.map(
+              (img) =>
+                img.imageData ||
+                img.imageUrl ||
+                img.url ||
+                img.ImageData ||
+                img.ImageUrl ||
+                img.Url ||
+                img
+            ).filter(Boolean);
+          }
+        }
+
+        // Check if images are stored directly in the product object as fallback
+        if (images.length === 0 && l.images && Array.isArray(l.images)) {
+          images = l.images;
+        } else if (images.length === 0) {
+          // Check other possible image fields
+          const possibleImageFields = [
+            "image",
+            "photo",
+            "thumbnail",
+            "picture",
+            "img",
+            "Image",
+            "Photo",
+            "Thumbnail",
+            "Picture",
+            "Img",
+            "primaryImage",
+            "mainImage",
+            "coverImage",
+          ];
+
+          for (const field of possibleImageFields) {
+            if (l[field]) {
+              if (Array.isArray(l[field])) {
+                images = l[field];
+              } else if (typeof l[field] === "string") {
+                images = [l[field]];
+              }
+              break;
             }
           }
+        }
 
-          // Check if images are stored directly in the product object first
-          if (l.images && Array.isArray(l.images)) {
-            images = l.images;
-          } else {
-            // Check other possible image fields
-            const possibleImageFields = [
-              "image",
-              "photo",
-              "thumbnail",
-              "picture",
-              "img",
-              "Image",
-              "Photo",
-              "Thumbnail",
-              "Picture",
-              "Img",
-              "primaryImage",
-              "mainImage",
-              "coverImage",
-            ];
+        return {
+          ...l,
+          status: status,
+          images: images,
+          rejectionReason: rejectionReason,
+        };
+      });
 
-            for (const field of possibleImageFields) {
-              if (l[field]) {
-                if (Array.isArray(l[field])) {
-                  images = l[field];
-                } else if (typeof l[field] === "string") {
-                  images = [l[field]];
-                }
-                break;
+      // ✅ FIX: Fetch rejection reasons for rejected products in parallel
+      const rejectedProducts = listingsWithImages.filter((l) => getStatus(l) === "rejected");
+      if (rejectedProducts.length > 0) {
+        console.log(`🔄 Fetching fresh rejection reasons for ${rejectedProducts.length} rejected products...`);
+        const rejectionPromises = rejectedProducts.map(async (l) => {
+          try {
+            const productId = l.id || l.productId || l.Id;
+            const detailedProduct = await apiRequest(`/api/Product/${productId}`);
+            const rejectionReason = 
+              detailedProduct?.rejectionReason || 
+              detailedProduct?.RejectionReason || 
+              detailedProduct?.rejection_reason;
+            
+            if (rejectionReason) {
+              const index = listingsWithImages.findIndex(
+                (item) => (item.id || item.productId || item.Id) === productId
+              );
+              if (index !== -1) {
+                listingsWithImages[index].rejectionReason = rejectionReason;
               }
             }
+          } catch (error) {
+            console.warn(`⚠️ Failed to fetch rejection reason for product ${l.id || l.productId}:`, error);
           }
-
-          // Only try the API endpoint if no images found in product object
-          if (images.length === 0) {
-            try {
-              // Add delay between API calls to prevent DbContext conflicts
-              if (index > 0) {
-                await new Promise((resolve) =>
-                  setTimeout(resolve, 100 * index)
-                );
-              }
-
-              const imagesData = await apiRequest(
-                `/api/ProductImage/product/${l.id || l.productId || l.Id}`
-              );
-
-              const imagesArray = Array.isArray(imagesData)
-                ? imagesData
-                : imagesData?.items || [];
-
-              images = imagesArray.map(
-                (img) =>
-                  img.imageData ||
-                  img.imageUrl ||
-                  img.url ||
-                  img.ImageData ||
-                  img.ImageUrl ||
-                  img.Url
-              );
-            } catch (error) {
-              // Use fallback placeholder images based on product type
-              const isVehicle =
-                l.productType === "vehicle" ||
-                (l.title && l.title.toLowerCase().includes("xe")) ||
-                (l.brand &&
-                  ["toyota", "honda", "ford", "bmw", "mercedes"].some((b) =>
-                    l.brand.toLowerCase().includes(b)
-                  ));
-
-              images = isVehicle
-                ? [
-                    "https://images.unsplash.com/photo-1552519507-da3b142c6e3d?w=400&h=300&fit=crop&auto=format",
-                    "https://images.unsplash.com/photo-1549317336-206569e8475c?w=400&h=300&fit=crop&auto=format",
-                  ]
-                : [
-                    "https://images.unsplash.com/photo-1609592807902-4a3a4a4a4a4a?w=400&h=300&fit=crop&auto=format",
-                    "https://images.unsplash.com/photo-1609592807902-4a3a4a4a4a4b?w=400&h=300&fit=crop&auto=format",
-                  ];
-            }
-          }
-
-          return {
-            ...l,
-            status: status,
-            images: images,
-            rejectionReason: rejectionReason,
-          };
         });
-
-      // Wait for all image loading to complete
-      const listingsWithImages = await Promise.all(filtered);
+        await Promise.all(rejectionPromises);
+      }
 
       // Sort listings to show newest first (by createdDate or createdAt)
       const sortedListings = listingsWithImages.sort((a, b) => {
@@ -749,6 +734,7 @@ export const MyListings = () => {
                           src={listing.images[0]}
                           alt={listing.title}
                           className="mylistings-image"
+                          loading="lazy"
                           onError={(e) => {
                             e.target.style.display = "none";
                             // Show fallback icon when image fails to load
