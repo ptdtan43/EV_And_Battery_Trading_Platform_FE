@@ -29,19 +29,53 @@ export const RegisterForm = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState("");
+  const [phoneError, setPhoneError] = useState("");
   const [loading, setLoading] = useState(false);
   const { signUp, signOut } = useAuth();
   const { show: showToast } = useToast();
   const navigate = useNavigate();
 
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
+    const { name, value } = e.target;
+    
+    // Validate phone number in real-time
+    if (name === "phone") {
+      // Only allow numbers and limit to 10 digits
+      const numericValue = value.replace(/\D/g, "");
+      const phoneValue = numericValue.substring(0, 10);
+      
+      setFormData({
+        ...formData,
+        [name]: phoneValue,
+      });
+      
+      // Clear error when user starts typing
+      if (phoneError) {
+        setPhoneError("");
+      }
+    } else {
+      setFormData({
+        ...formData,
+        [name]: value,
+      });
+    }
   };
 
   const validateForm = () => {
+    // Validate phone number
+    const phoneRegex = /^0\d{9}$/;
+    if (!formData.phone) {
+      setPhoneError("Vui lòng nhập số điện thoại");
+      setError("Vui lòng nhập số điện thoại");
+      return false;
+    }
+    if (!phoneRegex.test(formData.phone)) {
+      setPhoneError("Số điện thoại phải bắt đầu bằng 0 và có đúng 10 chữ số");
+      setError("Số điện thoại phải bắt đầu bằng 0 và có đúng 10 chữ số");
+      return false;
+    }
+    
+    // Validate password
     if (formData.password !== formData.confirmPassword) {
       setError("Mật khẩu xác nhận không khớp");
       return false;
@@ -50,12 +84,16 @@ export const RegisterForm = () => {
       setError("Mật khẩu phải có ít nhất 6 ký tự");
       return false;
     }
+    
+    // Clear phone error if validation passes
+    setPhoneError("");
     return true;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    setPhoneError("");
 
     if (!validateForm()) return;
     setLoading(true);
@@ -367,11 +405,18 @@ export const RegisterForm = () => {
                     type="tel"
                     value={formData.phone}
                     onChange={handleChange}
-                    className="auth-input"
+                    className={`auth-input ${phoneError ? "border-red-500" : ""}`}
                     placeholder="0123456789"
+                    maxLength={10}
                     required
                   />
                 </div>
+                {phoneError && (
+                  <p className="text-red-400 text-sm mt-1 flex items-center">
+                    <AlertCircle className="h-4 w-4 mr-1" />
+                    {phoneError}
+                  </p>
+                )}
               </div>
 
               {/* Password Field */}

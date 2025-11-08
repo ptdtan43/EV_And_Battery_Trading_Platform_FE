@@ -4,6 +4,7 @@ import { Clock, Package, Star, CheckCircle, Eye, MessageSquare, XCircle, AlertCi
 import { apiRequest } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import { batchFetchProductImages, fetchProductImages, preloadImage } from '../utils/imageLoader';
 
 const MyPurchases = () => {
   const { user } = useAuth();
@@ -194,10 +195,9 @@ const MyPurchases = () => {
         // Check if product data is already included
         if (order.product) {
           console.log(`✅ Order ${index} already has product data:`, order.product);
-          console.log(`🔍 Product fields:`, Object.keys(order.product));
           
-        // Extract productId from the product object (API /api/Order/buyer structure)
-        const productId = order.product?.productId || order.product?.id || order.productId || order.product?.ProductId;
+          // Extract productId from the product object
+          const productId = order.product?.productId || order.product?.id || order.productId || order.product?.ProductId;
           
           // Skip orders with invalid product data
           if (!productId || productId === null) {
@@ -242,20 +242,14 @@ const MyPurchases = () => {
             primaryImage: productImages?.[0] || null
           };
             
-            return {
-              ...order,
+          return {
+            ...order,
             productId: productId,
             product: productWithImages,
             sellerId: (() => {
               const sellerId = order.sellerId || order.seller?.id || order.product?.sellerId || 1;
-              console.log(`🔍 Order ${order.orderId} sellerId calculation:`, {
-                orderSellerId: order.sellerId,
-                orderSellerIdFromSeller: order.seller?.id,
-                productSellerId: order.product?.sellerId,
-                finalSellerId: sellerId
-              });
               return sellerId;
-            })(), // Fallback to 1
+            })(),
             canReview: !order.hasRating && (order.status || order.orderStatus || '').toLowerCase() !== 'cancelled',
             orderStatus: order.status || order.orderStatus || order.product?.status || 'completed',
             cancellationReason: order.cancellationReason || order.CancellationReason || null
@@ -268,18 +262,26 @@ const MyPurchases = () => {
         
         if (!productId) {
           console.error(`❌ Order ${index} has no product data or productId:`, order);
-          console.error(`❌ Available fields:`, Object.keys(order));
-            return {
-              ...order,
+          return {
+            ...order,
             productId: null,
-              product: null,
-              canReview: false,
+            product: null,
+            canReview: false,
             error: 'No product data found',
             orderStatus: order.status || order.orderStatus || 'Unknown'
           };
         }
         
         console.log(`✅ Found productId: ${productId} for order ${index}`);
+        
+        // Fetch product details to get latest status
+        let productDetails = null;
+        try {
+          productDetails = await apiRequest(`/api/Product/${productId}`, 'GET');
+          console.log(`✅ Fetched product ${productId} details:`, productDetails);
+        } catch (error) {
+          console.log(`⚠️ Failed to fetch product ${productId} details:`, error.message);
+        }
         
         // Fetch images for this product
         let productImages = [];
@@ -296,26 +298,24 @@ const MyPurchases = () => {
         return {
           ...order,
           productId: productId,
-          product: {
+          product: productDetails ? {
+            ...productDetails,
+            images: productImages,
+            primaryImage: productImages?.[0] || null
+          } : {
             productId: productId,
             images: productImages,
             primaryImage: productImages?.[0] || null
           },
           sellerId: (() => {
             const sellerId = order.sellerId || order.seller?.id || order.product?.sellerId || 1;
-            console.log(`🔍 Order ${order.orderId} sellerId calculation (fallback):`, {
-              orderSellerId: order.sellerId,
-              orderSellerIdFromSeller: order.seller?.id,
-              productSellerId: order.product?.sellerId,
-              finalSellerId: sellerId
-            });
             return sellerId;
-          })(), // Fallback to 1
+          })(),
           canReview: !order.hasRating && (order.status || order.orderStatus || '').toLowerCase() !== 'cancelled',
           orderStatus: order.status || order.orderStatus || order.product?.status || 'completed',
           cancellationReason: order.cancellationReason || order.CancellationReason || null
         };
-      }));
+      });
       
       // Filter out null values (orders with invalid productId)
       const validPurchases = purchasesWithDetails.filter(purchase => purchase !== null);
@@ -350,18 +350,31 @@ const MyPurchases = () => {
       
       console.log('🔍 Loading sales for seller:', sellerId);
       
-      // Use GET /api/Order (same endpoint as MyListings.jsx uses)
-      const allOrders = await apiRequest(`/api/Order`);
-      console.log('✅ All orders loaded from /api/Order:', allOrders);
+      // ✅ FIX: Load sold products directly from Product API, not just from orders
+      // This ensures we get all sold products even if orders are missing or incomplete
+      const productsData = await apiRequest(`/api/Product/seller/${sellerId}`);
+      const allProducts = Array.isArray(productsData) ? productsData : productsData?.items || [];
       
-      // Filter orders by sellerId
-      const orders = Array.isArray(allOrders) ? allOrders : [];
-      const sellerOrders = orders.filter(order => {
-        const orderSellerId = order.sellerId || order.SellerId || order.seller?.id || order.seller?.userId;
-        return orderSellerId == sellerId || orderSellerId === sellerId;
+      // Filter sold products
+      const soldProducts = allProducts.filter(product => {
+        const status = (product.status || product.Status || '').toLowerCase();
+        return status === 'sold';
       });
       
-      console.log(`✅ Filtered ${sellerOrders.length} orders for seller ${sellerId}`);
+      console.log(`✅ Found ${soldProducts.length} sold products from Product API`);
+      
+      // Fetch seller orders from Order API
+      let sellerOrders = [];
+      try {
+        sellerOrders = await apiRequest(`/api/Order/seller`);
+        if (!Array.isArray(sellerOrders)) {
+          sellerOrders = sellerOrders?.items || sellerOrders?.data || [];
+        }
+        console.log(`✅ Found ${sellerOrders.length} seller orders from Order API`);
+      } catch (error) {
+        console.log(`⚠️ Failed to fetch seller orders:`, error.message);
+        sellerOrders = [];
+      }
       
       // Filter to show ALL seller orders (deposited, completed, rejected)
       // Logic: "Đơn bán" quản lý các đơn hàng mà seller đã đăng sản phẩm
@@ -444,14 +457,14 @@ const MyPurchases = () => {
         };
         
         return {
-          ...order,
+          orderId: order?.orderId || order?.OrderId || null,
           productId: productId,
           product: mergedProduct,
           buyerName: order.buyer?.fullName || order.buyerName || order.user?.fullName || 'N/A',
           orderStatus: order.status || order.orderStatus || order.Status || order.OrderStatus,
           cancellationReason: order.cancellationReason || order.CancellationReason || null
         };
-      }));
+      });
       
       // Filter out null values
       const validSales = salesWithDetails.filter(sale => sale !== null);
@@ -688,27 +701,40 @@ const MyPurchases = () => {
                     );
                   }
 
-                  // Check for real product images first
+                  // ✅ OPTIMIZED: Check for real product images first
                   const realImages = product.images || [];
                   const primaryImage = product.primaryImage || realImages[0];
                   
-                  console.log(`🖼️ Product ${product.title} - Real images:`, realImages);
-                  console.log(`🖼️ Product ${product.title} - Primary image:`, primaryImage);
-
+                  // ✅ OPTIMIZED: Handle different image formats
+                  let imageUrl = null;
                   if (primaryImage) {
-                    const imageUrl = primaryImage.imageData || primaryImage.imageUrl || primaryImage;
+                    if (typeof primaryImage === 'string') {
+                      imageUrl = primaryImage;
+                    } else {
+                      imageUrl = primaryImage.imageData || primaryImage.imageUrl || primaryImage.url || primaryImage.ImageData || primaryImage.ImageUrl;
+                    }
+                  }
+
+                  if (imageUrl) {
                     return (
-                      <div className="w-full h-48 relative overflow-hidden">
+                      <div className="w-full h-48 relative overflow-hidden bg-gray-100">
                         <img
                           src={imageUrl}
                           alt={product.title || 'Sản phẩm'}
-                          className="w-full h-full object-cover"
+                          className="w-full h-full object-cover transition-opacity duration-300"
+                          loading="lazy"
                           onError={(e) => {
-                            console.log(`❌ Real image failed to load for ${product.title}:`, primaryImage);
-                            console.log(`❌ Image URL was:`, imageUrl);
+                            console.log(`❌ Image failed to load for ${product.title}:`, imageUrl);
                             // Fallback to placeholder
                             e.target.style.display = 'none';
-                            e.target.nextSibling.style.display = 'flex';
+                            const placeholder = e.target.nextElementSibling;
+                            if (placeholder) {
+                              placeholder.style.display = 'flex';
+                            }
+                          }}
+                          onLoad={(e) => {
+                            // Ensure image is visible when loaded
+                            e.target.style.opacity = '1';
                           }}
                         />
                         
@@ -1035,20 +1061,39 @@ const MyPurchases = () => {
                         );
                       }
 
+                      // ✅ OPTIMIZED: Handle different image formats
                       const realImages = product.images || [];
                       const primaryImage = product.primaryImage || realImages[0];
-
+                      
+                      let imageUrl = null;
                       if (primaryImage) {
-                        const imageUrl = primaryImage.imageData || primaryImage.imageUrl || primaryImage;
+                        if (typeof primaryImage === 'string') {
+                          imageUrl = primaryImage;
+                        } else {
+                          imageUrl = primaryImage.imageData || primaryImage.imageUrl || primaryImage.url || primaryImage.ImageData || primaryImage.ImageUrl;
+                        }
+                      }
+
+                      if (imageUrl) {
                         return (
-                          <div className="w-full h-48 relative overflow-hidden">
+                          <div className="w-full h-48 relative overflow-hidden bg-gray-100">
                             <img
                               src={imageUrl}
                               alt={product.title || 'Sản phẩm'}
-                              className="w-full h-full object-cover"
+                              className="w-full h-full object-cover transition-opacity duration-300"
+                              loading="lazy"
                               onError={(e) => {
+                                console.log(`❌ Image failed to load for ${product.title}:`, imageUrl);
+                                // Fallback to placeholder
                                 e.target.style.display = 'none';
-                                e.target.nextSibling.style.display = 'flex';
+                                const placeholder = e.target.nextElementSibling;
+                                if (placeholder) {
+                                  placeholder.style.display = 'flex';
+                                }
+                              }}
+                              onLoad={(e) => {
+                                // Ensure image is visible when loaded
+                                e.target.style.opacity = '1';
                               }}
                             />
                             <div className="w-full h-48 bg-gradient-to-br from-blue-50 to-indigo-100 flex flex-col items-center justify-center absolute inset-0" style={{display: 'none'}}>

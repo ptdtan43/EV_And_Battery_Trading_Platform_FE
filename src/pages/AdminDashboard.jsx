@@ -185,6 +185,7 @@ export const AdminDashboard = () => {
     product: null,
     reasonCode: '',
     reasonNote: '',
+    refundOption: 'refund', // 'refund' or 'no_refund'
   });
 
   // Transaction failure reason options
@@ -867,6 +868,7 @@ export const AdminDashboard = () => {
         product: product,
         reasonCode: '',
         reasonNote: '',
+        refundOption: 'refund',
       });
       return;
     }
@@ -941,16 +943,43 @@ export const AdminDashboard = () => {
       // Call API to save cancellation reason to Order using admin-reject endpoint
       if (orderId) {
         try {
-          // Use admin-reject endpoint that already exists
-          // Note: Endpoint expects field "Reason" (capital R) and minimum 3 characters
+          const refundOption = failureReason.refundOption || 'refund';
+          
+          // Use admin-reject endpoint
           const response = await apiRequest(`/api/Order/${orderId}/admin-reject`, {
             method: 'POST',
             body: {
-              Reason: cancellationReasonText  // Capital R - matches AdminRejectOrderRequest.Reason
+              Reason: cancellationReasonText,
+              RefundOption: refundOption
             }
           });
           console.log('✅ Cancellation reason saved to Order:', cancellationReasonText);
+          console.log('✅ Refund option:', refundOption);
           console.log('✅ Admin-reject response:', response);
+          
+          // Send notification to buyer
+          try {
+            const buyerId = response.buyerId || order?.userId;
+            if (buyerId) {
+              const refundMessage = refundOption === 'refund' 
+                ? `Số tiền cọc ${formatPrice(response.refundAmount || order?.depositAmount || 0)} sẽ được hoàn lại vào tài khoản của bạn trong vòng 3-5 ngày làm việc.`
+                : 'Số tiền cọc sẽ không được hoàn lại do điều khoản hủy giao dịch.';
+              
+              await apiRequest('/api/Notification', {
+                method: 'POST',
+                body: {
+                  UserId: buyerId,
+                  Title: 'Giao dịch đã bị hủy',
+                  Message: `Giao dịch của bạn đã bị admin hủy. Lý do: ${cancellationReasonText}. ${refundMessage}`,
+                  Type: 'error',
+                  IsRead: false
+                }
+              });
+              console.log('✅ Notification sent to buyer:', buyerId);
+            }
+          } catch (notifError) {
+            console.warn('⚠️ Could not send notification to buyer:', notifError);
+          }
         } catch (orderError) {
           console.error('❌ Could not update order:', orderError);
           showToast({
@@ -3883,7 +3912,10 @@ export const AdminDashboard = () => {
             {(() => {
               const cancelledOrders = orders.filter(order => {
                 const status = (order.status || order.orderStatus || order.Status || order.OrderStatus || '').toLowerCase();
-                return (status === 'cancelled' || status === 'failed') && order.cancellationReason;
+                const hasCancellationReason = order.cancellationReason || order.adminNotes;
+                const hasRefundOption = order.refundOption;
+                // Include orders that are cancelled/failed AND have either cancellation reason or refund option
+                return (status === 'cancelled' || status === 'failed') && (hasCancellationReason || hasRefundOption);
               });
 
               if (cancelledOrders.length === 0) {
@@ -3902,17 +3934,14 @@ export const AdminDashboard = () => {
                     const productId = order.productId || order.ProductId || order.product?.productId || order.product?.id;
                     const product = allListings.find(p => (p.id || p.productId) == productId);
                     
-                    // Debug: Log order object to see available date fields
-                    console.log('🔍 Cancelled order date fields:', {
+                    // Debug: Log order object to see available fields
+                    console.log('🔍 Cancelled order:', {
                       orderId: order.orderId || order.OrderId || order.id,
-                      CancelledDate: order.CancelledDate, // Backend sets this (PascalCase)
-                      cancelledDate: order.cancelledDate, // camelCase variant
-                      cancellationDate: order.cancellationDate,
-                      updatedDate: order.updatedDate,
-                      updatedAt: order.updatedAt,
-                      createdDate: order.createdDate,
-                      createdAt: order.createdAt,
-                      allKeys: Object.keys(order).filter(k => k.toLowerCase().includes('date') || k.toLowerCase().includes('time'))
+                      status: order.status || order.orderStatus,
+                      cancellationReason: order.cancellationReason,
+                      refundOption: order.refundOption,
+                      adminNotes: order.adminNotes,
+                      allKeys: Object.keys(order)
                     });
                     
                     return (
@@ -3981,13 +4010,41 @@ export const AdminDashboard = () => {
                                 return <p>Ngày hủy: Chưa xác định</p>;
                               })()}
                             </div>
-                            {order.cancellationReason && (
+                            {/* Cancellation Reason and Refund Status */}
+                            {(order.cancellationReason || order.refundOption) && (
                               <div className="mt-3 p-3 bg-red-100 border border-red-200 rounded-lg">
                                 <div className="flex items-start space-x-2">
                                   <AlertTriangle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
                                   <div className="flex-1">
-                                    <p className="text-xs font-medium text-red-900 mb-1">Lý do từ chối:</p>
-                                    <p className="text-xs text-red-800">{order.cancellationReason}</p>
+                                    {order.cancellationReason && (
+                                      <>
+                                        <p className="text-xs font-medium text-red-900 mb-1">Lý do từ chối:</p>
+                                        <p className="text-xs text-red-800 mb-2">{order.cancellationReason}</p>
+                                      </>
+                                    )}
+                                    {/* Refund Status - Always show if available */}
+                                    {order.refundOption && (
+                                      <div className={order.cancellationReason ? "mt-2 pt-2 border-t border-red-300" : ""}>
+                                        <p className="text-xs font-medium text-red-900 mb-1">Trạng thái hoàn tiền:</p>
+                                        <div className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
+                                          order.refundOption === 'refund' 
+                                            ? 'bg-green-100 text-green-800 border border-green-300' 
+                                            : 'bg-gray-100 text-gray-800 border border-gray-300'
+                                        }`}>
+                                          {order.refundOption === 'refund' ? (
+                                            <>
+                                              <CheckCircle className="h-3 w-3 mr-1" />
+                                              Hoàn tiền
+                                            </>
+                                          ) : (
+                                            <>
+                                              <XCircle className="h-3 w-3 mr-1" />
+                                              Không hoàn tiền
+                                            </>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -4129,11 +4186,54 @@ export const AdminDashboard = () => {
                 </div>
               )}
 
+              {/* Refund Option */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  Xử lý hoàn tiền <span className="text-red-500">*</span>
+                </label>
+                <div className="space-y-3">
+                  <label className="flex items-center space-x-3 p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                    <input
+                      type="radio"
+                      name="refundOption"
+                      value="refund"
+                      checked={transactionFailureModal.refundOption === 'refund'}
+                      onChange={(e) => setTransactionFailureModal({
+                        ...transactionFailureModal,
+                        refundOption: e.target.value
+                      })}
+                      className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900">Hoàn tiền</div>
+                      <div className="text-sm text-gray-600">Số tiền cọc sẽ được hoàn lại cho người mua</div>
+                    </div>
+                  </label>
+                  <label className="flex items-center space-x-3 p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                    <input
+                      type="radio"
+                      name="refundOption"
+                      value="no_refund"
+                      checked={transactionFailureModal.refundOption === 'no_refund'}
+                      onChange={(e) => setTransactionFailureModal({
+                        ...transactionFailureModal,
+                        refundOption: e.target.value
+                      })}
+                      className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900">Không hoàn tiền</div>
+                      <div className="text-sm text-gray-600">Số tiền cọc sẽ không được hoàn lại</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
               {/* Actions */}
               <div className="flex items-center justify-end space-x-3">
                 <button
                   type="button"
-                  onClick={() => setTransactionFailureModal({ isOpen: false, product: null, reasonCode: '', reasonNote: '' })}
+                  onClick={() => setTransactionFailureModal({ isOpen: false, product: null, reasonCode: '', reasonNote: '', refundOption: 'refund' })}
                   className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
                 >
                   Hủy
@@ -4144,6 +4244,7 @@ export const AdminDashboard = () => {
                     // Validate
                     const reasonCode = transactionFailureModal.reasonCode;
                     const reasonNote = transactionFailureModal.reasonNote;
+                    const refundOption = transactionFailureModal.refundOption;
                     
                     if (!reasonCode) {
                       showToast({
@@ -4163,6 +4264,15 @@ export const AdminDashboard = () => {
                       return;
                     }
 
+                    if (!refundOption) {
+                      showToast({
+                        title: 'Lỗi',
+                        description: 'Vui lòng chọn phương án xử lý hoàn tiền',
+                        type: 'error',
+                      });
+                      return;
+                    }
+
                     const productId = transactionFailureModal.product?.id || transactionFailureModal.product?.productId;
                     if (!productId) {
                       showToast({
@@ -4174,13 +4284,14 @@ export const AdminDashboard = () => {
                     }
 
                     // Close modal and proceed with failure
-                    setTransactionFailureModal({ isOpen: false, product: null, reasonCode: '', reasonNote: '' });
+                    setTransactionFailureModal({ isOpen: false, product: null, reasonCode: '', reasonNote: '', refundOption: 'refund' });
                     await handleMarkTransactionFailed(productId, {
                       reasonCode: reasonCode,
-                      reasonNote: reasonNote
+                      reasonNote: reasonNote,
+                      refundOption: refundOption
                     });
                   }}
-                  disabled={!transactionFailureModal.reasonCode || (transactionFailureModal.reasonCode === 'OTHER' && !transactionFailureModal.reasonNote.trim())}
+                  disabled={!transactionFailureModal.reasonCode || (transactionFailureModal.reasonCode === 'OTHER' && !transactionFailureModal.reasonNote.trim()) || !transactionFailureModal.refundOption}
                   className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
                 >
                   <AlertTriangle className="h-4 w-4" />

@@ -113,25 +113,41 @@ export const SellerProfile = () => {
       
       // ✅ Add seller name to all products
       const sellerName = sellerData?.fullName || sellerData?.name || "Người bán";
-      const productsWithSellerName = productsList.map(product => ({
-        ...product,
-        sellerName: sellerName
+      
+      // ✅ FIX: Fetch images for all products (especially sold products)
+      const productsWithImages = await Promise.all(productsList.map(async (product) => {
+        const productId = product.id || product.productId || product.ProductId;
+        if (!productId) return { ...product, sellerName };
+        
+        try {
+          const imageResponse = await apiRequest(`/api/ProductImage/product/${productId}`, 'GET');
+          const images = Array.isArray(imageResponse) ? imageResponse : imageResponse?.items || [];
+          return {
+            ...product,
+            sellerName,
+            images: images,
+            primaryImage: images?.[0] || null
+          };
+        } catch (error) {
+          console.log(`⚠️ Could not fetch images for product ${productId}:`, error);
+          return { ...product, sellerName };
+        }
       }));
       
       // Filter approved products (still available)
-      const approvedProducts = productsWithSellerName.filter(product => {
+      const approvedProducts = productsWithImages.filter(product => {
         const status = String(product.status || product.Status || "").toLowerCase();
         return status === "approved" || status === "active";
       });
       
       // Filter reserved products (after deposit payment)
-      const reservedProducts = productsWithSellerName.filter(product => {
+      const reservedProducts = productsWithImages.filter(product => {
         const status = String(product.status || product.Status || "").toLowerCase();
         return status === "reserved";
       });
       
       // Filter sold products
-      const soldProductsList = productsWithSellerName.filter(product => {
+      const soldProductsList = productsWithImages.filter(product => {
         const status = String(product.status || product.Status || "").toLowerCase();
         return status === "sold";
       });
@@ -482,35 +498,66 @@ export const SellerProfile = () => {
                 </h3>
                 {soldProducts.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {soldProducts.map((product) => (
-                      <div key={product.id || product.productId} className="border border-gray-200 rounded-lg p-4">
-                        <div className="flex items-start space-x-3">
-                          <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center">
-                            <Package className="h-6 w-6 text-gray-400" />
+                    {soldProducts.map((product) => {
+                      // ✅ FIX: Get product image
+                      const productId = product.id || product.productId || product.ProductId;
+                      const images = product.images || [];
+                      const primaryImage = product.primaryImage || images[0];
+                      const imageUrl = primaryImage?.imageData || primaryImage?.imageUrl || primaryImage?.url || primaryImage;
+                      
+                      // ✅ FIX: Handle date formatting
+                      const updateDate = product.updatedAt || product.updated_at || product.createdAt || product.createdDate;
+                      const formattedDate = updateDate ? new Date(updateDate).toLocaleDateString('vi-VN') : 'Chưa cập nhật';
+                      
+                      return (
+                        <div key={product.id || product.productId} className="border border-gray-200 rounded-lg p-4">
+                          <div className="flex items-start space-x-3">
+                            {/* ✅ FIX: Display product image instead of placeholder */}
+                            {imageUrl ? (
+                              <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0">
+                                <img
+                                  src={imageUrl}
+                                  alt={product.title || 'Sản phẩm'}
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    // Fallback to placeholder if image fails to load
+                                    e.target.style.display = 'none';
+                                    e.target.nextSibling.style.display = 'flex';
+                                  }}
+                                />
+                                <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center" style={{display: 'none'}}>
+                                  <Package className="h-6 w-6 text-gray-400" />
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center flex-shrink-0">
+                                <Package className="h-6 w-6 text-gray-400" />
+                              </div>
+                            )}
+                            <div className="flex-1">
+                              <h4 className="font-medium text-gray-900 line-clamp-2">
+                                {product.title}
+                              </h4>
+                              <p className="text-lg font-bold text-green-600 mt-1">
+                                {formatPrice(product.price)}
+                              </p>
+                              <div className="flex items-center mt-2">
+                                <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
+                                <span className="text-sm text-green-600">Đã bán</span>
+                              </div>
+                              <div className="text-xs text-gray-500 mt-1">
+                                Cập nhật: {formattedDate}
+                              </div>
+                            </div>
                           </div>
-                          <div className="flex-1">
-                            <h4 className="font-medium text-gray-900 line-clamp-2">
-                              {product.title}
-                            </h4>
-                            <p className="text-lg font-bold text-green-600 mt-1">
-                              {formatPrice(product.price)}
-                            </p>
-                            <div className="flex items-center mt-2">
-                              <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
-                              <span className="text-sm text-green-600">Đã bán</span>
-                            </div>
-                            <div className="text-xs text-gray-500 mt-1">
-                              Cập nhật: {new Date(product.updatedAt || product.updated_at).toLocaleDateString('vi-VN')}
-                            </div>
+                          <div className="mt-3">
+                            <span className="text-gray-500 text-sm">
+                              Sản phẩm này đã được bán và không còn hiển thị công khai
+                            </span>
                           </div>
                         </div>
-                        <div className="mt-3">
-                          <span className="text-gray-500 text-sm">
-                            Sản phẩm này đã được bán và không còn hiển thị công khai
-                          </span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="text-center py-8">

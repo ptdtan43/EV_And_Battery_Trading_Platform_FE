@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Shield, Clock, CheckCircle, XCircle, CreditCard } from 'lucide-react';
 import { apiRequest } from '../../lib/api';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { feeService } from '../../services/feeService';
 
 export const VerificationButton = ({ 
   productId, 
@@ -14,6 +15,21 @@ export const VerificationButton = ({
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState(currentStatus);
+  const [verificationFee, setVerificationFee] = useState(50000); // Default 50k
+
+  // Load verification fee from API
+  useEffect(() => {
+    const loadVerificationFee = async () => {
+      try {
+        const fee = await feeService.getVerificationFee();
+        setVerificationFee(fee);
+      } catch (error) {
+        console.error('Failed to load verification fee:', error);
+        // Keep default value
+      }
+    };
+    loadVerificationFee();
+  }, []);
 
   const handleRequestVerification = async () => {
     if (loading) return;
@@ -22,12 +38,12 @@ export const VerificationButton = ({
     try {
       console.log('🔍 Creating verification payment for product:', productId);
       
-      // Create payment for verification (200k VND)
+      // Create payment for verification (dynamic fee from API)
       const paymentData = {
         productId: parseInt(productId),
         payerId: user?.id || user?.userId || user?.accountId,
         paymentType: 'Verification',
-        amount: 200000, // 200k VND
+        amount: verificationFee, // Dynamic fee from API
         status: 'Pending'
       };
       
@@ -55,16 +71,18 @@ export const VerificationButton = ({
           paymentWindow.focus();
         }
         
+        const formattedFee = verificationFee.toLocaleString('vi-VN');
         show({
           title: '💰 Mở trang thanh toán',
-          description: 'Đã mở trang thanh toán 200.000 VNĐ cho dịch vụ kiểm định xe trong tab mới.',
+          description: `Đã mở trang thanh toán ${formattedFee} VNĐ cho dịch vụ kiểm định xe trong tab mới.`,
           type: 'success',
         });
       } else {
         // Fallback if no paymentUrl
+        const formattedFee = verificationFee.toLocaleString('vi-VN');
         show({
           title: '💰 Thanh toán kiểm định xe',
-          description: 'Đã tạo đơn thanh toán 200.000 VNĐ cho dịch vụ kiểm định xe. Vui lòng kiểm tra email để thanh toán.',
+          description: `Đã tạo đơn thanh toán ${formattedFee} VNĐ cho dịch vụ kiểm định xe. Vui lòng kiểm tra email để thanh toán.`,
           type: 'success',
         });
       }
@@ -91,7 +109,7 @@ export const VerificationButton = ({
     }
   };
 
-  const getStatusInfo = () => {
+  const getStatusInfo = (fee) => {
     // Handle both new and old status formats
     let actualStatus = status;
     if (status === 'NotRequested' && currentStatus === true) {
@@ -136,18 +154,22 @@ export const VerificationButton = ({
           disabled: false
         };
       default:
+        // Format fee dynamically
+        const formattedFee = verificationFee >= 1000 
+          ? `${(verificationFee / 1000).toFixed(0)}k`
+          : verificationFee.toLocaleString('vi-VN');
         return {
           icon: <Shield className="h-4 w-4" />,
           text: 'Chưa kiểm định',
           color: 'bg-gray-100 text-gray-800 border-gray-200',
-          buttonText: 'Thanh toán kiểm định (200k)',
+          buttonText: `Thanh toán kiểm định (${formattedFee})`,
           buttonColor: 'bg-green-500 hover:bg-green-600',
           disabled: false
         };
     }
   };
 
-  const statusInfo = getStatusInfo();
+  const statusInfo = getStatusInfo(verificationFee);
 
   // Don't show button if not owner and not requested/verified
   if (!isOwner && (status === 'NotRequested' || status === 'Rejected')) {
