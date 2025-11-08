@@ -315,7 +315,7 @@ const MyPurchases = () => {
           orderStatus: order.status || order.orderStatus || order.product?.status || 'completed',
           cancellationReason: order.cancellationReason || order.CancellationReason || null
         };
-      });
+      }));
       
       // Filter out null values (orders with invalid productId)
       const validPurchases = purchasesWithDetails.filter(purchase => purchase !== null);
@@ -464,7 +464,7 @@ const MyPurchases = () => {
           orderStatus: order.status || order.orderStatus || order.Status || order.OrderStatus,
           cancellationReason: order.cancellationReason || order.CancellationReason || null
         };
-      });
+      }));
       
       // Filter out null values
       const validSales = salesWithDetails.filter(sale => sale !== null);
