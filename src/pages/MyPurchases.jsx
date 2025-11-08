@@ -363,105 +363,133 @@ const MyPurchases = () => {
       
       console.log(`✅ Found ${soldProducts.length} sold products from Product API`);
       
-      // Fetch seller orders from Order API
+      // ✅ FIX: Use /api/Order/seller endpoint (backend has this endpoint)
+      // Backend GetMySales() returns orders for the authenticated seller
       let sellerOrders = [];
       try {
         sellerOrders = await apiRequest(`/api/Order/seller`);
         if (!Array.isArray(sellerOrders)) {
           sellerOrders = sellerOrders?.items || sellerOrders?.data || [];
         }
-        console.log(`✅ Found ${sellerOrders.length} seller orders from Order API`);
+        console.log(`✅ Found ${sellerOrders.length} seller orders from /api/Order/seller`);
       } catch (error) {
-        console.log(`⚠️ Failed to fetch seller orders:`, error.message);
-        sellerOrders = [];
+        console.log(`⚠️ Failed to fetch seller orders from /api/Order/seller:`, error.message);
+        // Fallback: try to get from /api/Order and filter by productId
+        console.log(`🔄 Trying fallback: fetch from /api/Order and filter by productId`);
+        const sellerProductIds = allProducts.map(p => p.productId || p.ProductId || p.id).filter(id => id != null);
+        try {
+          const allOrders = await apiRequest(`/api/Order`);
+          const ordersArray = Array.isArray(allOrders) ? allOrders : (allOrders?.items || allOrders?.data || []);
+          sellerOrders = ordersArray.filter(order => {
+            const orderProductId = order.productId || order.ProductId;
+            return orderProductId && sellerProductIds.some(sellerProductId => 
+              sellerProductId == orderProductId || 
+              sellerProductId === orderProductId || 
+              parseInt(sellerProductId) === parseInt(orderProductId)
+            );
+          });
+          console.log(`✅ Fallback: Found ${sellerOrders.length} seller orders from /api/Order`);
+        } catch (fallbackError) {
+          console.error(`❌ Fallback also failed:`, fallbackError.message);
+          sellerOrders = [];
+        }
       }
       
-      // Filter to show ALL seller orders (deposited, completed, rejected)
-      // Logic: "Đơn bán" quản lý các đơn hàng mà seller đã đăng sản phẩm
-      // Khi buyer đặt cọc → "đã được đặt cọc"
-      // Khi admin xét duyệt: thành công → "đã bán", từ chối → "đã bị từ chối"
-      const sellerOrdersFiltered = sellerOrders.filter(order => {
+      // ✅ FIX: Backend /api/Order/seller already returns seller's orders
+      // Backend response: OrderId, TotalAmount, Status, PayoutStatus, CreatedDate, CancellationReason, BuyerName, Product (Title, Price)
+      // Note: Backend doesn't return product.status, so we need to fetch product details later
+      // Show ALL orders from backend (they are already filtered by sellerId on backend)
+      // We'll check product status after fetching product details
+      console.log(`✅ Backend returned ${sellerOrders.length} orders for seller. Processing all of them...`);
+      
+      // Log all order statuses for debugging
+      sellerOrders.forEach(order => {
         const orderStatus = (order.status || order.Status || order.orderStatus || order.OrderStatus || '').toLowerCase();
-        const depositStatus = (order.depositStatus || order.DepositStatus || '').toLowerCase();
-        const productStatus = (order.product?.status || order.product?.Status || '').toLowerCase();
-        
-        // Show all orders that have been deposited (buyer đã đặt cọc - "đã được đặt cọc")
-        const isDeposited = orderStatus === 'deposited' || 
-                           orderStatus === 'depositpaid' || 
-                           orderStatus === 'deposit_paid' ||
-                           depositStatus === 'paid' ||
-                           depositStatus === 'succeeded';
-        
-        // Show completed orders (admin confirmed success - "đã bán")
-        const isCompleted = orderStatus === 'completed' || 
-                           productStatus === 'sold' || 
-                           productStatus === 'completed';
-        
-        // Show cancelled/rejected orders (admin rejected - "đã bị từ chối")
-        const isRejected = orderStatus === 'cancelled' || 
-                          orderStatus === 'failed' ||
-                          orderStatus === 'rejected';
-        
-        // Include all orders that have been deposited, completed, or rejected
-        // Seller cần theo dõi tất cả orders từ khi buyer đặt cọc đến khi admin xét duyệt
-        const shouldInclude = isDeposited || isCompleted || isRejected;
-        
-        if (shouldInclude) {
-          console.log(`✅ Including seller order ${order.orderId || order.OrderId} - Order: ${orderStatus}, Deposit: ${depositStatus}, Product: ${productStatus}, Deposited: ${isDeposited}, Completed: ${isCompleted}, Rejected: ${isRejected}`);
-        }
-        
-        return shouldInclude;
+        console.log(`🔍 Seller order ${order.orderId || order.OrderId}: Status = "${orderStatus}"`);
       });
       
-      console.log(`✅ Filtered ${sellerOrdersFiltered.length} seller orders (deposited/completed/rejected) out of ${sellerOrders.length} total`);
+      // Don't filter here - show all orders from backend
+      // Backend endpoint /api/Order/seller already filters by sellerId
+      const sellerOrdersFiltered = sellerOrders;
       
-      // Process sales with product details
+      console.log(`✅ Processing ${sellerOrdersFiltered.length} seller orders from backend (all statuses)`);
+      
+      // ✅ FIX: Backend /api/Order/seller response structure:
+      // { OrderId, TotalAmount, Status, PayoutStatus, CreatedDate, CancellationReason, CancelledDate, BuyerName, Product: { Title, Price } }
+      // Note: Backend doesn't return ProductId, Product.Status, CompletedDate
+      // Workaround: Try to find ProductId from seller's products by matching title
       const salesWithDetails = await Promise.all(sellerOrdersFiltered.map(async (order) => {
-        const productId = order.productId || order.ProductId || order.product?.productId || order.product?.id;
+        // Try to get ProductId from order object first
+        let productId = order.productId || order.ProductId || order.product?.productId || order.product?.id || order.product?.ProductId;
         
+        // ✅ WORKAROUND: If no ProductId, try to find it from seller's products by matching title
         if (!productId) {
-          return null;
+          const productTitle = order.product?.title || order.product?.Title || order.productTitle || order.ProductTitle;
+          if (productTitle && allProducts.length > 0) {
+            // Find product by matching title
+            const matchedProduct = allProducts.find(p => {
+              const pTitle = p.title || p.Title || p.productTitle || p.ProductTitle;
+              return pTitle && pTitle.toLowerCase() === productTitle.toLowerCase();
+            });
+            if (matchedProduct) {
+              productId = matchedProduct.productId || matchedProduct.ProductId || matchedProduct.id;
+              console.log(`✅ Found ProductId ${productId} by matching title: "${productTitle}"`);
+            }
+          }
         }
         
-        // Fetch product details to get latest status
+        // Fetch product details if we have productId
         let productDetails = null;
-        try {
-          productDetails = await apiRequest(`/api/Product/${productId}`, 'GET');
-          console.log(`✅ Fetched product ${productId} details:`, productDetails);
-        } catch (error) {
-          console.log(`⚠️ Failed to fetch product ${productId} details:`, error.message);
-          // Continue with existing product data if fetch fails
-        }
-        
-        // Fetch images for this product
         let productImages = [];
-        try {
-          const imageResponse = await apiRequest(`/api/ProductImage/product/${productId}`, 'GET');
-          productImages = imageResponse || [];
-        } catch (error) {
-          console.log(`❌ Failed to fetch images for product ${productId}:`, error.message);
-          productImages = [];
+        if (productId) {
+          try {
+            productDetails = await apiRequest(`/api/Product/${productId}`, 'GET');
+            console.log(`✅ Fetched product ${productId} details:`, productDetails);
+          } catch (error) {
+            console.log(`⚠️ Failed to fetch product ${productId} details:`, error.message);
+          }
+          
+          try {
+            const imageResponse = await apiRequest(`/api/ProductImage/product/${productId}`, 'GET');
+            productImages = imageResponse || [];
+          } catch (error) {
+            console.log(`❌ Failed to fetch images for product ${productId}:`, error.message);
+            productImages = [];
+          }
         }
         
         // Merge product data: prefer fetched productDetails, fallback to order.product
         const mergedProduct = productDetails ? {
           ...order.product,
           ...productDetails,
+          title: productDetails.title || productDetails.Title || order.product?.title || order.product?.Title,
+          price: productDetails.price || productDetails.Price || order.product?.price || order.product?.Price,
           status: productDetails.status || productDetails.Status || order.product?.status || order.product?.Status,
           images: productImages,
           primaryImage: productImages?.[0] || null
         } : {
           ...order.product,
+          title: order.product?.title || order.product?.Title,
+          price: order.product?.price || order.product?.Price,
+          status: order.product?.status || order.product?.Status, // Backend doesn't return this, will be null
           images: productImages,
           primaryImage: productImages?.[0] || null
         };
         
+        // ✅ FIX: Backend doesn't return CompletedDate, use null or CreatedDate as fallback
+        // Backend Status values: "Pending", "Deposited", "Completed", "Cancelled"
+        const orderStatus = (order.status || order.Status || order.orderStatus || order.OrderStatus || '').toLowerCase();
+        const isCompleted = orderStatus === 'completed' || orderStatus === 'Completed';
+        
         return {
           orderId: order?.orderId || order?.OrderId || null,
-          productId: productId,
+          productId: productId || null, // May be null if can't find
           product: mergedProduct,
-          buyerName: order.buyer?.fullName || order.buyerName || order.user?.fullName || 'N/A',
-          orderStatus: order.status || order.orderStatus || order.Status || order.OrderStatus,
+          buyerName: order.buyerName || order.BuyerName || order.buyer?.fullName || order.user?.fullName || 'N/A',
+          orderStatus: order.status || order.Status || order.orderStatus || order.OrderStatus,
+          totalAmount: order.totalAmount || order.TotalAmount || order.product?.price || order.product?.Price || mergedProduct?.price || mergedProduct?.Price || 0,
+          createdDate: order.createdDate || order.CreatedDate || order.createdAt || order.CreatedAt || order.purchaseDate || order.PurchaseDate,
+          completedDate: order.completedDate || order.CompletedDate || (isCompleted ? (order.createdDate || order.CreatedDate) : null), // ✅ WORKAROUND: Use CreatedDate if completed
           cancellationReason: order.cancellationReason || order.CancellationReason || null
         };
       }));
@@ -588,6 +616,7 @@ const MyPurchases = () => {
   };
 
   const formatPrice = (price) => {
+    if (!price && price !== 0) return '0 ₫';
     return new Intl.NumberFormat('vi-VN', {
       style: 'currency',
       currency: 'VND'
@@ -595,11 +624,17 @@ const MyPurchases = () => {
   };
 
   const formatDate = (date) => {
-    return new Date(date).toLocaleDateString('vi-VN', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
+    if (!date) return 'N/A';
+    try {
+      return new Date(date).toLocaleDateString('vi-VN', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    } catch (error) {
+      console.error('Error formatting date:', date, error);
+      return 'N/A';
+    }
   };
 
   if (loading && activeTab === 'purchases') {
@@ -1119,7 +1154,15 @@ const MyPurchases = () => {
                                 // IMPORTANT: Check status in priority order (completed > rejected > deposited)
                                 // Completed first (highest priority - đã bán thành công)
                                 // Check both order status AND product status to ensure accuracy
-                                if (status === 'completed' || productStatus === 'sold' || productStatus === 'completed') {
+                                // ✅ FIX: Also check for "Completed" (capitalized) and other variations
+                                const isCompleted = status === 'completed' || 
+                                                  status === 'Completed' ||
+                                                  productStatus === 'sold' || 
+                                                  productStatus === 'Sold' ||
+                                                  productStatus === 'completed' ||
+                                                  productStatus === 'Completed';
+                                
+                                if (isCompleted) {
                                   return (
                                     <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                                       Đã bán
@@ -1178,10 +1221,19 @@ const MyPurchases = () => {
                                 console.log(`🔍 Seller Order Card ${sale.orderId || sale.OrderId} - Status: ${status}, ProductStatus: ${productStatus}, Should show "Đã bán"`);
                               }
                               
+                              // ✅ FIX: Backend /api/Order/seller doesn't return Product.Status
+                              // So we only check Order.Status (backend returns: "Pending", "Deposited", "Completed", "Cancelled")
                               // IMPORTANT: Check status in priority order (completed > rejected > deposited)
                               // Completed first (highest priority - đã bán thành công)
-                              // Check both order status AND product status to ensure accuracy
-                              if (status === 'completed' || productStatus === 'sold' || productStatus === 'completed') {
+                              const isCompleted = status === 'completed' || 
+                                                status === 'Completed' ||
+                                                // Fallback: check productStatus if available (from fetched productDetails)
+                                                productStatus === 'sold' || 
+                                                productStatus === 'Sold' ||
+                                                productStatus === 'completed' ||
+                                                productStatus === 'Completed';
+                              
+                              if (isCompleted) {
                                 return (
                                   <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                                     Đã bán
@@ -1225,7 +1277,7 @@ const MyPurchases = () => {
                         {sale.product?.title || sale.productTitle || 'Sản phẩm không tìm thấy'}
                       </h3>
                       
-                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center justify-between mb-3">
                         <span className="text-xl font-bold text-green-600">
                           {formatPrice(sale.totalAmount)}
                         </span>
@@ -1234,15 +1286,23 @@ const MyPurchases = () => {
                             const status = (sale.orderStatus || sale.status || sale.OrderStatus || sale.Status || '').toLowerCase();
                             const productStatus = (sale.product?.status || sale.product?.Status || sale.productStatus || sale.ProductStatus || '').toLowerCase();
                             
-                            // Debug logging for seller orders
-                            if (productStatus === 'sold' || status === 'completed') {
-                              console.log(`🔍 Seller Order Detail ${sale.orderId || sale.OrderId} - Status: ${status}, ProductStatus: ${productStatus}, Should show "Đã bán"`);
-                            }
+                            // ✅ FIX: Log all statuses for debugging
+                            console.log(`🔍 Seller Order Detail ${sale.orderId || sale.OrderId} - OrderStatus: "${status}", ProductStatus: "${productStatus}", TotalAmount: ${sale.totalAmount}`);
                             
+                            // ✅ FIX: Backend /api/Order/seller doesn't return Product.Status
+                            // So we primarily check Order.Status (backend returns: "Pending", "Deposited", "Completed", "Cancelled")
                             // IMPORTANT: Check status in priority order (completed > rejected > deposited)
                             // Completed first (highest priority - đã bán thành công)
-                            // Check both order status AND product status to ensure accuracy
-                            if (status === 'completed' || productStatus === 'sold' || productStatus === 'completed') {
+                            const isCompleted = status === 'completed' || 
+                                              status === 'Completed' ||
+                                              // Fallback: check productStatus if available (from fetched productDetails)
+                                              productStatus === 'sold' || 
+                                              productStatus === 'Sold' ||
+                                              productStatus === 'completed' ||
+                                              productStatus === 'Completed';
+                            
+                            if (isCompleted) {
+                              console.log(`✅ Seller Order ${sale.orderId || sale.OrderId} is COMPLETED - showing "Đã bán" badge`);
                               return (
                                 <>
                                   <CheckCircle className="h-4 w-4 mr-1 text-green-500" />
