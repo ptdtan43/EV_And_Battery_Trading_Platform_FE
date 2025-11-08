@@ -103,62 +103,92 @@ const MyPurchases = () => {
         });
       });
       
-      // Filter to show completed/sold purchases AND cancelled orders
-      const completedOrders = orders.filter(order => {
-        const orderStatus = (order.status || order.orderStatus || '').toLowerCase();
-        const productStatus = (order.product?.status || '').toLowerCase();
+      // Filter to show orders that buyer has deposited, completed, or rejected
+      // Logic: "Đơn mua" quản lý các đơn hàng đã đặt cọc để buyer theo dõi
+      // Khi admin xét duyệt: thành công → "đã mua", từ chối → "đã bị từ chối"
+      const buyerOrders = orders.filter(order => {
+        const orderStatus = (order.status || order.Status || order.orderStatus || order.OrderStatus || '').toLowerCase();
+        const depositStatus = (order.depositStatus || order.DepositStatus || '').toLowerCase();
+        const productStatus = (order.product?.status || order.product?.Status || '').toLowerCase();
         
-        console.log(`🔍 Order ${order.orderId} - Order status: ${orderStatus}, Product status: ${productStatus}`);
-        console.log(`🔍 Order ${order.orderId} - ProductId: ${order.productId}, Product:`, order.product);
+        console.log(`🔍 Order ${order.orderId || order.OrderId} - Order status: ${orderStatus}, Deposit status: ${depositStatus}, Product status: ${productStatus}`);
         
         // Check if this order has valid productId
-        const productId = order.product?.productId || order.product?.id || order.productId || order.product?.ProductId;
-        const hasValidProductId = productId && productId !== null;
+        // Backend returns: Product.ProductId (camelCase: product.productId)
+        const productId = order.product?.productId || order.product?.ProductId || order.product?.id || order.productId || order.ProductId;
+        const hasValidProductId = productId && productId !== null && productId !== undefined;
         
-        if (hasValidProductId) {
-          console.log(`✅ Order ${order.orderId} has valid productId: ${productId}`);
-          console.log(`🔍 Order ${order.orderId} - Product title: ${order.product?.title}, Price: ${order.product?.price}`);
-        } else {
-          console.log(`❌ Order ${order.orderId} has invalid productId: ${productId}`);
+        if (!hasValidProductId) {
+          console.log(`❌ Order ${order.orderId || order.OrderId} has invalid productId: ${productId}`);
+          return false;
         }
         
-        // Check if this order belongs to current user and has valid productId
-        const isCurrentUserOrder = order.buyerId === userId;
+        // Check if this order belongs to current user
+        // Backend returns: BuyerId (camelCase: buyerId)
+        const orderBuyerId = order.buyerId || order.BuyerId || order.userId || order.UserId;
+        const isCurrentUserOrder = orderBuyerId == userId || orderBuyerId === userId || parseInt(orderBuyerId) === parseInt(userId);
         
-        console.log(`🔍 Order ${order.orderId} - buyerId: ${order.buyerId}, current userId: ${userId}, isCurrentUserOrder: ${isCurrentUserOrder}`);
+        if (!isCurrentUserOrder) {
+          return false;
+        }
         
-        // Show cancelled orders (to display cancellation reason)
-        const isCancelled = orderStatus === 'cancelled' || orderStatus === 'cancelled' || orderStatus === 'failed';
+        // Show orders that are pending (buyer đang trong quá trình đặt cọc - chưa thanh toán cọc)
+        // Backend returns: DepositStatus = "Unpaid" for unpaid deposits
+        // NOTE: Order status may still be "Pending" even after successful deposit payment
+        const isPending = orderStatus === 'pending' && 
+                         (depositStatus === 'pending' || depositStatus === 'unpaid' || depositStatus === '' || !depositStatus);
         
-        // Show completed/sold products
-        const isProductSold = productStatus === 'sold' || productStatus === 'completed' || 
-                              productStatus === 'finished' || productStatus === 'active';
+        // Show orders that have been successfully deposited (đã đặt cọc thành công)
+        // Backend PaymentController updates after successful deposit payment:
+        // - Order.Status = "Deposited"
+        // - Order.DepositStatus = "Paid"
+        // - Product.Status = "Reserved"
+        const productIsReserved = productStatus === 'reserved';
+        const isDeposited = orderStatus === 'deposited' || 
+                           orderStatus === 'depositpaid' || 
+                           orderStatus === 'deposit_paid' ||
+                           depositStatus === 'paid' ||
+                           depositStatus === 'succeeded' ||
+                           productIsReserved; // ✅ Fallback: Nếu product đã Reserved thì đã đặt cọc thành công
         
-        // Include if: has valid productId AND (is cancelled OR is sold)
-        const shouldInclude = hasValidProductId && (isCancelled || isProductSold);
+        // Show completed orders (admin confirmed success - đã mua thành công)
+        const isCompleted = orderStatus === 'completed' || 
+                           productStatus === 'sold' || 
+                           productStatus === 'completed';
+        
+        // Show cancelled/rejected orders (admin rejected - đã bị từ chối)
+        // Buyer cần biết lý do từ chối để theo dõi
+        const isRejected = orderStatus === 'cancelled' || 
+                          orderStatus === 'failed' ||
+                          orderStatus === 'rejected';
+        
+        // Include if: has valid productId AND (is pending OR is deposited OR is completed OR is rejected)
+        // Hiển thị cả pending orders (đang đặt cọc) và rejected orders (để buyer biết lý do từ chối)
+        const shouldInclude = hasValidProductId && isCurrentUserOrder && (isPending || isDeposited || isCompleted || isRejected);
         
         if (shouldInclude) {
-          console.log(`✅ Including order ${order.orderId} - Order: ${orderStatus}, Product: ${productStatus}, Cancelled: ${isCancelled}`);
+          console.log(`✅ Including order ${order.orderId || order.OrderId} - Order: ${orderStatus}, Deposit: ${depositStatus}, Product: ${productStatus}, ProductReserved: ${productIsReserved}, Pending: ${isPending}, Deposited: ${isDeposited}, Completed: ${isCompleted}, Rejected: ${isRejected}`);
         } else {
-          console.log(`❌ Excluding order ${order.orderId} - Order: ${orderStatus}, Product: ${productStatus}`);
+          console.log(`❌ Excluding order ${order.orderId || order.OrderId} - Order: ${orderStatus}, Deposit: ${depositStatus}, Product: ${productStatus}, ProductReserved: ${productIsReserved}`);
         }
         
         return shouldInclude;
       });
       
-      console.log(`🔍 Total orders: ${orders.length}, Completed orders: ${completedOrders.length}`);
-      console.log(`🔍 Completed orders details:`, completedOrders.map(o => ({
-        orderId: o.orderId,
-        orderStatus: o.status,
-        productStatus: o.product?.status,
-        productTitle: o.product?.title
+      console.log(`🔍 Total orders: ${orders.length}, Buyer orders (pending/deposited/completed/rejected): ${buyerOrders.length}`);
+      console.log(`🔍 Buyer orders details:`, buyerOrders.map(o => ({
+        orderId: o.orderId || o.OrderId,
+        orderStatus: o.status || o.Status || o.orderStatus || o.OrderStatus,
+        depositStatus: o.depositStatus || o.DepositStatus,
+        productStatus: o.product?.status || o.product?.Status,
+        productTitle: o.product?.title || o.product?.Title
       })));
       
-      // Process orders - only completed ones
-      console.log(`🔍 About to process ${completedOrders.length} completed orders`);
+      // Process orders - pending, deposited, completed, and rejected ones
+      console.log(`🔍 About to process ${buyerOrders.length} buyer orders (pending/deposited/completed/rejected)`);
       
       // Fetch images for all products first
-      const purchasesWithDetails = await Promise.all(completedOrders.map(async (order, index) => {
+      const purchasesWithDetails = await Promise.all(buyerOrders.map(async (order, index) => {
         console.log(`🔍 Processing completed order ${index} (OrderId: ${order.orderId}):`, order);
         
         // Check if product data is already included
@@ -175,6 +205,16 @@ const MyPurchases = () => {
             return null;
           }
           
+          // Fetch product details to get latest status (important for completed orders)
+          let productDetails = null;
+          try {
+            productDetails = await apiRequest(`/api/Product/${productId}`, 'GET');
+            console.log(`✅ Fetched product ${productId} details for buyer order:`, productDetails);
+          } catch (error) {
+            console.log(`⚠️ Failed to fetch product ${productId} details:`, error.message);
+            // Continue with existing product data if fetch fails
+          }
+          
           // Fetch images for this product
           let productImages = [];
           if (productId) {
@@ -189,8 +229,14 @@ const MyPurchases = () => {
             }
           }
           
-          // Update product with images
-          const productWithImages = {
+          // Merge product data: prefer fetched productDetails, fallback to order.product
+          const productWithImages = productDetails ? {
+            ...order.product,
+            ...productDetails,
+            status: productDetails.status || productDetails.Status || order.product?.status || order.product?.Status,
+            images: productImages,
+            primaryImage: productImages?.[0] || null
+          } : {
             ...order.product,
             images: productImages,
             primaryImage: productImages?.[0] || null
@@ -288,7 +334,7 @@ const MyPurchases = () => {
       console.error('Error loading purchases:', error);
       show({
         title: 'Lỗi',
-        description: 'Không thể tải danh sách sản phẩm đã mua',
+        description: 'Không thể tải danh sách đơn mua',
         type: 'error'
       });
     } finally {
@@ -317,24 +363,61 @@ const MyPurchases = () => {
       
       console.log(`✅ Filtered ${sellerOrders.length} orders for seller ${sellerId}`);
       
-      // Filter completed/sold orders
-      const completedSales = sellerOrders.filter(order => {
-        const orderStatus = (order.status || order.orderStatus || order.Status || order.OrderStatus || '').toLowerCase();
-        const productStatus = (order.product?.status || '').toLowerCase();
+      // Filter to show ALL seller orders (deposited, completed, rejected)
+      // Logic: "Đơn bán" quản lý các đơn hàng mà seller đã đăng sản phẩm
+      // Khi buyer đặt cọc → "đã được đặt cọc"
+      // Khi admin xét duyệt: thành công → "đã bán", từ chối → "đã bị từ chối"
+      const sellerOrdersFiltered = sellerOrders.filter(order => {
+        const orderStatus = (order.status || order.Status || order.orderStatus || order.OrderStatus || '').toLowerCase();
+        const depositStatus = (order.depositStatus || order.DepositStatus || '').toLowerCase();
+        const productStatus = (order.product?.status || order.product?.Status || '').toLowerCase();
         
-        // Show cancelled orders (to display cancellation reason) and completed/sold products
-        const isCancelled = orderStatus === 'cancelled' || orderStatus === 'failed';
-        const isCompleted = productStatus === 'sold' || productStatus === 'completed' || orderStatus === 'completed';
+        // Show all orders that have been deposited (buyer đã đặt cọc - "đã được đặt cọc")
+        const isDeposited = orderStatus === 'deposited' || 
+                           orderStatus === 'depositpaid' || 
+                           orderStatus === 'deposit_paid' ||
+                           depositStatus === 'paid' ||
+                           depositStatus === 'succeeded';
         
-        return isCancelled || isCompleted;
+        // Show completed orders (admin confirmed success - "đã bán")
+        const isCompleted = orderStatus === 'completed' || 
+                           productStatus === 'sold' || 
+                           productStatus === 'completed';
+        
+        // Show cancelled/rejected orders (admin rejected - "đã bị từ chối")
+        const isRejected = orderStatus === 'cancelled' || 
+                          orderStatus === 'failed' ||
+                          orderStatus === 'rejected';
+        
+        // Include all orders that have been deposited, completed, or rejected
+        // Seller cần theo dõi tất cả orders từ khi buyer đặt cọc đến khi admin xét duyệt
+        const shouldInclude = isDeposited || isCompleted || isRejected;
+        
+        if (shouldInclude) {
+          console.log(`✅ Including seller order ${order.orderId || order.OrderId} - Order: ${orderStatus}, Deposit: ${depositStatus}, Product: ${productStatus}, Deposited: ${isDeposited}, Completed: ${isCompleted}, Rejected: ${isRejected}`);
+        }
+        
+        return shouldInclude;
       });
       
+      console.log(`✅ Filtered ${sellerOrdersFiltered.length} seller orders (deposited/completed/rejected) out of ${sellerOrders.length} total`);
+      
       // Process sales with product details
-      const salesWithDetails = await Promise.all(completedSales.map(async (order) => {
+      const salesWithDetails = await Promise.all(sellerOrdersFiltered.map(async (order) => {
         const productId = order.productId || order.ProductId || order.product?.productId || order.product?.id;
         
         if (!productId) {
           return null;
+        }
+        
+        // Fetch product details to get latest status
+        let productDetails = null;
+        try {
+          productDetails = await apiRequest(`/api/Product/${productId}`, 'GET');
+          console.log(`✅ Fetched product ${productId} details:`, productDetails);
+        } catch (error) {
+          console.log(`⚠️ Failed to fetch product ${productId} details:`, error.message);
+          // Continue with existing product data if fetch fails
         }
         
         // Fetch images for this product
@@ -347,14 +430,23 @@ const MyPurchases = () => {
           productImages = [];
         }
         
+        // Merge product data: prefer fetched productDetails, fallback to order.product
+        const mergedProduct = productDetails ? {
+          ...order.product,
+          ...productDetails,
+          status: productDetails.status || productDetails.Status || order.product?.status || order.product?.Status,
+          images: productImages,
+          primaryImage: productImages?.[0] || null
+        } : {
+          ...order.product,
+          images: productImages,
+          primaryImage: productImages?.[0] || null
+        };
+        
         return {
           ...order,
           productId: productId,
-          product: {
-            ...order.product,
-            images: productImages,
-            primaryImage: productImages?.[0] || null
-          },
+          product: mergedProduct,
           buyerName: order.buyer?.fullName || order.buyerName || order.user?.fullName || 'N/A',
           orderStatus: order.status || order.orderStatus || order.Status || order.OrderStatus,
           cancellationReason: order.cancellationReason || order.CancellationReason || null
@@ -370,7 +462,7 @@ const MyPurchases = () => {
       console.error('Error loading sales:', error);
       show({
         title: 'Lỗi',
-        description: 'Không thể tải danh sách sản phẩm đã bán',
+        description: 'Không thể tải danh sách đơn bán',
         type: 'error'
       });
     } finally {
@@ -503,7 +595,7 @@ const MyPurchases = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Đang tải danh sách sản phẩm đã mua...</p>
+            <p className="mt-4 text-gray-600">Đang tải danh sách đơn mua...</p>
           </div>
         </div>
       </div>
@@ -516,7 +608,7 @@ const MyPurchases = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Đang tải danh sách sản phẩm đã bán...</p>
+            <p className="mt-4 text-gray-600">Đang tải danh sách đơn bán...</p>
           </div>
         </div>
       </div>
@@ -527,10 +619,7 @@ const MyPurchases = () => {
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Quản lí sản phẩm</h1>
-          <p className="mt-2 text-gray-600">
-            Quản lý các sản phẩm bạn đã mua và đã bán
-          </p>
+          <h1 className="text-3xl font-bold text-gray-900">Quản lí đơn hàng</h1>
         </div>
 
         {/* Tabs */}
@@ -548,7 +637,7 @@ const MyPurchases = () => {
             >
               <div className="flex items-center space-x-2">
                 <ShoppingCart className="h-5 w-5" />
-                <span>Sản phẩm đã mua</span>
+                <span>Đơn mua</span>
               </div>
             </button>
             <button
@@ -563,7 +652,7 @@ const MyPurchases = () => {
             >
               <div className="flex items-center space-x-2">
                 <Store className="h-5 w-5" />
-                <span>Sản phẩm đã bán</span>
+                <span>Đơn bán</span>
               </div>
             </button>
           </nav>
@@ -576,8 +665,8 @@ const MyPurchases = () => {
         {purchases.length === 0 ? (
           <div className="text-center py-12">
             <Package className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">Chưa có sản phẩm đã mua</h3>
-            <p className="text-gray-600 mb-6">Bạn chưa có sản phẩm nào đã mua hoàn tất hoặc đã bán trên EV Market</p>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Chưa có đơn mua</h3>
+            <p className="text-gray-600 mb-6">Bạn chưa có đơn hàng nào đã mua hoàn tất trên EV Market</p>
             <Link
               to="/"
               className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
@@ -647,16 +736,60 @@ const MyPurchases = () => {
                         
                         {/* Status badge */}
                         <div className="absolute top-3 right-3">
-                          {((purchase.orderStatus || purchase.status || '').toLowerCase() === 'cancelled' || 
-                            (purchase.orderStatus || purchase.status || '').toLowerCase() === 'failed') ? (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                              Đã hủy
-                            </span>
-                          ) : (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                              Đã bán
-                            </span>
-                          )}
+                          {(() => {
+                            const status = (purchase.orderStatus || purchase.status || purchase.OrderStatus || purchase.Status || '').toLowerCase();
+                            const productStatus = (purchase.product?.status || purchase.product?.Status || purchase.productStatus || purchase.ProductStatus || '').toLowerCase();
+                            
+                            // Debug logging for buyer orders
+                            if (productStatus === 'sold' || status === 'completed') {
+                              console.log(`🔍 Buyer Order ${purchase.orderId || purchase.OrderId} - Status: ${status}, ProductStatus: ${productStatus}, Should show "Đã mua"`);
+                            }
+                            
+                            // IMPORTANT: Check status in priority order (completed > rejected > deposited > pending)
+                            // Completed first (highest priority - đã mua thành công)
+                            // Check both order status AND product status to ensure accuracy
+                            if (status === 'completed' || productStatus === 'sold' || productStatus === 'completed') {
+                              return (
+                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                  Đã mua
+                                </span>
+                              );
+                            }
+                            // Rejected second (đã bị từ chối)
+                            else if (status === 'cancelled' || status === 'failed' || status === 'rejected') {
+                              return (
+                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                  Đã bị từ chối
+                                </span>
+                              );
+                            }
+                            // Deposited third (đã đặt cọc thành công)
+                            // IMPORTANT: Only show "đã đặt cọc" if NOT completed/sold
+                            else if ((status === 'deposited' || status === 'depositpaid' || status === 'deposit_paid') && 
+                                     productStatus !== 'sold' && productStatus !== 'completed' && status !== 'completed') {
+                              return (
+                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                  Đã đặt cọc
+                                </span>
+                              );
+                            }
+                            // Pending last (đang trong quá trình đặt cọc)
+                            else if (status === 'pending') {
+                              return (
+                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                  Đang đặt cọc
+                                </span>
+                              );
+                            }
+                            // Default
+                            else {
+                              return (
+                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                  Đang xử lý
+                                </span>
+                              );
+                            }
+                          })()}
                         </div>
                       </div>
                     );
@@ -688,9 +821,42 @@ const MyPurchases = () => {
                       
                       {/* Status badge */}
                       <div className="absolute top-3 right-3">
-                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          Đã bán
-                        </span>
+                        {(() => {
+                          const status = (purchase.orderStatus || purchase.status || '').toLowerCase();
+                          const productStatus = (purchase.product?.status || '').toLowerCase();
+                          
+                          if (status === 'cancelled' || status === 'failed' || status === 'rejected') {
+                            return (
+                              <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                Đã bị từ chối
+                              </span>
+                            );
+                          } else if (status === 'completed' || productStatus === 'sold' || productStatus === 'completed') {
+                            return (
+                              <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                Đã bán
+                              </span>
+                            );
+                          } else if (status === 'deposited' || status === 'depositpaid' || status === 'deposit_paid') {
+                            return (
+                              <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                Đã đặt cọc
+                              </span>
+                            );
+                          } else if (status === 'pending') {
+                            return (
+                              <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                Đang đặt cọc
+                              </span>
+                            );
+                          } else {
+                            return (
+                              <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                Đang xử lý
+                              </span>
+                            );
+                          }
+                        })()}
                       </div>
                     </div>
                   );
@@ -706,18 +872,65 @@ const MyPurchases = () => {
                       {formatPrice(purchase.totalAmount)}
                     </span>
                     <div className="flex items-center text-sm text-gray-500">
-                      {((purchase.orderStatus || purchase.status || '').toLowerCase() === 'cancelled' || 
-                        (purchase.orderStatus || purchase.status || '').toLowerCase() === 'failed') ? (
-                        <>
-                          <XCircle className="h-4 w-4 mr-1 text-red-500" />
-                          Đã hủy
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle className="h-4 w-4 mr-1" />
-                          Đã giao dịch
-                        </>
-                      )}
+                      {(() => {
+                        const status = (purchase.orderStatus || purchase.status || purchase.OrderStatus || purchase.Status || '').toLowerCase();
+                        const productStatus = (purchase.product?.status || purchase.product?.Status || purchase.productStatus || purchase.ProductStatus || '').toLowerCase();
+                        
+                        // Debug logging for buyer orders detail view
+                        if (productStatus === 'sold' || status === 'completed') {
+                          console.log(`🔍 Buyer Order Detail ${purchase.orderId || purchase.OrderId} - Status: ${status}, ProductStatus: ${productStatus}, Should show "Đã mua"`);
+                        }
+                        
+                        // IMPORTANT: Check status in priority order (completed > rejected > deposited > pending)
+                        // Completed first (highest priority - đã mua thành công)
+                        // Check both order status AND product status to ensure accuracy
+                        if (status === 'completed' || productStatus === 'sold' || productStatus === 'completed') {
+                          return (
+                            <>
+                              <CheckCircle className="h-4 w-4 mr-1 text-green-500" />
+                              Đã mua
+                            </>
+                          );
+                        }
+                        // Rejected second (đã bị từ chối)
+                        else if (status === 'cancelled' || status === 'failed' || status === 'rejected') {
+                          return (
+                            <>
+                              <XCircle className="h-4 w-4 mr-1 text-red-500" />
+                              Đã bị từ chối
+                            </>
+                          );
+                        }
+                        // Deposited third (đã đặt cọc thành công)
+                        // IMPORTANT: Only show "đã đặt cọc" if NOT completed/sold
+                        else if ((status === 'deposited' || status === 'depositpaid' || status === 'deposit_paid') && 
+                                 productStatus !== 'sold' && productStatus !== 'completed' && status !== 'completed') {
+                          return (
+                            <>
+                              <Clock className="h-4 w-4 mr-1 text-yellow-500" />
+                              Đã đặt cọc
+                            </>
+                          );
+                        }
+                        // Pending last (đang trong quá trình đặt cọc)
+                        else if (status === 'pending') {
+                          return (
+                            <>
+                              <Clock className="h-4 w-4 mr-1 text-blue-500" />
+                              Đang đặt cọc
+                            </>
+                          );
+                        }
+                        // Default
+                        else {
+                          return (
+                            <>
+                              <Clock className="h-4 w-4 mr-1 text-gray-500" />
+                              Đang xử lý
+                            </>
+                          );
+                        }
+                      })()}
                     </div>
                   </div>
                   
@@ -732,20 +945,21 @@ const MyPurchases = () => {
                     )}
                   </div>
                   
-                  {/* Show Cancellation Reason if order is cancelled */}
+                  {/* Show Rejection Reason if order is rejected */}
                   {((purchase.orderStatus || purchase.status || '').toLowerCase() === 'cancelled' || 
-                    (purchase.orderStatus || purchase.status || '').toLowerCase() === 'failed') && 
+                    (purchase.orderStatus || purchase.status || '').toLowerCase() === 'failed' ||
+                    (purchase.orderStatus || purchase.status || '').toLowerCase() === 'rejected') && 
                     purchase.cancellationReason && (
                     <div className="bg-red-50 border border-red-200 rounded-lg p-4 mt-4">
                       <div className="flex items-start space-x-2">
                         <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
                         <div className="flex-1">
-                          <h4 className="font-semibold text-red-900 mb-1">Giao dịch đã bị hủy</h4>
+                          <h4 className="font-semibold text-red-900 mb-1">Giao dịch đã bị từ chối</h4>
                           <p className="text-sm text-red-800 mb-1">
                             <span className="font-medium">Lý do:</span> {purchase.cancellationReason}
                           </p>
                           <p className="text-xs text-red-600 mt-2">
-                            Đơn hàng này đã bị admin hủy. Sản phẩm đã được trả về trang chủ.
+                            Đơn hàng này đã bị admin từ chối. Sản phẩm đã được trả về trang chủ.
                           </p>
                         </div>
                       </div>
@@ -798,8 +1012,8 @@ const MyPurchases = () => {
             {sales.length === 0 ? (
               <div className="text-center py-12">
                 <Store className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">Chưa có sản phẩm đã bán</h3>
-                <p className="text-gray-600 mb-6">Bạn chưa có sản phẩm nào đã bán trên EV Market</p>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">Chưa có đơn bán</h3>
+                <p className="text-gray-600 mb-6">Bạn chưa có đơn hàng nào đã bán trên EV Market</p>
                 <Link
                   to="/my-listings"
                   className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
@@ -848,16 +1062,52 @@ const MyPurchases = () => {
                               </div>
                             </div>
                             <div className="absolute top-3 right-3">
-                              {((sale.orderStatus || sale.status || '').toLowerCase() === 'cancelled' || 
-                                (sale.orderStatus || sale.status || '').toLowerCase() === 'failed') ? (
-                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                  Đã hủy
-                                </span>
-                              ) : (
-                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                  Đã bán
-                                </span>
-                              )}
+                              {(() => {
+                                const status = (sale.orderStatus || sale.status || sale.OrderStatus || sale.Status || '').toLowerCase();
+                                const productStatus = (sale.product?.status || sale.product?.Status || sale.productStatus || sale.ProductStatus || '').toLowerCase();
+                                
+                                // Debug logging for seller orders
+                                if (productStatus === 'sold' || status === 'completed') {
+                                  console.log(`🔍 Seller Order ${sale.orderId || sale.OrderId} - Status: ${status}, ProductStatus: ${productStatus}, Should show "Đã bán"`);
+                                }
+                                
+                                // IMPORTANT: Check status in priority order (completed > rejected > deposited)
+                                // Completed first (highest priority - đã bán thành công)
+                                // Check both order status AND product status to ensure accuracy
+                                if (status === 'completed' || productStatus === 'sold' || productStatus === 'completed') {
+                                  return (
+                                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                      Đã bán
+                                    </span>
+                                  );
+                                }
+                                // Rejected second (đã bị từ chối)
+                                else if (status === 'cancelled' || status === 'failed' || status === 'rejected') {
+                                  return (
+                                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                      Đã bị từ chối
+                                    </span>
+                                  );
+                                }
+                                // Deposited third (đã được đặt cọc)
+                                // IMPORTANT: Only show "đã được đặt cọc" if NOT completed/sold
+                                else if ((status === 'deposited' || status === 'depositpaid' || status === 'deposit_paid') && 
+                                         productStatus !== 'sold' && productStatus !== 'completed' && status !== 'completed') {
+                                  return (
+                                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                      Đã được đặt cọc
+                                    </span>
+                                  );
+                                }
+                                // Default
+                                else {
+                                  return (
+                                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                      Đang chờ
+                                    </span>
+                                  );
+                                }
+                              })()}
                             </div>
                           </div>
                         );
@@ -874,9 +1124,52 @@ const MyPurchases = () => {
                             </h4>
                           </div>
                           <div className="absolute top-3 right-3">
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                              Đã bán
-                            </span>
+                            {(() => {
+                              const status = (sale.orderStatus || sale.status || sale.OrderStatus || sale.Status || '').toLowerCase();
+                              const productStatus = (sale.product?.status || sale.product?.Status || sale.productStatus || sale.ProductStatus || '').toLowerCase();
+                              
+                              // Debug logging for seller orders
+                              if (productStatus === 'sold' || status === 'completed') {
+                                console.log(`🔍 Seller Order Card ${sale.orderId || sale.OrderId} - Status: ${status}, ProductStatus: ${productStatus}, Should show "Đã bán"`);
+                              }
+                              
+                              // IMPORTANT: Check status in priority order (completed > rejected > deposited)
+                              // Completed first (highest priority - đã bán thành công)
+                              // Check both order status AND product status to ensure accuracy
+                              if (status === 'completed' || productStatus === 'sold' || productStatus === 'completed') {
+                                return (
+                                  <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                    Đã bán
+                                  </span>
+                                );
+                              }
+                              // Rejected second (đã bị từ chối)
+                              else if (status === 'cancelled' || status === 'failed' || status === 'rejected') {
+                                return (
+                                  <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                    Đã bị từ chối
+                                  </span>
+                                );
+                              }
+                              // Deposited third (đã được đặt cọc)
+                              // IMPORTANT: Only show "đã được đặt cọc" if NOT completed/sold
+                              else if ((status === 'deposited' || status === 'depositpaid' || status === 'deposit_paid') && 
+                                       productStatus !== 'sold' && productStatus !== 'completed' && status !== 'completed') {
+                                return (
+                                  <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                    Đã được đặt cọc
+                                  </span>
+                                );
+                              }
+                              // Default
+                              else {
+                                return (
+                                  <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                    Đang chờ
+                                  </span>
+                                );
+                              }
+                            })()}
                           </div>
                         </div>
                       );
@@ -892,18 +1185,56 @@ const MyPurchases = () => {
                           {formatPrice(sale.totalAmount)}
                         </span>
                         <div className="flex items-center text-sm text-gray-500">
-                          {((sale.orderStatus || sale.status || '').toLowerCase() === 'cancelled' || 
-                            (sale.orderStatus || sale.status || '').toLowerCase() === 'failed') ? (
-                            <>
-                              <XCircle className="h-4 w-4 mr-1 text-red-500" />
-                              Đã hủy
-                            </>
-                          ) : (
-                            <>
-                              <CheckCircle className="h-4 w-4 mr-1" />
-                              Đã bán
-                            </>
-                          )}
+                          {(() => {
+                            const status = (sale.orderStatus || sale.status || sale.OrderStatus || sale.Status || '').toLowerCase();
+                            const productStatus = (sale.product?.status || sale.product?.Status || sale.productStatus || sale.ProductStatus || '').toLowerCase();
+                            
+                            // Debug logging for seller orders
+                            if (productStatus === 'sold' || status === 'completed') {
+                              console.log(`🔍 Seller Order Detail ${sale.orderId || sale.OrderId} - Status: ${status}, ProductStatus: ${productStatus}, Should show "Đã bán"`);
+                            }
+                            
+                            // IMPORTANT: Check status in priority order (completed > rejected > deposited)
+                            // Completed first (highest priority - đã bán thành công)
+                            // Check both order status AND product status to ensure accuracy
+                            if (status === 'completed' || productStatus === 'sold' || productStatus === 'completed') {
+                              return (
+                                <>
+                                  <CheckCircle className="h-4 w-4 mr-1 text-green-500" />
+                                  Đã bán
+                                </>
+                              );
+                            }
+                            // Rejected second (đã bị từ chối)
+                            else if (status === 'cancelled' || status === 'failed' || status === 'rejected') {
+                              return (
+                                <>
+                                  <XCircle className="h-4 w-4 mr-1 text-red-500" />
+                                  Đã bị từ chối
+                                </>
+                              );
+                            }
+                            // Deposited third (đã được đặt cọc)
+                            // IMPORTANT: Only show "đã được đặt cọc" if NOT completed/sold
+                            else if ((status === 'deposited' || status === 'depositpaid' || status === 'deposit_paid') && 
+                                     productStatus !== 'sold' && productStatus !== 'completed' && status !== 'completed') {
+                              return (
+                                <>
+                                  <Clock className="h-4 w-4 mr-1 text-yellow-500" />
+                                  Đã được đặt cọc
+                                </>
+                              );
+                            }
+                            // Default
+                            else {
+                              return (
+                                <>
+                                  <Clock className="h-4 w-4 mr-1 text-blue-500" />
+                                  Đang chờ
+                                </>
+                              );
+                            }
+                          })()}
                         </div>
                       </div>
                       
@@ -915,20 +1246,21 @@ const MyPurchases = () => {
                         <p>Người mua: {sale.buyerName || 'N/A'}</p>
                       </div>
                       
-                      {/* Show Cancellation Reason if order is cancelled */}
+                      {/* Show Rejection Reason if order is rejected */}
                       {((sale.orderStatus || sale.status || '').toLowerCase() === 'cancelled' || 
-                        (sale.orderStatus || sale.status || '').toLowerCase() === 'failed') && 
+                        (sale.orderStatus || sale.status || '').toLowerCase() === 'failed' ||
+                        (sale.orderStatus || sale.status || '').toLowerCase() === 'rejected') && 
                         sale.cancellationReason && (
                         <div className="bg-red-50 border border-red-200 rounded-lg p-4 mt-4">
                           <div className="flex items-start space-x-2">
                             <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
                             <div className="flex-1">
-                              <h4 className="font-semibold text-red-900 mb-1">Giao dịch đã bị hủy</h4>
+                              <h4 className="font-semibold text-red-900 mb-1">Giao dịch đã bị từ chối</h4>
                               <p className="text-sm text-red-800 mb-1">
                                 <span className="font-medium">Lý do:</span> {sale.cancellationReason}
                               </p>
                               <p className="text-xs text-red-600 mt-2">
-                                Đơn hàng này đã bị admin hủy. Sản phẩm đã được trả về trang chủ.
+                                Đơn hàng này đã bị admin từ chối. Sản phẩm đã được trả về trang chủ.
                               </p>
                             </div>
                           </div>

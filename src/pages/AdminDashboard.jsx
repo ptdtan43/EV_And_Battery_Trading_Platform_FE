@@ -690,23 +690,100 @@ export const AdminDashboard = () => {
   // Tạo review cho người mua sau khi admin xác nhận
   const createReviewForBuyer = async (productId) => {
     try {
+      // Đợi một chút để database cập nhật sau khi admin confirm
+      // Backend PaymentController đã update Order.OrderStatus = "Completed" và CompletedDate
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       // Lấy thông tin order để tìm buyer
       const orders = await apiRequest("/api/Order");
-      const completedOrder = orders.find(order => 
-        order.productId === productId && 
-        order.orderStatus === "completed"
-      );
+      const ordersArray = Array.isArray(orders) ? orders : [];
+      
+      console.log(`🔍 Looking for completed order for productId: ${productId}`);
+      console.log(`🔍 Total orders: ${ordersArray.length}`);
+      
+      // Tìm order đã hoàn thành với logic robust hơn
+      const completedOrder = ordersArray.find(order => {
+        // Check productId với nhiều field names khác nhau
+        const orderProductId = order.ProductId || order.productId || 
+                              order.product?.ProductId || order.product?.productId || 
+                              order.product?.id;
+        const productIdMatch = orderProductId == productId || 
+                              orderProductId === productId || 
+                              parseInt(orderProductId) === parseInt(productId);
+        
+        if (!productIdMatch) {
+          return false;
+        }
+        
+        // Check order status với nhiều field names khác nhau (case-insensitive)
+        // QUAN TRỌNG: Backend PaymentController đã update Order.OrderStatus = "Completed" khi admin confirm
+        const orderStatus = (order.Status || order.status || 
+                           order.orderStatus || order.OrderStatus || '').toLowerCase();
+        const isCompleted = orderStatus === 'completed';
+        
+        // Check completed date (backend cũng set CompletedDate khi admin confirm)
+        const hasCompletedDate = order.CompletedDate || order.completedDate;
+        
+        // Check product status (fallback - endpoint /api/Order có thể không trả về Product.Status)
+        const productStatus = (order.Product?.Status || order.product?.status || 
+                              order.product?.Status || '').toLowerCase();
+        const isProductSold = productStatus === 'sold' || productStatus === 'completed';
+        
+        // Order được coi là completed nếu:
+        // 1. ProductId match
+        // 2. VÀ (orderStatus === 'completed' HOẶC (isProductSold && hasCompletedDate))
+        // Ưu tiên check Order.Status trước vì backend đã update khi admin confirm
+        const matches = isCompleted || (isProductSold && hasCompletedDate);
+        
+        // Debug logging
+        console.log(`🔍 Order ${order.OrderId || order.orderId || order.id}:`, {
+          orderProductId, 
+          productId, 
+          productIdMatch, 
+          orderStatus, 
+          productStatus, 
+          isCompleted, 
+          isProductSold, 
+          hasCompletedDate,
+          Status: order.Status,
+          OrderStatus: order.OrderStatus,
+          CompletedDate: order.CompletedDate,
+          ProductId: order.ProductId,
+          matches
+        });
+        
+        return matches;
+      });
 
       if (!completedOrder) {
+        console.error('❌ No completed order found. Available orders:', 
+          ordersArray.map(o => ({
+            OrderId: o.OrderId || o.orderId || o.id,
+            ProductId: o.ProductId || o.productId,
+            Status: o.Status || o.status || o.orderStatus || o.OrderStatus,
+            CompletedDate: o.CompletedDate || o.completedDate,
+            ProductStatus: o.Product?.Status || o.product?.status || o.product?.Status
+          }))
+        );
         throw new Error("Không tìm thấy order đã hoàn thành cho sản phẩm này");
       }
 
+      console.log(`✅ Found completed order:`, {
+        OrderId: completedOrder.OrderId || completedOrder.orderId || completedOrder.id,
+        ProductId: completedOrder.ProductId || completedOrder.productId,
+        BuyerId: completedOrder.BuyerId || completedOrder.buyerId,
+        SellerId: completedOrder.SellerId || completedOrder.sellerId,
+        Status: completedOrder.Status || completedOrder.status
+      });
+
       // Tạo review cho buyer
+      // Sử dụng field names từ backend (có thể là PascalCase hoặc camelCase)
       const reviewData = {
-        orderId: completedOrder.orderId,
+        orderId: completedOrder.OrderId || completedOrder.orderId || completedOrder.id,
         productId: productId,
-        buyerId: completedOrder.userId,
-        sellerId: completedOrder.sellerId,
+        buyerId: completedOrder.BuyerId || completedOrder.buyerId || 
+                completedOrder.userId || completedOrder.UserId,
+        sellerId: completedOrder.SellerId || completedOrder.sellerId,
         ratingValue: 0, // Mặc định 0, buyer sẽ cập nhật sau
         comment: "", // Để trống, buyer sẽ điền sau
         isCompleted: false // Chưa hoàn thành đánh giá
@@ -718,7 +795,7 @@ export const AdminDashboard = () => {
         body: reviewData
       });
 
-      console.log(`✅ Review created for buyer ${completedOrder.userId} on product ${productId}`);
+      console.log(`✅ Review created for buyer ${reviewData.buyerId} on product ${productId}`);
       
     } catch (error) {
       console.error('Error creating review for buyer:', error);
@@ -765,11 +842,7 @@ export const AdminDashboard = () => {
         });
       } catch (reviewError) {
         console.warn('Không thể tạo review:', reviewError);
-        showToast({
-          title: 'Cảnh báo',
-          description: 'Giao dịch đã thành công nhưng không thể tạo review tự động.',
-          type: 'warning',
-        });
+        // Không hiển thị thông báo cảnh báo cho user
       }
 
       // Reload data to update UI
