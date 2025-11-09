@@ -1197,7 +1197,6 @@ export const CreateListing = () => {
                     <option value="">Chọn loại xe</option>
                     <option value="Car">Ô tô</option>
                     <option value="Motorcycle">Xe máy</option>
-                    <option value="Bike">Xe đạp điện</option>
                   </select>
                 </div>
 

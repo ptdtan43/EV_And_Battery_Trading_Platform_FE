@@ -25,6 +25,8 @@ import {
   LogOut,
   X,
   AlertTriangle,
+  Settings,
+  CreditCard,
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
 import { formatPrice, formatDate } from "../utils/formatters";
@@ -37,6 +39,7 @@ import { AdminReports } from "../components/admin/AdminReports";
 import { updateVerificationStatus, getVerificationRequests } from "../lib/verificationApi";
 import { getUserNotifications, getUnreadCount, notifyUserVerificationCompleted } from "../lib/notificationApi";
 import { forceSendNotificationsForAllSuccessfulPayments, sendNotificationsForKnownPayments, sendNotificationsForVerifiedProducts } from "../lib/verificationNotificationService";
+import { feeService } from "../services/feeService";
 
 export const AdminDashboard = () => {
   const location = useLocation();
@@ -49,7 +52,7 @@ export const AdminDashboard = () => {
     } catch (_) {
       return "dashboard";
     }
-  }); // dashboard, vehicles, batteries, inspections, transactions, reports, users
+  }); // dashboard, vehicles, batteries, inspections, transactions, reports, users, fees
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalListings: 0,
@@ -85,6 +88,10 @@ export const AdminDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [expandedDetails, setExpandedDetails] = useState(false);
+  const [expandedDetailsDuplicateWarning, setExpandedDetailsDuplicateWarning] = useState({
+    hasDuplicate: false,
+    duplicates: []
+  });
   const [cancelledOrderContext, setCancelledOrderContext] = useState(null); // Track cancelled order for modal context
   const [processingIds, setProcessingIds] = useState(new Set());
   const [skipImageLoading, setSkipImageLoading] = useState(false); // Add flag to skip image loading if causing issues
@@ -103,6 +110,12 @@ export const AdminDashboard = () => {
   const [pendingStatusReason, setPendingStatusReason] = useState(''); // legacy free-text
   const [pendingStatusReasonCode, setPendingStatusReasonCode] = useState('');
   const [pendingStatusReasonNote, setPendingStatusReasonNote] = useState('');
+  
+  // Fee management state
+  const [feeSettings, setFeeSettings] = useState([]);
+  const [feeLoading, setFeeLoading] = useState(false);
+  const [editingFee, setEditingFee] = useState(null);
+  const [feeFormData, setFeeFormData] = useState({ feeValue: '', isActive: true });
 
   const suspendedReasonOptions = [
     { code: 'SPAM_CONTENT', label: 'Đăng nội dung spam/quảng cáo' },
@@ -206,6 +219,10 @@ export const AdminDashboard = () => {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [selectedListing, setSelectedListing] = useState(null);
   const [showModal, setShowModal] = useState(false);
+  const [duplicateLicensePlateWarning, setDuplicateLicensePlateWarning] = useState({
+    hasDuplicate: false,
+    duplicates: []
+  });
   
   // Inspection modal state
   const [showInspectionModal, setShowInspectionModal] = useState(false);
@@ -606,6 +623,108 @@ export const AdminDashboard = () => {
     } catch (error) {
       console.error('❌ Error loading admin notifications:', error);
     }
+  };
+
+  // Load fee settings
+  const loadFeeSettings = async () => {
+    try {
+      setFeeLoading(true);
+      const response = await apiRequest('/api/FeeSetting', {
+        method: 'GET',
+      });
+      setFeeSettings(response || []);
+      console.log('✅ Fee settings loaded:', response);
+    } catch (error) {
+      console.error('❌ Error loading fee settings:', error);
+      showToast({
+        title: 'Lỗi',
+        description: 'Không thể tải cài đặt phí',
+        type: 'error',
+      });
+    } finally {
+      setFeeLoading(false);
+    }
+  };
+
+  // Update fee setting
+  const updateFeeSetting = async (feeId, feeData) => {
+    try {
+      setFeeLoading(true);
+      const response = await apiRequest(`/api/FeeSetting/${feeId}`, {
+        method: 'PUT',
+        body: feeData,
+      });
+      
+      // ✅ CRITICAL: Clear feeService cache so new values are used immediately
+      feeService.clearCache();
+      console.log('✅ FeeService cache cleared after update');
+      
+      // Refresh fee settings
+      await loadFeeSettings();
+      
+      showToast({
+        title: 'Thành công',
+        description: 'Đã cập nhật cài đặt phí. Giá trị mới sẽ được áp dụng ngay lập tức.',
+        type: 'success',
+      });
+      
+      setEditingFee(null);
+      setFeeFormData({ feeValue: '', isActive: true });
+      
+      return response;
+    } catch (error) {
+      console.error('❌ Error updating fee setting:', error);
+      showToast({
+        title: 'Lỗi',
+        description: 'Không thể cập nhật cài đặt phí',
+        type: 'error',
+      });
+      throw error;
+    } finally {
+      setFeeLoading(false);
+    }
+  };
+
+  // Handle edit fee
+  const handleEditFee = (fee) => {
+    setEditingFee(fee);
+    setFeeFormData({
+      feeValue: fee.feeValue || fee.FeeValue || '',
+      isActive: fee.isActive !== undefined ? fee.isActive : (fee.IsActive !== undefined ? fee.IsActive : true),
+    });
+  };
+
+  // Handle save fee
+  const handleSaveFee = async () => {
+    if (!editingFee) return;
+    
+    const feeId = editingFee.feeId || editingFee.FeeId;
+    const feeType = editingFee.feeType || editingFee.FeeType;
+    
+    if (!feeId || !feeType) {
+      showToast({
+        title: 'Lỗi',
+        description: 'Thông tin phí không hợp lệ',
+        type: 'error',
+      });
+      return;
+    }
+
+    const feeValue = parseFloat(feeFormData.feeValue);
+    if (isNaN(feeValue) || feeValue < 0) {
+      showToast({
+        title: 'Lỗi',
+        description: 'Giá trị phí phải là số không âm',
+        type: 'error',
+      });
+      return;
+    }
+
+    await updateFeeSetting(feeId, {
+      feeType: feeType,
+      feeValue: feeValue,
+      isActive: feeFormData.isActive,
+    });
   };
 
   // Get admin user ID
@@ -1017,14 +1136,58 @@ export const AdminDashboard = () => {
     }
   };
 
+  // Check for duplicate license plate in expanded details modal
+  const checkDuplicateLicensePlateForExpandedDetails = async (licensePlate, currentProductId) => {
+    if (!licensePlate || licensePlate.trim() === '' || licensePlate === 'N/A') {
+      setExpandedDetailsDuplicateWarning({ hasDuplicate: false, duplicates: [] });
+      return;
+    }
+
+    try {
+      // Get all products to check for duplicates
+      const allProducts = await apiRequest('/api/Product');
+      const productsList = Array.isArray(allProducts) ? allProducts : allProducts?.items || [];
+      
+      // Find products with same license plate (excluding current product)
+      const duplicates = productsList.filter(p => {
+        const productId = p.productId || p.id || p.ProductId || p.Id;
+        const plate = (p.licensePlate || p.license_plate || '').trim().toUpperCase();
+        const currentPlate = licensePlate.trim().toUpperCase();
+        
+        return plate === currentPlate && 
+               plate !== '' && 
+               plate !== 'N/A' &&
+               productId !== currentProductId;
+      });
+
+      if (duplicates.length > 0) {
+        setExpandedDetailsDuplicateWarning({ hasDuplicate: true, duplicates });
+        console.log(`⚠️ Duplicate license plate found in expanded details: ${licensePlate}`, duplicates);
+      } else {
+        setExpandedDetailsDuplicateWarning({ hasDuplicate: false, duplicates: [] });
+      }
+    } catch (error) {
+      console.error('Error checking duplicate license plate:', error);
+      setExpandedDetailsDuplicateWarning({ hasDuplicate: false, duplicates: [] });
+    }
+  };
+
   // Handle view product details
-  const handleViewDetails = (product, cancelledOrder = null) => {
+  const handleViewDetails = async (product, cancelledOrder = null) => {
     // Use the same modal as Dashboard tab (expandedDetails)
     const productId = product.id || product.productId;
     setExpandedDetails(productId);
     setShowModal(false);
     // Track cancelled order context if viewing from cancelled orders
     setCancelledOrderContext(cancelledOrder);
+    
+    // Check for duplicate license plate if it's a vehicle
+    if (product.productType?.toLowerCase().includes("vehicle")) {
+      const licensePlate = product.licensePlate || product.license_plate || '';
+      await checkDuplicateLicensePlateForExpandedDetails(licensePlate, productId);
+    } else {
+      setExpandedDetailsDuplicateWarning({ hasDuplicate: false, duplicates: [] });
+    }
   };
 
   // Helper function to close modal and reset context
@@ -1072,6 +1235,13 @@ export const AdminDashboard = () => {
       }
     }
   }, [adminUserId]);
+
+  // Load fee settings when fees tab is active
+  useEffect(() => {
+    if (activeTab === 'fees') {
+      loadFeeSettings();
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     filterListings();
@@ -1777,6 +1947,7 @@ export const AdminDashboard = () => {
         year: product.year,
         mileage: product.mileage,
         condition: product.condition,
+        licensePlate: product.licensePlate,
         fullProduct: product
       });
       setCurrentInspectionProduct(product);
@@ -2111,11 +2282,56 @@ export const AdminDashboard = () => {
     }
   };
 
-  const openListingModal = (listing) => {
+  // Check for duplicate license plate when viewing product details
+  const checkDuplicateLicensePlateForDetail = async (licensePlate, currentProductId) => {
+    if (!licensePlate || licensePlate.trim() === '' || licensePlate === 'N/A') {
+      setDuplicateLicensePlateWarning({ hasDuplicate: false, duplicates: [] });
+      return;
+    }
+
+    try {
+      // Get all products to check for duplicates
+      const allProducts = await apiRequest('/api/Product');
+      const productsList = Array.isArray(allProducts) ? allProducts : allProducts?.items || [];
+      
+      // Find products with same license plate (excluding current product)
+      const duplicates = productsList.filter(p => {
+        const productId = p.productId || p.id || p.ProductId || p.Id;
+        const plate = (p.licensePlate || p.license_plate || '').trim().toUpperCase();
+        const currentPlate = licensePlate.trim().toUpperCase();
+        
+        return plate === currentPlate && 
+               plate !== '' && 
+               plate !== 'N/A' &&
+               productId !== currentProductId;
+      });
+
+      if (duplicates.length > 0) {
+        setDuplicateLicensePlateWarning({ hasDuplicate: true, duplicates });
+        console.log(`⚠️ Duplicate license plate found: ${licensePlate}`, duplicates);
+      } else {
+        setDuplicateLicensePlateWarning({ hasDuplicate: false, duplicates: [] });
+      }
+    } catch (error) {
+      console.error('Error checking duplicate license plate:', error);
+      setDuplicateLicensePlateWarning({ hasDuplicate: false, duplicates: [] });
+    }
+  };
+
+  const openListingModal = async (listing) => {
     setSelectedListing(listing);
     setCurrentImageIndex(0);
     closeDetailsModal();
     setShowModal(true);
+    
+    // Check for duplicate license plate if it's a vehicle
+    if (listing.productType === 'Vehicle' || listing.productType === 'vehicle') {
+      const licensePlate = listing.licensePlate || listing.license_plate || '';
+      const productId = getId(listing);
+      await checkDuplicateLicensePlateForDetail(licensePlate, productId);
+    } else {
+      setDuplicateLicensePlateWarning({ hasDuplicate: false, duplicates: [] });
+    }
   };
 
   const getStatusBadge = (status) => {
@@ -2295,6 +2511,17 @@ export const AdminDashboard = () => {
               <Flag className="h-5 w-5" />
               <span>Báo cáo vi phạm</span>
             </div>
+            <div 
+              className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
+                activeTab === "fees" 
+                  ? "bg-blue-50 text-blue-600" 
+                  : "text-gray-600 hover:bg-gray-50"
+              }`}
+              onClick={() => handleTabChange("fees")}
+            >
+              <Settings className="h-5 w-5" />
+              <span>Quản lý phí</span>
+            </div>
           </div>
         </nav>
       </div>
@@ -2311,6 +2538,7 @@ export const AdminDashboard = () => {
                 {activeTab === "batteries" && "Quản lý pin"}
                 {activeTab === "transactions" && "Quản lý giao dịch"}
                 {activeTab === "reports" && "Báo cáo vi phạm"}
+                {activeTab === "fees" && "Quản lý phí"}
               </h1>
               <p className="text-gray-600">
                 {activeTab === "dashboard" && "Tổng quan hệ thống EV Market • Cập nhật theo thời gian thực"}
@@ -2318,6 +2546,7 @@ export const AdminDashboard = () => {
                 {activeTab === "batteries" && "Quản lý bài đăng pin và phê duyệt"}
                 {activeTab === "transactions" && "Quản lý các giao dịch giữa người bán và người mua"}
                 {activeTab === "reports" && "Xem xét và xử lý các báo cáo vi phạm từ người dùng"}
+                {activeTab === "fees" && "Quản lý phí đặt cọc và phí kiểm định"}
               </p>
             </div>
             <button
@@ -2503,26 +2732,244 @@ export const AdminDashboard = () => {
             </div>
           </div>
 
-            {/* Recent Notifications */}
-            <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
-            <div className="flex items-center justify-between">
-              <div>
-                  <p className="text-gray-500 text-sm font-medium">THÔNG BÁO GẦN ĐÂY</p>
-                  <p className="text-3xl font-bold text-gray-900 mt-2">
-                    {unreadNotificationCount}
-                  </p>
-                  <p className="text-xs text-gray-600 mt-1">Tin chưa đọc</p>
-              </div>
-                <div className="bg-blue-100 p-4 rounded-xl">
-                  <Bell className="h-8 w-8 text-blue-600" />
+        </div>
+        )}
+
+        {/* Fee Management */}
+        {activeTab === 'fees' && (
+          <div className="bg-white rounded-2xl shadow-lg p-6 mb-8 border border-gray-100">
+            <div className="mb-6">
+              <h2 className="text-xl font-semibold text-gray-900 mb-2">Quản lý phí hệ thống</h2>
+              <p className="text-sm text-gray-600">Cấu hình phí đặt cọc và phí kiểm định cho hệ thống</p>
             </div>
+
+            {feeLoading && feeSettings.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                <p className="text-gray-600 mt-2">Đang tải...</p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {(() => {
+                  // Filter and deduplicate fees - only show one fee per type
+                  // Priority: active fees first, then newest by createdDate
+                  const filteredFees = feeSettings.filter(fee => {
+                    const feeType = fee.feeType || fee.FeeType || '';
+                    return feeType === 'DepositPercentage' || feeType === 'VerificationFee';
+                  });
+
+                  // Group by feeType and get the best one for each type
+                  const feeMap = new Map();
+                  filteredFees.forEach(fee => {
+                    const feeType = fee.feeType || fee.FeeType || '';
+                    const isActive = fee.isActive !== undefined ? fee.isActive : (fee.IsActive !== undefined ? fee.IsActive : false);
+                    const createdDate = fee.createdDate || fee.CreatedDate;
+                    const existingFee = feeMap.get(feeType);
+
+                    if (!existingFee) {
+                      feeMap.set(feeType, fee);
+                    } else {
+                      const existingIsActive = existingFee.isActive !== undefined ? existingFee.isActive : (existingFee.IsActive !== undefined ? existingFee.IsActive : false);
+                      const existingDate = existingFee.createdDate || existingFee.CreatedDate;
+                      
+                      // Priority: active > inactive, then newest date
+                      if (isActive && !existingIsActive) {
+                        feeMap.set(feeType, fee);
+                      } else if (isActive === existingIsActive) {
+                        // If both have same active status, prefer newer one
+                        if (createdDate && existingDate) {
+                          const feeDate = new Date(createdDate);
+                          const existingFeeDate = new Date(existingDate);
+                          if (feeDate > existingFeeDate) {
+                            feeMap.set(feeType, fee);
+                          }
+                        } else if (createdDate && !existingDate) {
+                          feeMap.set(feeType, fee);
+                        }
+                      }
+                    }
+                  });
+
+                  return Array.from(feeMap.values());
+                })().map((fee) => {
+                    const feeId = fee.feeId || fee.FeeId;
+                    const feeType = fee.feeType || fee.FeeType || '';
+                    const feeValue = fee.feeValue || fee.FeeValue || 0;
+                    const isActive = fee.isActive !== undefined ? fee.isActive : (fee.IsActive !== undefined ? fee.IsActive : false);
+                    const createdDate = fee.createdDate || fee.CreatedDate;
+
+                    const isEditing = editingFee && (editingFee.feeId || editingFee.FeeId) === feeId;
+
+                    return (
+                      <div
+                        key={feeId}
+                        className="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow"
+                      >
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              {feeType === 'DepositPercentage' ? (
+                                <CreditCard className="h-5 w-5 text-blue-600" />
+                              ) : (
+                                <Shield className="h-5 w-5 text-green-600" />
+                              )}
+                              <h3 className="text-lg font-semibold text-gray-900">
+                                {feeType === 'DepositPercentage' ? 'Phí đặt cọc' : 'Phí kiểm định'}
+                              </h3>
+                              <span
+                                className={`px-2 py-1 text-xs font-medium rounded-full ${
+                                  isActive
+                                    ? 'bg-green-100 text-green-800'
+                                    : 'bg-gray-100 text-gray-800'
+                                }`}
+                              >
+                                {isActive ? 'Đang hoạt động' : 'Đã tắt'}
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-600 mb-1">
+                              {feeType === 'DepositPercentage'
+                                ? 'Tỷ lệ phần trăm đặt cọc (ví dụ: 0.1 = 10%)'
+                                : 'Phí kiểm định xe (VNĐ)'}
+                            </p>
+                            {createdDate && (
+                              <p className="text-xs text-gray-500">
+                                Ngày tạo: {formatDate(createdDate)}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        {isEditing ? (
+                          <div className="space-y-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                {feeType === 'DepositPercentage' ? 'Tỷ lệ phần trăm' : 'Giá trị phí (VNĐ)'}
+                              </label>
+                              <input
+                                type="number"
+                                step={feeType === 'DepositPercentage' ? '0.01' : '1'}
+                                min="0"
+                                value={feeFormData.feeValue}
+                                onChange={(e) =>
+                                  setFeeFormData({ ...feeFormData, feeValue: e.target.value })
+                                }
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                placeholder={
+                                  feeType === 'DepositPercentage' ? '0.1' : '50000'
+                                }
+                              />
+                            </div>
+                            <div className="flex items-center">
+                              <input
+                                type="checkbox"
+                                id={`active-${feeId}`}
+                                checked={feeFormData.isActive}
+                                onChange={(e) =>
+                                  setFeeFormData({ ...feeFormData, isActive: e.target.checked })
+                                }
+                                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                              />
+                              <label
+                                htmlFor={`active-${feeId}`}
+                                className="ml-2 text-sm text-gray-700"
+                              >
+                                Kích hoạt phí này
+                              </label>
+                            </div>
+                            <div className="flex gap-3">
+                              <button
+                                onClick={handleSaveFee}
+                                disabled={feeLoading}
+                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              >
+                                {feeLoading ? 'Đang lưu...' : 'Lưu thay đổi'}
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingFee(null);
+                                  setFeeFormData({ feeValue: '', isActive: true });
+                                }}
+                                disabled={feeLoading}
+                                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              >
+                                Hủy
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-2xl font-bold text-gray-900">
+                                {feeType === 'DepositPercentage' ? (
+                                  `${(feeValue * 100).toFixed(1)}%`
+                                ) : (
+                                  formatPrice(feeValue)
+                                )}
+                              </p>
+                              <p className="text-sm text-gray-500 mt-1">
+                                {feeType === 'DepositPercentage'
+                                  ? `Tỷ lệ: ${feeValue} (${(feeValue * 100).toFixed(1)}%)`
+                                  : `Giá trị: ${feeValue.toLocaleString('vi-VN')} VNĐ`}
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => handleEditFee(fee)}
+                              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                            >
+                              <Settings className="h-4 w-4" />
+                              Chỉnh sửa
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                {(() => {
+                  // Use same deduplication logic for empty check
+                  const filteredFees = feeSettings.filter(fee => {
+                    const feeType = fee.feeType || fee.FeeType || '';
+                    return feeType === 'DepositPercentage' || feeType === 'VerificationFee';
+                  });
+
+                  const feeMap = new Map();
+                  filteredFees.forEach(fee => {
+                    const feeType = fee.feeType || fee.FeeType || '';
+                    const isActive = fee.isActive !== undefined ? fee.isActive : (fee.IsActive !== undefined ? fee.IsActive : false);
+                    const createdDate = fee.createdDate || fee.CreatedDate;
+                    const existingFee = feeMap.get(feeType);
+
+                    if (!existingFee) {
+                      feeMap.set(feeType, fee);
+                    } else {
+                      const existingIsActive = existingFee.isActive !== undefined ? existingFee.isActive : (existingFee.IsActive !== undefined ? existingFee.IsActive : false);
+                      const existingDate = existingFee.createdDate || existingFee.CreatedDate;
+                      
+                      if (isActive && !existingIsActive) {
+                        feeMap.set(feeType, fee);
+                      } else if (isActive === existingIsActive) {
+                        if (createdDate && existingDate) {
+                          const feeDate = new Date(createdDate);
+                          const existingFeeDate = new Date(existingDate);
+                          if (feeDate > existingFeeDate) {
+                            feeMap.set(feeType, fee);
+                          }
+                        } else if (createdDate && !existingDate) {
+                          feeMap.set(feeType, fee);
+                        }
+                      }
+                    }
+                  });
+
+                  return feeMap.size === 0;
+                })() && (
+                  <div className="text-center py-8 text-gray-500">
+                    <p>Chưa có cài đặt phí nào</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-              <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Tổng: {notifications.length}</p>
-                <p className="text-xs text-gray-500">Kiểm định: {notifications.filter(n => n.notificationType === 'verification_payment_success').length}</p>
-        </div>
-          </div>
-        </div>
         )}
 
         {/* Users Management */}
@@ -2870,8 +3317,8 @@ export const AdminDashboard = () => {
             </div>
           </div>
         )}
-            {/* Filters and Search - Hide on reports, users, and transactions tabs */}
-            {activeTab !== "reports" && activeTab !== "users" && activeTab !== "transactions" && (
+            {/* Filters and Search - Hide on reports, users, transactions, and fees tabs */}
+            {activeTab !== "reports" && activeTab !== "users" && activeTab !== "transactions" && activeTab !== "fees" && (
             <div className="bg-white rounded-2xl shadow-lg p-6 mb-8 border border-gray-100">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0 lg:space-x-6">
             <div className="flex-1">
@@ -2925,8 +3372,8 @@ export const AdminDashboard = () => {
         </div>
         )}
 
-        {/* Listings Table - Hide on inspections, transactions, reports and users tabs */}
-        {activeTab !== "inspections" && activeTab !== "transactions" && activeTab !== "reports" && activeTab !== "users" && (
+        {/* Listings Table - Hide on inspections, transactions, reports, users and fees tabs */}
+        {activeTab !== "inspections" && activeTab !== "transactions" && activeTab !== "reports" && activeTab !== "users" && activeTab !== "fees" && (
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200">
             <h2 className="text-xl font-semibold text-gray-900">
@@ -3025,7 +3472,17 @@ export const AdminDashboard = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex items-center space-x-2">
                       <button
-                          onClick={() => setExpandedDetails(listing.id)}
+                          onClick={async () => {
+                            const productId = listing.id || listing.productId;
+                            setExpandedDetails(productId);
+                            // Check for duplicate license plate if it's a vehicle
+                            if (listing.productType?.toLowerCase().includes("vehicle")) {
+                              const licensePlate = listing.licensePlate || listing.license_plate || '';
+                              await checkDuplicateLicensePlateForExpandedDetails(licensePlate, productId);
+                            } else {
+                              setExpandedDetailsDuplicateWarning({ hasDuplicate: false, duplicates: [] });
+                            }
+                          }}
                           className="text-blue-600 hover:text-blue-900 p-1 rounded"
                           title="Xem chi tiết"
                       >
@@ -3046,41 +3503,6 @@ export const AdminDashboard = () => {
                           <Camera className="h-3 w-3" />
                           <span>{listing.verificationStatus === "InProgress" ? "Tiếp tục" : "Kiểm định"}</span>
                       </button>
-                      )}
-                        
-                        {(listing.status === "pending" || listing.status === "Đang chờ duyệt" || listing.status === "Re-submit" || listing.status === "Draft") && listing.status !== "reserved" && (
-                          
-                          <>
-                            {console.log(`🔍 Product ${listing.id} debug:`, {
-                              status: listing.status,
-                              verificationStatus: listing.verificationStatus,
-                              shouldShowButtons: listing.status === "pending" || listing.status === "Đang chờ duyệt" || listing.status === "Re-submit" || listing.status === "Draft",
-                              statusType: typeof listing.status,
-                              statusValue: JSON.stringify(listing.status)
-                            })}
-                          <button
-                              onClick={() => handleApprove(listing.id)}
-                              disabled={processingIds.has(listing.id)}
-                              className="bg-green-600 text-white px-3 py-1 rounded-lg text-xs hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-1"
-                              title="Duyệt sản phẩm"
-                            >
-                              {processingIds.has(listing.id) ? (
-                                <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
-                              ) : (
-                                <CheckCircle className="h-3 w-3" />
-                              )}
-                              <span>Duyệt</span>
-                          </button>
-                          <button
-                            onClick={() => openRejectModal(listing)}
-                              disabled={processingIds.has(listing.id)}
-                              className="bg-red-600 text-white px-3 py-1 rounded-lg text-xs hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-1"
-                              title="Từ chối sản phẩm"
-                          >
-                              <XCircle className="h-3 w-3" />
-                              <span>Từ chối</span>
-                          </button>
-                        </>
                       )}
                     </div>
                     </td>
@@ -3214,6 +3636,32 @@ export const AdminDashboard = () => {
                               <div>
                                     <p className="text-sm text-gray-500">Biển số</p>
                                     <p className="font-medium">{product.licensePlate}</p>
+                                    {/* Duplicate License Plate Warning */}
+                                    {expandedDetailsDuplicateWarning.hasDuplicate && (
+                                      <div className="mt-2 p-3 bg-yellow-50 border-2 border-yellow-300 rounded-lg">
+                                        <div className="flex items-start">
+                                          <AlertTriangle className="h-4 w-4 text-yellow-600 mt-0.5 mr-2 flex-shrink-0" />
+                                          <div className="flex-1">
+                                            <p className="text-xs font-semibold text-yellow-900 mb-1">
+                                              ⚠️ Biển số đã trùng
+                                            </p>
+                                            <p className="text-xs text-yellow-800 mb-1">
+                                              Biển số "{product.licensePlate}" đã được sử dụng bởi {expandedDetailsDuplicateWarning.duplicates.length} sản phẩm khác:
+                                            </p>
+                                            <ul className="text-xs text-yellow-700 list-disc list-inside space-y-0.5">
+                                              {expandedDetailsDuplicateWarning.duplicates.slice(0, 3).map((dup, idx) => (
+                                                <li key={idx}>
+                                                  {dup.title || dup.name} (ID: {dup.productId || dup.id})
+                                                </li>
+                                              ))}
+                                              {expandedDetailsDuplicateWarning.duplicates.length > 3 && (
+                                                <li>... và {expandedDetailsDuplicateWarning.duplicates.length - 3} sản phẩm khác</li>
+                                              )}
+                                            </ul>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
                               </div>
                               <div>
                                     <p className="text-sm text-gray-500">Số km</p>
@@ -3397,6 +3845,33 @@ export const AdminDashboard = () => {
                       <span>Người bán: {selectedListing.sellerName || "Unknown"}</span>
                     </div>
                   </div>
+
+                  {/* Duplicate License Plate Warning */}
+                  {duplicateLicensePlateWarning.hasDuplicate && (
+                    <div className="mt-4 p-4 bg-yellow-50 border-2 border-yellow-300 rounded-lg">
+                      <div className="flex items-start">
+                        <AlertTriangle className="h-5 w-5 text-yellow-600 mt-0.5 mr-3 flex-shrink-0" />
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-yellow-900 mb-1">
+                            ⚠️ Biển số xe đã trùng
+                          </p>
+                          <p className="text-xs text-yellow-800 mb-2">
+                            Biển số "{selectedListing.licensePlate || selectedListing.license_plate}" đã được sử dụng bởi {duplicateLicensePlateWarning.duplicates.length} sản phẩm khác:
+                          </p>
+                          <ul className="text-xs text-yellow-700 list-disc list-inside space-y-1">
+                            {duplicateLicensePlateWarning.duplicates.slice(0, 3).map((dup, idx) => (
+                              <li key={idx}>
+                                {dup.title || dup.name} (ID: {dup.productId || dup.id})
+                              </li>
+                            ))}
+                            {duplicateLicensePlateWarning.duplicates.length > 3 && (
+                              <li>... và {duplicateLicensePlateWarning.duplicates.length - 3} sản phẩm khác</li>
+                            )}
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Inspection Images Section */}
                   {selectedListing.inspectionImages && selectedListing.inspectionImages.length > 0 && (
@@ -3762,9 +4237,10 @@ export const AdminDashboard = () => {
                       await handleCompleteInspection(currentInspectionProduct.id);
                     }}
                     disabled={inspectionImages.length === 0}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
                   >
-                    Hoàn thành kiểm định
+                    <CheckCircle className="h-4 w-4" />
+                    <span>Hoàn thành kiểm định</span>
                   </button>
                 </div>
               </div>

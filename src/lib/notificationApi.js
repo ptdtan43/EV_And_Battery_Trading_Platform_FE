@@ -381,7 +381,11 @@ export const notifyUserVerificationCompleted = async (userId, productTitle, prod
     if (isVerified) {
       content += `\n\n🎉 Sản phẩm của bạn giờ đã có chứng nhận kiểm định và sẽ được ưu tiên hiển thị trên trang chủ!`;
     } else {
-      content += `\n\n💡 Bạn có thể liên hệ admin để được hướng dẫn khắc phục và kiểm định lại.`;
+      content += `\n\n⚠️ Bạn đã bị admin từ chối kiểm định.`;
+      if (adminNotes) {
+        content += `\n\n📋 Lý do từ chối: ${adminNotes}`;
+      }
+      content += `\n\n💡 Vui lòng cập nhật lại bài viết để gửi yêu cầu kiểm duyệt lại miễn phí.`;
     }
 
     await createNotification({
