@@ -569,15 +569,29 @@ namespace EVTB_Backend.Controllers
                 product.Status = "Sold";
                 product.UpdatedAt = DateTime.UtcNow;
 
-                // Find and update related order
+                // ✅ SỬA ĐỔI: Tìm order theo ProductId, không phụ thuộc vào OrderStatus
+                // Vì có thể OrderStatus là "Deposited", "Deposit", "deposited", etc.
                 var order = await _context.Orders
-                    .FirstOrDefaultAsync(o => o.ProductId == request.ProductId && o.OrderStatus == "Deposited");
+                    .FirstOrDefaultAsync(o => o.ProductId == request.ProductId);
 
                 if (order != null)
                 {
-                    order.OrderStatus = "Completed";
-                    order.CompletedDate = DateTime.UtcNow;
-                    order.UpdatedAt = DateTime.UtcNow;
+                    // ✅ Chỉ update nếu order chưa completed
+                    if (order.OrderStatus?.ToLower() != "completed")
+                    {
+                        order.OrderStatus = "Completed";
+                        order.CompletedDate = DateTime.UtcNow;
+                        order.UpdatedAt = DateTime.UtcNow;
+                        
+                        // ✅ Cũng update AdminConfirmed nếu có field này trong Order model
+                        order.AdminConfirmed = true;
+                        order.AdminConfirmedDate = DateTime.UtcNow;
+                    }
+                }
+                else
+                {
+                    // Log warning nếu không tìm thấy order
+                    _logger.LogWarning($"Admin {adminId} confirmed product {request.ProductId} but no order found for this product.");
                 }
 
                 // Save changes

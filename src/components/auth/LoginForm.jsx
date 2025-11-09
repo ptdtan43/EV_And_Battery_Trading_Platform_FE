@@ -62,13 +62,13 @@ export const LoginForm = () => {
       console.log("Processed roleId:", rid);
       console.log("Role name:", roleName);
       console.log("Is admin:", isAdmin);
-      console.log("Will navigate to:", isAdmin ? "/admin" : "/dashboard");
+      console.log("Will navigate to:", isAdmin ? "/admin" : "/");
       console.log("==================");
 
       // Add a small delay to ensure state is updated before navigation
       setTimeout(() => {
         setLoading(false);
-        navigate(isAdmin ? "/admin" : "/dashboard");
+        navigate(isAdmin ? "/admin" : "/"); // Admin goes to /admin, User goes to HomePage
       }, 200);
     } catch (err) {
       setError(getErrorMessage(err));
