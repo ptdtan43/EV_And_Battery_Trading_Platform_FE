@@ -475,6 +475,10 @@ export const EditListing = () => {
     setLoading(true);
 
     try {
+      // Check if product was previously rejected - if so, automatically request verification again
+      const originalVerificationStatus = formData.verificationStatus || "NotRequested";
+      const shouldAutoRequestVerification = originalVerificationStatus === "Rejected";
+      
       const productData = {
         title: formData.title,
         description: formData.description,
@@ -485,7 +489,10 @@ export const EditListing = () => {
         productType: formData.productType,
         // Force status back to pending when updated (requires admin re-approval)
         status: "pending",
-        verificationStatus: formData.verificationStatus || "NotRequested",
+        // If product was rejected, automatically set verificationStatus to Requested for free re-verification
+        verificationStatus: shouldAutoRequestVerification ? "Requested" : (formData.verificationStatus || "NotRequested"),
+        // Clear verification notes when requesting re-verification
+        verificationNotes: shouldAutoRequestVerification ? null : undefined,
         // Add updatedDate to track when product was last updated
         updatedDate: new Date().toISOString(),
         // Vehicle specific fields
@@ -719,7 +726,9 @@ export const EditListing = () => {
 
       show({
         title: "Cập nhật thành công",
-        description: "Bài đăng đã được cập nhật và thông báo đã được gửi tới admin",
+        description: shouldAutoRequestVerification 
+          ? "Bài đăng đã được cập nhật và yêu cầu kiểm duyệt lại đã được gửi miễn phí tới admin"
+          : "Bài đăng đã được cập nhật và thông báo đã được gửi tới admin",
         type: "success",
       });
       navigate("/my-listings");

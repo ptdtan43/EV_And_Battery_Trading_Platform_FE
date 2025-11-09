@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Clock, Package, Star, CheckCircle, Eye, MessageSquare, XCircle, AlertCircle, ShoppingCart, Store } from 'lucide-react';
+import { Clock, Package, Star, CheckCircle, Eye, MessageSquare, XCircle, AlertCircle, ShoppingCart, Store, Info, X } from 'lucide-react';
 import { apiRequest } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -20,6 +20,8 @@ const MyPurchases = () => {
     rating: 5,
     comment: ''
   });
+  const [showCancellationModal, setShowCancellationModal] = useState(false);
+  const [selectedCancellationReason, setSelectedCancellationReason] = useState(null);
 
   useEffect(() => {
     if (user) {
@@ -131,12 +133,15 @@ const MyPurchases = () => {
         // Show cancelled orders (to display cancellation reason)
         const isCancelled = orderStatus === 'cancelled' || orderStatus === 'cancelled' || orderStatus === 'failed';
         
+        // Show completed orders
+        const isOrderCompleted = orderStatus === 'completed' || orderStatus === 'paid' || orderStatus === 'depositpaid';
+        
         // Show completed/sold products
         const isProductSold = productStatus === 'sold' || productStatus === 'completed' || 
                               productStatus === 'finished' || productStatus === 'active';
         
-        // Include if: has valid productId AND (is cancelled OR is sold)
-        const shouldInclude = hasValidProductId && (isCancelled || isProductSold);
+        // Include if: has valid productId AND (is cancelled OR is order completed OR is product sold)
+        const shouldInclude = hasValidProductId && (isCancelled || isOrderCompleted || isProductSold);
         
         if (shouldInclude) {
           console.log(`✅ Including order ${order.orderId} - Order: ${orderStatus}, Product: ${productStatus}, Cancelled: ${isCancelled}`);
@@ -676,6 +681,28 @@ const MyPurchases = () => {
                             </span>
                           )}
                         </div>
+                        
+                        {/* Cancellation info icon - top left */}
+                        {((purchase.orderStatus || purchase.status || '').toLowerCase() === 'cancelled' || 
+                          (purchase.orderStatus || purchase.status || '').toLowerCase() === 'failed') && 
+                          purchase.cancellationReason && (
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setSelectedCancellationReason({
+                                reason: purchase.cancellationReason,
+                                cancelledDate: purchase.cancelledDate || purchase.CancelledDate,
+                                orderId: purchase.orderId || purchase.id
+                              });
+                              setShowCancellationModal(true);
+                            }}
+                            className="absolute top-3 left-3 bg-red-500 text-white rounded-full p-2 hover:bg-red-600 transition-colors shadow-lg z-10"
+                            title="Xem lý do bị hủy"
+                          >
+                            <Info className="h-5 w-5" />
+                          </button>
+                        )}
                       </div>
                     );
                   }
@@ -710,6 +737,28 @@ const MyPurchases = () => {
                           Đã bán
                         </span>
                       </div>
+                      
+                      {/* Cancellation info icon - top left */}
+                      {((purchase.orderStatus || purchase.status || '').toLowerCase() === 'cancelled' || 
+                        (purchase.orderStatus || purchase.status || '').toLowerCase() === 'failed') && 
+                        purchase.cancellationReason && (
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setSelectedCancellationReason({
+                              reason: purchase.cancellationReason,
+                              cancelledDate: purchase.cancelledDate || purchase.CancelledDate,
+                              orderId: purchase.orderId || purchase.id
+                            });
+                            setShowCancellationModal(true);
+                          }}
+                          className="absolute top-3 left-3 bg-red-500 text-white rounded-full p-2 hover:bg-red-600 transition-colors shadow-lg z-10"
+                          title="Xem lý do bị hủy"
+                        >
+                          <Info className="h-5 w-5" />
+                        </button>
+                      )}
                     </div>
                   );
                 })()}
@@ -749,26 +798,6 @@ const MyPurchases = () => {
                       <p className="text-red-500 text-xs">⚠️ {purchase.error}</p>
                     )}
                   </div>
-                  
-                  {/* Show Cancellation Reason if order is cancelled */}
-                  {((purchase.orderStatus || purchase.status || '').toLowerCase() === 'cancelled' || 
-                    (purchase.orderStatus || purchase.status || '').toLowerCase() === 'failed') && 
-                    purchase.cancellationReason && (
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 mt-4">
-                      <div className="flex items-start space-x-2">
-                        <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
-                        <div className="flex-1">
-                          <h4 className="font-semibold text-red-900 mb-1">Giao dịch đã bị hủy</h4>
-                          <p className="text-sm text-red-800 mb-1">
-                            <span className="font-medium">Lý do:</span> {purchase.cancellationReason}
-                          </p>
-                          <p className="text-xs text-red-600 mt-2">
-                            Đơn hàng này đã bị admin hủy. Sản phẩm đã được trả về trang chủ.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                   
                   <div className="flex space-x-2">
                     <Link
@@ -896,6 +925,28 @@ const MyPurchases = () => {
                                 </span>
                               )}
                             </div>
+                            
+                            {/* Cancellation info icon - top left */}
+                            {((sale.orderStatus || sale.status || '').toLowerCase() === 'cancelled' || 
+                              (sale.orderStatus || sale.status || '').toLowerCase() === 'failed') && 
+                              sale.cancellationReason && (
+                              <button
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setSelectedCancellationReason({
+                                    reason: sale.cancellationReason,
+                                    cancelledDate: sale.cancelledDate || sale.CancelledDate,
+                                    orderId: sale.orderId || sale.id
+                                  });
+                                  setShowCancellationModal(true);
+                                }}
+                                className="absolute top-3 left-3 bg-red-500 text-white rounded-full p-2 hover:bg-red-600 transition-colors shadow-lg z-10"
+                                title="Xem lý do bị hủy"
+                              >
+                                <Info className="h-5 w-5" />
+                              </button>
+                            )}
                           </div>
                         );
                       }
@@ -915,6 +966,28 @@ const MyPurchases = () => {
                               Đã bán
                             </span>
                           </div>
+                          
+                          {/* Cancellation info icon - top left */}
+                          {((sale.orderStatus || sale.status || '').toLowerCase() === 'cancelled' || 
+                            (sale.orderStatus || sale.status || '').toLowerCase() === 'failed') && 
+                            sale.cancellationReason && (
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setSelectedCancellationReason({
+                                  reason: sale.cancellationReason,
+                                  cancelledDate: sale.cancelledDate || sale.CancelledDate,
+                                  orderId: sale.orderId || sale.id
+                                });
+                                setShowCancellationModal(true);
+                              }}
+                              className="absolute top-3 left-3 bg-red-500 text-white rounded-full p-2 hover:bg-red-600 transition-colors shadow-lg z-10"
+                              title="Xem lý do bị hủy"
+                            >
+                              <Info className="h-5 w-5" />
+                            </button>
+                          )}
                         </div>
                       );
                     })()}
@@ -951,26 +1024,6 @@ const MyPurchases = () => {
                         )}
                         <p>Người mua: {sale.buyerName || 'N/A'}</p>
                       </div>
-                      
-                      {/* Show Cancellation Reason if order is cancelled */}
-                      {((sale.orderStatus || sale.status || '').toLowerCase() === 'cancelled' || 
-                        (sale.orderStatus || sale.status || '').toLowerCase() === 'failed') && 
-                        sale.cancellationReason && (
-                        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mt-4">
-                          <div className="flex items-start space-x-2">
-                            <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
-                            <div className="flex-1">
-                              <h4 className="font-semibold text-red-900 mb-1">Giao dịch đã bị hủy</h4>
-                              <p className="text-sm text-red-800 mb-1">
-                                <span className="font-medium">Lý do:</span> {sale.cancellationReason}
-                              </p>
-                              <p className="text-xs text-red-600 mt-2">
-                                Đơn hàng này đã bị admin hủy. Sản phẩm đã được trả về trang chủ.
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      )}
                       
                       <div className="flex space-x-2">
                         <Link
@@ -1068,6 +1121,62 @@ const MyPurchases = () => {
                   className="flex-1 bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors"
                 >
                   Gửi đánh giá
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Cancellation Reason Modal */}
+        {showCancellationModal && selectedCancellationReason && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black bg-opacity-40" onClick={() => setShowCancellationModal(false)}></div>
+            <div className="relative bg-white rounded-xl shadow-xl max-w-md w-full p-6 z-10">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <XCircle className="h-5 w-5 text-red-600" />
+                  Lý do hủy giao dịch
+                </h3>
+                <button
+                  onClick={() => setShowCancellationModal(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                <div className="flex items-start space-x-2">
+                  <AlertCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-red-900 mb-2">Giao dịch đã bị hủy</h4>
+                    <p className="text-sm text-red-800 mb-1">
+                      <span className="font-medium">Lý do:</span>
+                    </p>
+                    <p className="text-sm text-red-700 mb-3 whitespace-pre-wrap">
+                      {selectedCancellationReason.reason}
+                    </p>
+                    {selectedCancellationReason.cancelledDate && (
+                      <p className="text-xs text-red-600">
+                        Ngày hủy: {formatDate(selectedCancellationReason.cancelledDate)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                <p className="text-xs text-blue-800">
+                  <strong>Lưu ý:</strong> Đơn hàng này đã bị admin hủy. Sản phẩm đã được trả về trang chủ.
+                </p>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setShowCancellationModal(false)}
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+                >
+                  Đóng
                 </button>
               </div>
             </div>

@@ -1,7 +1,6 @@
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import {
   Zap,
-  Search,
   Heart,
   User,
   LogOut,
@@ -74,17 +73,6 @@ export const Header = () => {
 
 
           <div className={`flex items-center ${isAdmin ? 'space-x-3' : 'space-x-4'}`}>
-            {!isAdmin && (
-              <Link
-                to="/"
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                title="Tìm kiếm"
-                onClick={handleHomeClick}
-              >
-                <Search className="h-5 w-5 text-gray-600" />
-              </Link>
-            )}
-
             {user ? (
               <>
                 {!isAdmin && (
@@ -98,7 +86,7 @@ export const Header = () => {
                   </Link>
                 )}
 
-                <NotificationBell />
+                {!isAdmin && <NotificationBell />}
 
                 {!isAdmin && <ChatBell />}
 

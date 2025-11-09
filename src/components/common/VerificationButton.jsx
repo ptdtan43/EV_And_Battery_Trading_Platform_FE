@@ -36,6 +36,29 @@ export const VerificationButton = ({
     
     setLoading(true);
     try {
+      // If status is Rejected, request re-verification for free (no payment)
+      if (status === 'Rejected') {
+        console.log('🔄 Requesting free re-verification for rejected product:', productId);
+        
+        // Import requestVerification function
+        const { requestVerification } = await import('../../lib/verificationApi');
+        
+        // Request verification directly without payment
+        await requestVerification(productId);
+        
+        // Update local status
+        setStatus('Requested');
+        
+        show({
+          title: '✅ Yêu cầu kiểm định lại thành công',
+          description: 'Yêu cầu kiểm định lại đã được gửi miễn phí. Admin sẽ xem xét và kiểm định lại sản phẩm của bạn.',
+          type: 'success',
+        });
+        
+        return;
+      }
+      
+      // For new verification requests, require payment
       console.log('🔍 Creating verification payment for product:', productId);
       
       // Create payment for verification (dynamic fee from API)
@@ -149,8 +172,8 @@ export const VerificationButton = ({
           icon: <XCircle className="h-4 w-4" />,
           text: 'Từ chối kiểm định',
           color: 'bg-red-100 text-red-800 border-red-200',
-          buttonText: 'Yêu cầu lại kiểm định',
-          buttonColor: 'bg-red-500 hover:bg-red-600',
+          buttonText: 'Yêu cầu lại kiểm định (Miễn phí)',
+          buttonColor: 'bg-green-500 hover:bg-green-600',
           disabled: false
         };
       default:
