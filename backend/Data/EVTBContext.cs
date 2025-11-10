@@ -110,6 +110,7 @@ namespace EVTB_Backend.Data
                 entity.Property(e => e.ProductType).HasMaxLength(50);
                 entity.Property(e => e.VehicleType).HasMaxLength(50);
                 entity.Property(e => e.LicensePlate).HasMaxLength(20);
+                entity.Property(e => e.WarrantyPeriod).HasMaxLength(100);
                 entity.Property(e => e.BatteryType).HasMaxLength(50);
                 entity.Property(e => e.BatteryHealth).HasMaxLength(50);
                 entity.Property(e => e.Capacity).HasMaxLength(50);

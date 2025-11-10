@@ -784,9 +784,6 @@ export const ProductDetail = () => {
               >
                 <ArrowLeft className="h-5 w-5" />
               </button>
-              <h1 className="text-xl font-semibold text-gray-900">
-                Chi tiết sản phẩm
-              </h1>
             </div>
 
             <div className="flex items-center space-x-2">

@@ -1399,6 +1399,7 @@ export const AdminDashboard = () => {
             })(),
             productType: norm(item.productType || item.type || item.category || "vehicle"),
             licensePlate: item.licensePlate || item.plateNumber || item.registrationNumber || "N/A",
+            warrantyPeriod: item.warrantyPeriod || item.warranty_period || item.WarrantyPeriod || "",
             mileage: item.mileage || item.odometer || item.distance || "N/A",
             fuelType: item.fuelType || item.energyType || item.powerSource || "N/A",
             transmission: item.transmission || item.gearbox || "N/A",
@@ -3672,6 +3673,10 @@ export const AdminDashboard = () => {
                               <div>
                                     <p className="text-sm text-gray-500">Tình trạng</p>
                                     <p className="font-medium">{product.condition}</p>
+                              </div>
+                              <div>
+                                    <p className="text-sm text-gray-500">Thời hạn bảo hành</p>
+                                    <p className="font-medium">{product.warrantyPeriod || "Chưa cập nhật"}</p>
                               </div>
                             </div>
                               </>

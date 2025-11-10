@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Upload, X } from "lucide-react";
+import { useNavigate, Link } from "react-router-dom";
+import { ArrowLeft, Upload, X, AlertTriangle, ExternalLink } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { apiRequest } from "../lib/api";
 import { useToast } from "../contexts/ToastContext";
 import { notifyPostCreated } from "../lib/notificationApi";
+import { ReportModal } from "../components/common/ReportModal";
 import {
   addWatermarkToImages,
   shouldWatermarkImage,
@@ -13,6 +14,48 @@ import {
   formatVietnamesePrice,
   parsePriceValue,
 } from "../utils/priceFormatter";
+
+// Mapping giữa các hãng xe và model tương ứng
+const brandModelMapping = {
+  VinFast: ["VF5", "VF6", "VF7", "VF8", "VF9", "VF e34", "VF e35", "VF e36"],
+  Tesla: ["Model S", "Model 3", "Model X", "Model Y", "Cybertruck", "Roadster"],
+  BMW: ["iX", "iX3", "i4", "iX1", "i7", "i5"],
+  Mercedes: ["EQC", "EQS", "EQE", "EQA", "EQB", "EQV", "EQS SUV"],
+  Audi: ["e-tron", "e-tron GT", "Q4 e-tron", "Q8 e-tron", "e-tron Sportback"],
+  Porsche: ["Taycan", "Macan Electric"],
+  Hyundai: ["IONIQ 5", "IONIQ 6", "Kona Electric"],
+  Kia: ["EV6", "EV9", "Niro EV", "Soul EV"],
+  Toyota: ["bZ4X", "bZ3"],
+  Honda: ["e", "Prologue"],
+  Ford: ["Mustang Mach-E", "F-150 Lightning", "E-Transit"],
+  Chevrolet: ["Bolt EV", "Bolt EUV", "Silverado EV", "Blazer EV", "Equinox EV"],
+  Nissan: ["Leaf", "Ariya"],
+  Mazda: ["MX-30"],
+  Subaru: ["Solterra"],
+  Volkswagen: ["ID.3", "ID.4", "ID.5", "ID.6", "ID.7", "ID.Buzz"],
+  Volvo: ["XC40 Recharge", "C40 Recharge", "EX30", "EX90"],
+  Lexus: ["RZ 450e", "UX 300e"],
+  Infiniti: ["QX Inspiration"],
+  Acura: ["ZDX"],
+  Genesis: ["GV60", "Electrified GV70", "Electrified G80"],
+  Cadillac: ["Lyriq", "Celestiq"],
+  Lincoln: ["Aviator Grand Touring"],
+  Buick: ["Electra"],
+  Chrysler: ["Airflow"],
+  Dodge: ["Charger Daytona"],
+  Jeep: ["Wagoneer S", "Recon"],
+  Ram: ["1500 REV"],
+  GMC: ["Hummer EV", "Sierra EV", "Equinox EV"],
+  Other: [] // Cho phép nhập tự do nếu chọn "Khác"
+};
+
+// Function để lấy danh sách model dựa trên brand
+const getModelsByBrand = (brand) => {
+  if (!brand || brand === "Other") {
+    return [];
+  }
+  return brandModelMapping[brand] || [];
+};
 
 export const CreateListing = () => {
   const { user, profile } = useAuth();
@@ -60,11 +103,12 @@ export const CreateListing = () => {
     color: "",
     fuelType: "",
 
-    condition: "excellent",
+    condition: "",
     productType: "vehicle",
     // Vehicle specific fields
     vehicleType: "",
     manufactureYear: "",
+    warrantyPeriod: "",
     // Battery specific fields
     batteryType: "",
     batteryHealth: "",
@@ -75,6 +119,82 @@ export const CreateListing = () => {
     cycleCount: "",
   });
   const [displayPrice, setDisplayPrice] = useState("");
+  const [duplicateProducts, setDuplicateProducts] = useState([]);
+  const [checkingDuplicate, setCheckingDuplicate] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [selectedProductForReport, setSelectedProductForReport] = useState(null);
+  const duplicateCheckTimeoutRef = useRef(null);
+
+  // Function để check duplicate license plate
+  const checkDuplicateLicensePlate = async (licensePlate) => {
+    if (!licensePlate || licensePlate.trim() === "") {
+      setDuplicateProducts([]);
+      return;
+    }
+
+    // Validate format trước
+    const licensePlateRegex = /^[0-9]{2}[A-Z]-[0-9]{5}$/;
+    if (!licensePlateRegex.test(licensePlate.trim())) {
+      setDuplicateProducts([]);
+      return;
+    }
+
+    setCheckingDuplicate(true);
+    try {
+      const allProducts = await apiRequest("/api/Product");
+      const productsArray = Array.isArray(allProducts) ? allProducts : [];
+      
+      // Tìm products có cùng license plate (case-insensitive) và chỉ lấy những sản phẩm đang hiển thị trên HomePage
+      const duplicates = productsArray.filter((product) => {
+        const productLicensePlate = (product.licensePlate || product.LicensePlate || "").trim().toUpperCase();
+        const inputLicensePlate = licensePlate.trim().toUpperCase();
+        const productStatus = String(product.status || product.Status || "").toLowerCase().trim();
+        
+        // Áp dụng logic filter giống HomePage: chỉ hiển thị những sản phẩm approved/active/verified và không phải sold/rejected/reserved
+        const isApproved = productStatus === "approved" || productStatus === "active" || productStatus === "verified";
+        const isNotSold = productStatus !== "sold";
+        const isNotRejected = productStatus !== "rejected";
+        const isNotReserved = productStatus !== "reserved";
+        const shouldShow = isApproved && isNotSold && isNotRejected && isNotReserved;
+        
+        // Chỉ lấy những sản phẩm có cùng biển số và đang hiển thị trên HomePage
+        return (
+          productLicensePlate === inputLicensePlate && 
+          productLicensePlate !== "" &&
+          shouldShow
+        );
+      });
+
+      setDuplicateProducts(duplicates);
+      console.log("🔍 Duplicate license plates found:", duplicates);
+    } catch (error) {
+      console.error("❌ Error checking duplicate license plate:", error);
+      setDuplicateProducts([]);
+    } finally {
+      setCheckingDuplicate(false);
+    }
+  };
+
+  // Debounce check duplicate khi licensePlate thay đổi
+  useEffect(() => {
+    if (duplicateCheckTimeoutRef.current) {
+      clearTimeout(duplicateCheckTimeoutRef.current);
+    }
+
+    if (formData.licensePlate && formData.productType === "vehicle") {
+      duplicateCheckTimeoutRef.current = setTimeout(() => {
+        checkDuplicateLicensePlate(formData.licensePlate);
+      }, 500); // Debounce 500ms
+    } else {
+      setDuplicateProducts([]);
+    }
+
+    return () => {
+      if (duplicateCheckTimeoutRef.current) {
+        clearTimeout(duplicateCheckTimeoutRef.current);
+      }
+    };
+  }, [formData.licensePlate, formData.productType]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -89,6 +209,17 @@ export const CreateListing = () => {
       setFormData({
         ...formData,
         [name]: numericPrice,
+      });
+    } else if (name === "brand") {
+      // Khi brand thay đổi, reset model nếu model hiện tại không thuộc brand mới
+      const newModels = getModelsByBrand(value);
+      const currentModel = formData.model;
+      const shouldResetModel = value && value !== "Other" && !newModels.includes(currentModel);
+      
+      setFormData({
+        ...formData,
+        brand: value,
+        model: shouldResetModel ? "" : formData.model,
       });
     } else if (type === "checkbox") {
       setFormData({
@@ -477,6 +608,7 @@ export const CreateListing = () => {
               : 0
             : 0,
         licensePlate: formData.licensePlate || "string",
+        warrantyPeriod: formData.productType === "vehicle" ? (formData.warrantyPeriod || "") : "",
         // Battery fields (will be null/0 for vehicles)
         batteryHealth:
           formData.productType === "battery"
@@ -875,10 +1007,11 @@ export const CreateListing = () => {
         mileage: "",
         color: "",
         fuelType: "",
-        condition: "excellent",
+        condition: "",
         productType: "vehicle",
         vehicleType: "",
         manufactureYear: "",
+        warrantyPeriod: "",
         batteryHealth: "",
         batteryType: "",
         capacity: "",
@@ -1111,15 +1244,33 @@ export const CreateListing = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Model * <span className="text-red-500">(Bắt buộc)</span>
                   </label>
-                  <input
-                    type="text"
-                    name="model"
-                    value={formData.model}
-                    onChange={handleChange}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Ví dụ: VF8, Model 3, iX3"
-                    required
-                  />
+                  {formData.brand && formData.brand !== "Other" && getModelsByBrand(formData.brand).length > 0 ? (
+                    <select
+                      name="model"
+                      value={formData.model}
+                      onChange={handleChange}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      required
+                    >
+                      <option value="">Chọn model</option>
+                      {getModelsByBrand(formData.brand).map((model) => (
+                        <option key={model} value={model}>
+                          {model}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      name="model"
+                      value={formData.model}
+                      onChange={handleChange}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder={formData.brand === "Other" ? "Nhập model xe" : "Chọn hãng xe trước"}
+                      required
+                      disabled={!formData.brand || (formData.brand !== "Other" && getModelsByBrand(formData.brand).length > 0)}
+                    />
+                  )}
                 </div>
 
                 <div>
@@ -1142,17 +1293,14 @@ export const CreateListing = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Tình trạng
                 </label>
-                <select
+                <input
+                  type="text"
                   name="condition"
                   value={formData.condition}
                   onChange={handleChange}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="excellent">Xuất sắc</option>
-                  <option value="good">Tốt</option>
-                  <option value="fair">Khá</option>
-                  <option value="poor">Kém</option>
-                </select>
+                  placeholder="Ví dụ: Xe mới 99%, Xuất sắc, Tốt..."
+                />
               </div>
             </div>
 
@@ -1242,7 +1390,11 @@ export const CreateListing = () => {
                     name="licensePlate"
                     value={formData.licensePlate}
                     onChange={handleChange}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                      duplicateProducts.length > 0
+                        ? "border-red-500 focus:ring-red-500"
+                        : "border-gray-300"
+                    }`}
                     placeholder="VD: 30A-12345"
                     pattern="[0-9]{2}[A-Z]-[0-9]{5}"
                     title="Định dạng: 30A-12345 (2 số + 1 chữ cái + 5 số)"
@@ -1250,6 +1402,92 @@ export const CreateListing = () => {
                   />
                   <p className="text-xs text-gray-500 mt-1">
                     Định dạng: 30A-12345 (2 số + 1 chữ cái + 5 số)
+                  </p>
+                  
+                  {/* Loading indicator */}
+                  {checkingDuplicate && (
+                    <p className="text-xs text-blue-500 mt-1">
+                      🔍 Đang kiểm tra biển số...
+                    </p>
+                  )}
+
+                  {/* Duplicate warning */}
+                  {duplicateProducts.length > 0 && !checkingDuplicate && (
+                    <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-red-800 mb-2">
+                            ⚠️ Biển số này đã được sử dụng!
+                          </p>
+                          <p className="text-xs text-red-700 mb-3">
+                            Phát hiện {duplicateProducts.length} tin đăng khác sử dụng biển số này. 
+                            Nếu đây là biển số giả, vui lòng báo cáo.
+                          </p>
+                          
+                          {/* List of duplicate products */}
+                          <div className="space-y-2 mb-3">
+                            {duplicateProducts.map((product) => {
+                              const productId = product.productId || product.id || product.ProductId || product.Id;
+                              const productTitle = product.title || product.Title || "Không có tiêu đề";
+                              const productBrand = product.brand || product.Brand || "";
+                              const productModel = product.model || product.Model || "";
+                              
+                              return (
+                                <div
+                                  key={productId}
+                                  className="p-2 bg-white rounded border border-red-200"
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex-1 min-w-0">
+                                      <Link
+                                        to={`/product/${productId}`}
+                                        target="_blank"
+                                        className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                                      >
+                                        {productTitle}
+                                        {productBrand && productModel && (
+                                          <span className="text-gray-500 text-xs">
+                                            {" "}({productBrand} {productModel})
+                                          </span>
+                                        )}
+                                      </Link>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedProductForReport(product);
+                                        setShowReportModal(true);
+                                      }}
+                                      className="px-3 py-1 text-xs font-medium text-red-700 bg-red-100 hover:bg-red-200 rounded border border-red-300 transition-colors"
+                                    >
+                                      Báo cáo
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Thời hạn bảo hành
+                  </label>
+                  <input
+                    type="text"
+                    name="warrantyPeriod"
+                    value={formData.warrantyPeriod}
+                    onChange={handleChange}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="VD: 6 tháng, 1 năm, 2 năm..."
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Ví dụ: 6 tháng, 1 năm, 2 năm, hoặc "Còn bảo hành đến 12/2025"
                   </p>
                 </div>
               </div>
@@ -1531,6 +1769,18 @@ export const CreateListing = () => {
           </div>
         </form>
       </div>
+
+      {/* Report Modal for duplicate license plates */}
+      {selectedProductForReport && (
+        <ReportModal
+          isOpen={showReportModal}
+          onClose={() => {
+            setShowReportModal(false);
+            setSelectedProductForReport(null);
+          }}
+          product={selectedProductForReport}
+        />
+      )}
     </div>
   );
 };

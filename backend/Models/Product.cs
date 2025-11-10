@@ -46,6 +46,9 @@ namespace EVTB_Backend.Models
         [MaxLength(20)]
         public string? LicensePlate { get; set; }
 
+        [MaxLength(100)]
+        public string? WarrantyPeriod { get; set; }
+
         // Battery specific fields
         [MaxLength(50)]
         public string? BatteryType { get; set; }
