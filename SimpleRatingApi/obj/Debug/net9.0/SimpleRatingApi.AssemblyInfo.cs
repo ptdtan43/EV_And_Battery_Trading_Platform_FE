@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SimpleRatingApi")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+455ea28bf46df0b4a1364c95acc2e19f02e1eebb")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+1a9a6b7dac0e4c76d4fcdfb302c3657453d1d11f")]
 [assembly: System.Reflection.AssemblyProductAttribute("SimpleRatingApi")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SimpleRatingApi")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
