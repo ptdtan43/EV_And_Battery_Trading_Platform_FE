@@ -735,3 +735,132 @@
     height: 1rem;
   }
 }
+
+/* Pagination Styles */
+.mylistings-pagination {
+  margin-top: 2rem;
+  margin-bottom: 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.5rem;
+  background-color: white;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.mylistings-pagination-info {
+  width: 100%;
+  text-align: center;
+}
+
+.mylistings-pagination-text {
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.mylistings-pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.mylistings-pagination-button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  color: #374151;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mylistings-pagination-button:hover:not(.mylistings-pagination-button-disabled) {
+  background-color: #f3f4f6;
+  border-color: #d1d5db;
+  color: #111827;
+}
+
+.mylistings-pagination-button-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mylistings-pagination-numbers {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.mylistings-pagination-number {
+  min-width: 2.5rem;
+  height: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  color: #374151;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mylistings-pagination-number:hover:not(.mylistings-pagination-number-active) {
+  background-color: #f3f4f6;
+  border-color: #d1d5db;
+  color: #111827;
+}
+
+.mylistings-pagination-number-active {
+  background-color: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.mylistings-pagination-number-active:hover {
+  background-color: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.mylistings-pagination-ellipsis {
+  padding: 0.5rem;
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+/* Responsive Pagination */
+@media (max-width: 640px) {
+  .mylistings-pagination {
+    flex-direction: column;
+    padding: 1rem;
+  }
+
+  .mylistings-pagination-controls {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .mylistings-pagination-button {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.75rem;
+  }
+
+  .mylistings-pagination-number {
+    min-width: 2rem;
+    height: 2rem;
+    font-size: 0.75rem;
+  }
+}

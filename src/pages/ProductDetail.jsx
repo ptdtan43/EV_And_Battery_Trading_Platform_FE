@@ -25,6 +25,7 @@ import {
   Clock,
   Flag,
   AlertCircle,
+  AlertTriangle,
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
 import { createOrder } from "../lib/orderApi";
@@ -189,19 +190,27 @@ export const ProductDetail = () => {
         price: productData.price || 0,
         images: productData.imageUrls || productData.images || [],
         status: productData.status || "Available",
+        // Normalize productType (handle both "Vehicle" and "vehicle")
+        productType: productData.productType || productData.product_type || productData.ProductType || "Vehicle",
+        // Normalize verificationStatus (handle various formats)
+        verificationStatus: productData.verificationStatus || productData.verification_status || productData.VerificationStatus || "NotRequested",
       };
 
       console.log("[ProductDetail] Raw product data:", productData);
       console.log("[ProductDetail] Normalized product:", normalizedProduct);
 
       // ✅ FIX: Check status but don't return early - still need to load images and seller info
+      // Normalize status to consistent format (case-insensitive)
       const productStatus = String(normalizedProduct.status || "").toLowerCase();
       if (productStatus === "sold") {
         console.log("[ProductDetail] Product is sold, but still loading full details");
-        normalizedProduct.status = "Sold";
+        normalizedProduct.status = "sold"; // Use lowercase consistently
       } else if (productStatus === "reserved") {
         console.log("[ProductDetail] Product is reserved, but still loading full details");
-        normalizedProduct.status = "Reserved";
+        normalizedProduct.status = "reserved"; // Use lowercase consistently
+      } else {
+        // Normalize other statuses to lowercase for consistency
+        normalizedProduct.status = productStatus;
       }
 
       setProduct(normalizedProduct);
@@ -527,6 +536,19 @@ export const ProductDetail = () => {
     }
   }, [product?.id, product?.price, product?.productType]);
 
+  // ✅ Also reload deposit amount when payment modal opens (to get latest fee)
+  useEffect(() => {
+    if (showPaymentModal && product) {
+      const loadDeposit = async () => {
+        // Clear cache to ensure we get latest fee settings
+        feeService.clearCache();
+        const amount = await calculateDepositAmount();
+        setDepositAmount(amount);
+      };
+      loadDeposit();
+    }
+  }, [showPaymentModal]);
+
   // Handle payment deposit
   const onPayDeposit = async () => {
     if (paying) return;
@@ -762,9 +784,6 @@ export const ProductDetail = () => {
               >
                 <ArrowLeft className="h-5 w-5" />
               </button>
-              <h1 className="text-xl font-semibold text-gray-900">
-                Chi tiết sản phẩm
-              </h1>
             </div>
 
             <div className="flex items-center space-x-2">
@@ -927,6 +946,39 @@ export const ProductDetail = () => {
                     )}
                   </div>
 
+                  {/* Rejection Message */}
+                  {product.verificationStatus === "Rejected" && (
+                    <div className="mb-4 p-4 bg-red-50 border-2 border-red-300 rounded-lg shadow-sm">
+                      <div className="flex items-start">
+                        <AlertTriangle className="h-6 w-6 text-red-600 mt-0.5 mr-3 flex-shrink-0" />
+                        <div className="flex-1">
+                          <p className="text-base font-semibold text-red-900 mb-2">
+                            ⚠️ Bạn đã bị admin từ chối kiểm định
+                          </p>
+                          {(product.verificationNotes || product.rejectionReason) && (
+                            <div className="mb-3 p-3 bg-white rounded border border-red-200">
+                              <p className="text-sm font-medium text-red-900 mb-1">
+                                📋 Lý do từ chối:
+                              </p>
+                              <p className="text-sm text-red-800 whitespace-pre-wrap">
+                                {product.verificationNotes || product.rejectionReason}
+                              </p>
+                            </div>
+                          )}
+                          <div className="bg-blue-50 border border-blue-200 rounded p-3 mt-3">
+                            <p className="text-sm font-medium text-blue-900 mb-1">
+                              💡 Hướng dẫn:
+                            </p>
+                            <ul className="text-sm text-blue-800 list-disc list-inside space-y-1">
+                              <li>Bạn có thể <strong>cập nhật lại bài viết</strong> để gửi yêu cầu kiểm duyệt lại miễn phí</li>
+                              <li>Hoặc nhấn nút <strong>"Yêu cầu lại kiểm định (Miễn phí)"</strong> bên dưới để gửi yêu cầu ngay</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {(product.productType?.toLowerCase() === 'vehicle') && (
                     <p className="text-gray-600">
                       {product.licensePlate ||
@@ -939,23 +991,28 @@ export const ProductDetail = () => {
                   {(() => {
                     const productStatus = String(product.status || "").toLowerCase();
                     const isSold = productStatus === "sold";
+                    // Check if product is a vehicle (case-insensitive)
+                    const isVehicle = (product.productType || "").toLowerCase() === "vehicle";
+                    // Check verification status (case-insensitive)
+                    const verificationStatus = (product.verificationStatus || "NotRequested").toString();
+                    const isVerified = verificationStatus.toLowerCase() === "verified";
+                    // Check if user is owner
+                    const isOwner = user &&
+                      (user.id || user.userId || user.accountId) ===
+                        (product.sellerId || product.userId);
+                    
                     return (
-                      product.productType === "Vehicle" &&
-                      product.verificationStatus !== "Verified" &&
-                      !isSold && (
+                      isVehicle &&
+                      !isVerified &&
+                      !isSold &&
+                      isOwner && (
                         <div className="mt-4">
                           <VerificationButton
                             productId={
                               product.id || product.productId || product.Id
                             }
-                            currentStatus={
-                              product.verificationStatus || "NotRequested"
-                            }
-                            isOwner={
-                              user &&
-                              (user.id || user.userId || user.accountId) ===
-                                (product.sellerId || product.userId)
-                            }
+                            currentStatus={verificationStatus}
+                            isOwner={true}
                             disabled={loading}
                           />
                         </div>
@@ -973,22 +1030,30 @@ export const ProductDetail = () => {
 
               {/* Status Badge */}
               <div className="mb-4">
-                {product.status === "approved" && (
-                  <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
-                    <CheckCircle className="h-4 w-4 mr-1" />
-                    Đã duyệt
-                  </span>
-                )}
-                {product.status === "sold" && (
-                  <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
-                    Đã bán
-                  </span>
-                )}
-                {product.is_auction && (
-                  <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
-                    Đấu giá
-                  </span>
-                )}
+                {(() => {
+                  const status = String(product.status || "").toLowerCase();
+                  return (
+                    <>
+                      {status === "approved" && (
+                        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                          <CheckCircle className="h-4 w-4 mr-1" />
+                          Đã duyệt
+                        </span>
+                      )}
+                      {status === "sold" && (
+                        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+                          <XCircle className="h-4 w-4 mr-1" />
+                          Đã bán
+                        </span>
+                      )}
+                      {product.is_auction && (
+                        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
+                          Đấu giá
+                        </span>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Key Features */}
@@ -1021,30 +1086,38 @@ export const ProductDetail = () => {
 
               {/* Action Buttons */}
               <div className="space-y-3">
-                {/* Show sold message if product is sold */}
-                {product.status === "Sold" || product.status === "sold" ? (
-                  <div className="w-full bg-red-50 border border-red-200 text-red-800 py-4 px-6 rounded-lg text-center">
-                    <div className="flex items-center justify-center space-x-2 mb-2">
-                      <XCircle className="h-6 w-6" />
-                      <span className="font-semibold text-lg">Sản phẩm đã được bán</span>
-                    </div>
-                    <p className="text-sm">
-                      Sản phẩm này không còn khả dụng.
-                    </p>
-                  </div>
-                ) : product.status === "Reserved" || product.status === "reserved" ? (
-                  <div className="w-full bg-yellow-50 border border-yellow-200 text-yellow-800 py-4 px-6 rounded-lg text-center">
-                    <div className="flex items-center justify-center space-x-2 mb-2">
-                      <Clock className="h-6 w-6" />
-                      <span className="font-semibold text-lg">Sản phẩm đang trong quá trình thanh toán</span>
-                    </div>
-                    <p className="text-sm">
-                      Sản phẩm này đã được khách hàng đặt cọc thành công và đang chờ seller xác nhận.
-                    </p>
-                  </div>
-                ) : (
-                  /* ✅ Only show payment button if user is not the seller */
-                  (() => {
+                {/* Show sold message if product is sold - check case-insensitive */}
+                {(() => {
+                  const productStatus = String(product.status || "").toLowerCase();
+                  const isSold = productStatus === "sold";
+                  const isReserved = productStatus === "reserved";
+                  
+                  if (isSold) {
+                    return (
+                      <div className="w-full bg-red-50 border border-red-200 text-red-800 py-4 px-6 rounded-lg text-center">
+                        <div className="flex items-center justify-center space-x-2 mb-2">
+                          <XCircle className="h-6 w-6" />
+                          <span className="font-semibold text-lg">Sản phẩm đã được bán</span>
+                        </div>
+                        <p className="text-sm">
+                          Sản phẩm này không còn khả dụng.
+                        </p>
+                      </div>
+                    );
+                  } else if (isReserved) {
+                    return (
+                      <div className="w-full bg-yellow-50 border border-yellow-200 text-yellow-800 py-4 px-6 rounded-lg text-center">
+                        <div className="flex items-center justify-center space-x-2 mb-2">
+                          <Clock className="h-6 w-6" />
+                          <span className="font-semibold text-lg">Sản phẩm đang trong quá trình thanh toán</span>
+                        </div>
+                        <p className="text-sm">
+                          Sản phẩm này đã được khách hàng đặt cọc thành công và đang chờ seller xác nhận.
+                        </p>
+                      </div>
+                    );
+                  } else {
+                    /* ✅ Only show payment button if user is not the seller */
                     const currentUserId =
                       user?.id || user?.userId || user?.accountId;
                     const productSellerId =
@@ -1066,15 +1139,15 @@ export const ProductDetail = () => {
                     return (
                       <button
                         onClick={handleCreateOrder}
-                        disabled={product.status === "sold"}
+                        disabled={isSold || isReserved}
                         className="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
                       >
                         <CreditCard className="h-5 w-5 mr-2" />
                         Tạo đơn hàng
                       </button>
                     );
-                  })()
-                )}
+                  }
+                })()}
 
                 {/* ✅ Only show contact button if user is not the seller */}
                 {(() => {
@@ -1371,12 +1444,41 @@ export const ProductDetail = () => {
                 An toàn & Tin cậy
               </h3>
               <div className="space-y-3">
-                <div className="flex items-center">
-                  <Shield className="h-5 w-5 text-green-600 mr-3" />
-                  <span className="text-sm text-gray-700">
-                    Sản phẩm đã được kiểm duyệt
-                  </span>
-                </div>
+                {/* Show verification status dynamically */}
+                {product?.verificationStatus && (product.verificationStatus.toString().toLowerCase() === "verified") ? (
+                  <div className="flex items-center">
+                    <Shield className="h-5 w-5 text-green-600 mr-3" />
+                    <span className="text-sm text-gray-700">
+                      Sản phẩm đã được kiểm định
+                    </span>
+                  </div>
+                ) : (
+                  // Show verification button for vehicle owners if not verified
+                  (() => {
+                    const isVehicle = (product?.productType || "").toLowerCase() === "vehicle";
+                    const isOwner = user &&
+                      (user.id || user.userId || user.accountId) ===
+                        (product?.sellerId || product?.userId);
+                    const verificationStatus = (product?.verificationStatus || "NotRequested").toString().toLowerCase();
+                    const isVerified = verificationStatus === "verified";
+                    const productStatus = String(product?.status || "").toLowerCase();
+                    const isSold = productStatus === "sold";
+                    
+                    if (isVehicle && !isVerified && !isSold && isOwner) {
+                      return (
+                        <div className="border-t pt-3 mt-3">
+                          <VerificationButton
+                            productId={product?.id || product?.productId || product?.Id}
+                            currentStatus={product?.verificationStatus || "NotRequested"}
+                            isOwner={true}
+                            disabled={loading}
+                          />
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()
+                )}
                 <div className="flex items-center">
                   <CheckCircle className="h-5 w-5 text-green-600 mr-3" />
                   <span className="text-sm text-gray-700">

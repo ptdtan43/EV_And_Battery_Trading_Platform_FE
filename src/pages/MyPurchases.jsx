@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Clock, Package, Star, CheckCircle, Eye, MessageSquare, XCircle, AlertCircle, ShoppingCart, Store } from 'lucide-react';
+import { Clock, Package, Star, CheckCircle, Eye, MessageSquare, XCircle, AlertCircle, ShoppingCart, Store, Info, X } from 'lucide-react';
 import { apiRequest } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -20,6 +20,8 @@ const MyPurchases = () => {
     rating: 5,
     comment: ''
   });
+  const [showCancellationModal, setShowCancellationModal] = useState(false);
+  const [selectedCancellationReason, setSelectedCancellationReason] = useState(null);
 
   useEffect(() => {
     if (user) {
@@ -104,9 +106,8 @@ const MyPurchases = () => {
         });
       });
       
-      // Filter to show orders that buyer has deposited, completed, or rejected
-      // Logic: "Đơn mua" quản lý các đơn hàng đã đặt cọc để buyer theo dõi
-      // Khi admin xét duyệt: thành công → "đã mua", từ chối → "đã bị từ chối"
+      // ✅ FIX: Backend /api/Order/buyer already filters by userId, so we should include ALL orders returned
+      // Only filter out orders that are truly invalid (no productId at all)
       const buyerOrders = orders.filter(order => {
         const orderStatus = (order.status || order.Status || order.orderStatus || order.OrderStatus || '').toLowerCase();
         const depositStatus = (order.depositStatus || order.DepositStatus || '').toLowerCase();
@@ -114,66 +115,28 @@ const MyPurchases = () => {
         
         console.log(`🔍 Order ${order.orderId || order.OrderId} - Order status: ${orderStatus}, Deposit status: ${depositStatus}, Product status: ${productStatus}`);
         
-        // Check if this order has valid productId
-        // Backend returns: Product.ProductId (camelCase: product.productId)
-        const productId = order.product?.productId || order.product?.ProductId || order.product?.id || order.productId || order.ProductId;
-        const hasValidProductId = productId && productId !== null && productId !== undefined;
+        // ✅ FIX: Accept productId from multiple sources (product object OR direct field)
+        // Backend may return productId directly OR in product object
+        const productId = order.product?.productId || 
+                         order.product?.ProductId || 
+                         order.product?.id || 
+                         order.productId || 
+                         order.ProductId ||
+                         order.product_id ||
+                         order.Product_ID;
         
-        if (!hasValidProductId) {
-          console.log(`❌ Order ${order.orderId || order.OrderId} has invalid productId: ${productId}`);
+        // ✅ FIX: Only exclude if truly no productId (but be lenient - some orders might still be valid)
+        // If order has orderId, it's probably valid even without productId (we'll try to fetch later)
+        if (!productId && !order.orderId && !order.OrderId) {
+          console.log(`❌ Order has no productId and no orderId, excluding:`, order);
           return false;
         }
         
-        // Check if this order belongs to current user
-        // Backend returns: BuyerId (camelCase: buyerId)
-        const orderBuyerId = order.buyerId || order.BuyerId || order.userId || order.UserId;
-        const isCurrentUserOrder = orderBuyerId == userId || orderBuyerId === userId || parseInt(orderBuyerId) === parseInt(userId);
-        
-        if (!isCurrentUserOrder) {
-          return false;
-        }
-        
-        // Show orders that are pending (buyer đang trong quá trình đặt cọc - chưa thanh toán cọc)
-        // Backend returns: DepositStatus = "Unpaid" for unpaid deposits
-        // NOTE: Order status may still be "Pending" even after successful deposit payment
-        const isPending = orderStatus === 'pending' && 
-                         (depositStatus === 'pending' || depositStatus === 'unpaid' || depositStatus === '' || !depositStatus);
-        
-        // Show orders that have been successfully deposited (đã đặt cọc thành công)
-        // Backend PaymentController updates after successful deposit payment:
-        // - Order.Status = "Deposited"
-        // - Order.DepositStatus = "Paid"
-        // - Product.Status = "Reserved"
-        const productIsReserved = productStatus === 'reserved';
-        const isDeposited = orderStatus === 'deposited' || 
-                           orderStatus === 'depositpaid' || 
-                           orderStatus === 'deposit_paid' ||
-                           depositStatus === 'paid' ||
-                           depositStatus === 'succeeded' ||
-                           productIsReserved; // ✅ Fallback: Nếu product đã Reserved thì đã đặt cọc thành công
-        
-        // Show completed orders (admin confirmed success - đã mua thành công)
-        const isCompleted = orderStatus === 'completed' || 
-                           productStatus === 'sold' || 
-                           productStatus === 'completed';
-        
-        // Show cancelled/rejected orders (admin rejected - đã bị từ chối)
-        // Buyer cần biết lý do từ chối để theo dõi
-        const isRejected = orderStatus === 'cancelled' || 
-                          orderStatus === 'failed' ||
-                          orderStatus === 'rejected';
-        
-        // Include if: has valid productId AND (is pending OR is deposited OR is completed OR is rejected)
-        // Hiển thị cả pending orders (đang đặt cọc) và rejected orders (để buyer biết lý do từ chối)
-        const shouldInclude = hasValidProductId && isCurrentUserOrder && (isPending || isDeposited || isCompleted || isRejected);
-        
-        if (shouldInclude) {
-          console.log(`✅ Including order ${order.orderId || order.OrderId} - Order: ${orderStatus}, Deposit: ${depositStatus}, Product: ${productStatus}, ProductReserved: ${productIsReserved}, Pending: ${isPending}, Deposited: ${isDeposited}, Completed: ${isCompleted}, Rejected: ${isRejected}`);
-        } else {
-          console.log(`❌ Excluding order ${order.orderId || order.OrderId} - Order: ${orderStatus}, Deposit: ${depositStatus}, Product: ${productStatus}, ProductReserved: ${productIsReserved}`);
-        }
-        
-        return shouldInclude;
+        // ✅ FIX: Include ALL orders from API (backend already filtered by userId)
+        // Don't filter by status - show all orders (pending, deposited, completed, rejected, etc.)
+        // The status filtering was too strict and was excluding valid orders
+        console.log(`✅ Including order ${order.orderId || order.OrderId} - Order: ${orderStatus}, Deposit: ${depositStatus}, Product: ${productStatus}, ProductId: ${productId}`);
+        return true;
       });
       
       console.log(`🔍 Total orders: ${orders.length}, Buyer orders (pending/deposited/completed/rejected): ${buyerOrders.length}`);
@@ -188,49 +151,82 @@ const MyPurchases = () => {
       // Process orders - pending, deposited, completed, and rejected ones
       console.log(`🔍 About to process ${buyerOrders.length} buyer orders (pending/deposited/completed/rejected)`);
       
-      // Fetch images for all products first
-      const purchasesWithDetails = await Promise.all(buyerOrders.map(async (order, index) => {
-        console.log(`🔍 Processing completed order ${index} (OrderId: ${order.orderId}):`, order);
+      // ✅ OPTIMIZED: Extract all productIds first
+      const productIds = [];
+      const orderProductMap = new Map(); // Map order index to productId
+      
+      buyerOrders.forEach((order, index) => {
+        // ✅ FIX: Try multiple sources for productId (same as filter logic)
+        let productId = order.product?.productId || 
+                       order.product?.ProductId || 
+                       order.product?.id || 
+                       order.productId || 
+                       order.ProductId ||
+                       order.product_id ||
+                       order.Product_ID ||
+                       order.itemId || 
+                       order.item_id;
         
-        // Check if product data is already included
-        if (order.product) {
-          console.log(`✅ Order ${index} already has product data:`, order.product);
-          
-          // Extract productId from the product object
-          const productId = order.product?.productId || order.product?.id || order.productId || order.product?.ProductId;
-          
-          // Skip orders with invalid product data
-          if (!productId || productId === null) {
-            console.log(`⚠️ Order ${order.orderId} has invalid productId (${productId}), skipping`);
-            return null;
+        // ✅ FIX: Include order even if no productId (we'll try to fetch product details later)
+        // But still try to batch fetch images for orders that have productId
+        if (productId && productId !== null && productId !== undefined) {
+          // Avoid duplicates
+          if (!productIds.includes(productId)) {
+            productIds.push(productId);
           }
-          
-          // Fetch product details to get latest status (important for completed orders)
-          let productDetails = null;
+          orderProductMap.set(index, productId);
+        } else {
+          // Order without productId - we'll handle it separately
+          console.log(`⚠️ Order ${order.orderId || index} has no productId, will try to fetch product details later`);
+          orderProductMap.set(index, null);
+        }
+      });
+      
+      // ✅ OPTIMIZED: Batch fetch all images at once
+      console.log(`🖼️ Batch fetching images for ${productIds.length} products...`);
+      const imagesMap = await batchFetchProductImages(productIds, 5);
+      console.log(`✅ Batch fetched images for ${imagesMap.size} products`);
+      
+      // ✅ OPTIMIZED: Batch fetch product details in parallel (smaller batches)
+      const productDetailsMap = new Map();
+      const productDetailsPromises = [];
+      const batchSize = 5;
+      
+      for (let i = 0; i < productIds.length; i += batchSize) {
+        const batch = productIds.slice(i, i + batchSize);
+        const batchPromises = batch.map(async (productId) => {
           try {
-            productDetails = await apiRequest(`/api/Product/${productId}`, 'GET');
-            console.log(`✅ Fetched product ${productId} details for buyer order:`, productDetails);
+            const details = await apiRequest(`/api/Product/${productId}`, 'GET');
+            return { productId, details };
           } catch (error) {
             console.log(`⚠️ Failed to fetch product ${productId} details:`, error.message);
-            // Continue with existing product data if fetch fails
+            return { productId, details: null };
           }
-          
-          // Fetch images for this product
-          let productImages = [];
-          if (productId) {
-            try {
-              console.log(`🖼️ Fetching images for product ${productId}...`);
-              const imageResponse = await apiRequest(`/api/ProductImage/product/${productId}`, 'GET');
-              productImages = imageResponse || [];
-              console.log(`🖼️ Product ${productId} images:`, productImages);
-            } catch (error) {
-              console.log(`❌ Failed to fetch images for product ${productId}:`, error.message);
-              productImages = [];
-            }
-          }
-          
-          // Merge product data: prefer fetched productDetails, fallback to order.product
-          const productWithImages = productDetails ? {
+        });
+        productDetailsPromises.push(...batchPromises);
+      }
+      
+      const productDetailsResults = await Promise.all(productDetailsPromises);
+      productDetailsResults.forEach(({ productId, details }) => {
+        if (details) {
+          productDetailsMap.set(productId, details);
+        }
+      });
+      
+      // ✅ OPTIMIZED: Process orders with pre-fetched data
+      const purchasesWithDetails = buyerOrders.map((order, index) => {
+        const productId = orderProductMap.get(index);
+        
+        // ✅ FIX: Don't skip orders without productId - try to use what we have
+        // Get pre-fetched data (if productId exists)
+        const productImages = productId ? (imagesMap.get(productId) || []) : [];
+        const productDetails = productId ? productDetailsMap.get(productId) : null;
+        
+        // ✅ FIX: Merge product data - handle both cases (with and without productId)
+        let productWithImages;
+        if (order.product) {
+          // Order already has product object
+          productWithImages = productDetails ? {
             ...order.product,
             ...productDetails,
             status: productDetails.status || productDetails.Status || order.product?.status || order.product?.Status,
@@ -241,84 +237,46 @@ const MyPurchases = () => {
             images: productImages,
             primaryImage: productImages?.[0] || null
           };
-            
-          return {
-            ...order,
+        } else if (productDetails) {
+          // No product object, but we fetched product details
+          productWithImages = {
+            ...productDetails,
+            images: productImages,
+            primaryImage: productImages?.[0] || null
+          };
+        } else if (productId) {
+          // Have productId but no product details (fetch might have failed)
+          productWithImages = {
             productId: productId,
-            product: productWithImages,
-            sellerId: (() => {
-              const sellerId = order.sellerId || order.seller?.id || order.product?.sellerId || 1;
-              return sellerId;
-            })(),
-            canReview: !order.hasRating && (order.status || order.orderStatus || '').toLowerCase() !== 'cancelled',
-            orderStatus: order.status || order.orderStatus || order.product?.status || 'completed',
-            cancellationReason: order.cancellationReason || order.CancellationReason || null
+            title: order.productTitle || 'Sản phẩm không tìm thấy',
+            images: productImages,
+            primaryImage: productImages?.[0] || null
           };
-        }
-        
-        // Fallback: try to find productId in various field names
-        const productId = order.productId || order.product_id || order.ProductId || order.Product_ID || 
-                         order.itemId || order.item_id;
-        
-        if (!productId) {
-          console.error(`❌ Order ${index} has no product data or productId:`, order);
-          return {
-            ...order,
-            productId: null,
-            product: null,
-            canReview: false,
-            error: 'No product data found',
-            orderStatus: order.status || order.orderStatus || 'Unknown'
+        } else {
+          // No productId and no product object - use minimal data
+          productWithImages = {
+            title: order.productTitle || 'Sản phẩm không tìm thấy',
+            images: [],
+            primaryImage: null
           };
-        }
-        
-        console.log(`✅ Found productId: ${productId} for order ${index}`);
-        
-        // Fetch product details to get latest status
-        let productDetails = null;
-        try {
-          productDetails = await apiRequest(`/api/Product/${productId}`, 'GET');
-          console.log(`✅ Fetched product ${productId} details:`, productDetails);
-        } catch (error) {
-          console.log(`⚠️ Failed to fetch product ${productId} details:`, error.message);
-        }
-        
-        // Fetch images for this product
-        let productImages = [];
-        try {
-          console.log(`🖼️ Fetching images for product ${productId}...`);
-          const imageResponse = await apiRequest(`/api/ProductImage/product/${productId}`, 'GET');
-          productImages = imageResponse || [];
-          console.log(`🖼️ Product ${productId} images:`, productImages);
-        } catch (error) {
-          console.log(`❌ Failed to fetch images for product ${productId}:`, error.message);
-          productImages = [];
         }
         
         return {
           ...order,
-          productId: productId,
-          product: productDetails ? {
-            ...productDetails,
-            images: productImages,
-            primaryImage: productImages?.[0] || null
-          } : {
-            productId: productId,
-            images: productImages,
-            primaryImage: productImages?.[0] || null
-          },
+          productId: productId || order.productId || order.ProductId || null,
+          product: productWithImages,
           sellerId: (() => {
-            const sellerId = order.sellerId || order.seller?.id || order.product?.sellerId || 1;
+            const sellerId = order.sellerId || order.seller?.id || order.product?.sellerId || order.SellerId || 1;
             return sellerId;
           })(),
           canReview: !order.hasRating && (order.status || order.orderStatus || '').toLowerCase() !== 'cancelled',
-          orderStatus: order.status || order.orderStatus || order.product?.status || 'completed',
+          orderStatus: order.status || order.orderStatus || order.OrderStatus || order.product?.status || 'pending',
           cancellationReason: order.cancellationReason || order.CancellationReason || null
         };
-      }));
+      });
       
-      // Filter out null values (orders with invalid productId)
-      const validPurchases = purchasesWithDetails.filter(purchase => purchase !== null);
+      // ✅ FIX: No need to filter null values anymore - we handle all orders now
+      const validPurchases = purchasesWithDetails;
       
       console.log(`🔍 Final purchases count: ${validPurchases.length}`);
       console.log(`🔍 Final purchases details:`, validPurchases.map(p => ({
@@ -414,11 +372,11 @@ const MyPurchases = () => {
       
       console.log(`✅ Processing ${sellerOrdersFiltered.length} seller orders from backend (all statuses)`);
       
-      // ✅ FIX: Backend /api/Order/seller response structure:
-      // { OrderId, TotalAmount, Status, PayoutStatus, CreatedDate, CancellationReason, CancelledDate, BuyerName, Product: { Title, Price } }
-      // Note: Backend doesn't return ProductId, Product.Status, CompletedDate
-      // Workaround: Try to find ProductId from seller's products by matching title
-      const salesWithDetails = await Promise.all(sellerOrdersFiltered.map(async (order) => {
+      // ✅ OPTIMIZED: Extract all productIds first
+      const productIds = [];
+      const orderProductMap = new Map(); // Map order index to productId
+      
+      sellerOrdersFiltered.forEach((order, index) => {
         // Try to get ProductId from order object first
         let productId = order.productId || order.ProductId || order.product?.productId || order.product?.id || order.product?.ProductId;
         
@@ -438,25 +396,50 @@ const MyPurchases = () => {
           }
         }
         
-        // Fetch product details if we have productId
-        let productDetails = null;
-        let productImages = [];
         if (productId) {
+          productIds.push(productId);
+          orderProductMap.set(index, productId);
+        }
+      });
+      
+      // ✅ OPTIMIZED: Batch fetch all images at once
+      console.log(`🖼️ Batch fetching images for ${productIds.length} products...`);
+      const imagesMap = await batchFetchProductImages(productIds, 5);
+      console.log(`✅ Batch fetched images for ${imagesMap.size} products`);
+      
+      // ✅ OPTIMIZED: Batch fetch product details in parallel (smaller batches)
+      const productDetailsMap = new Map();
+      const productDetailsPromises = [];
+      const batchSize = 5;
+      
+      for (let i = 0; i < productIds.length; i += batchSize) {
+        const batch = productIds.slice(i, i + batchSize);
+        const batchPromises = batch.map(async (productId) => {
           try {
-            productDetails = await apiRequest(`/api/Product/${productId}`, 'GET');
-            console.log(`✅ Fetched product ${productId} details:`, productDetails);
+            const details = await apiRequest(`/api/Product/${productId}`, 'GET');
+            return { productId, details };
           } catch (error) {
             console.log(`⚠️ Failed to fetch product ${productId} details:`, error.message);
+            return { productId, details: null };
           }
-          
-          try {
-            const imageResponse = await apiRequest(`/api/ProductImage/product/${productId}`, 'GET');
-            productImages = imageResponse || [];
-          } catch (error) {
-            console.log(`❌ Failed to fetch images for product ${productId}:`, error.message);
-            productImages = [];
-          }
+        });
+        productDetailsPromises.push(...batchPromises);
+      }
+      
+      const productDetailsResults = await Promise.all(productDetailsPromises);
+      productDetailsResults.forEach(({ productId, details }) => {
+        if (details) {
+          productDetailsMap.set(productId, details);
         }
+      });
+      
+      // ✅ OPTIMIZED: Process orders with pre-fetched data
+      const salesWithDetails = sellerOrdersFiltered.map((order, index) => {
+        const productId = orderProductMap.get(index);
+        
+        // Get pre-fetched data
+        const productImages = productId ? (imagesMap.get(productId) || []) : [];
+        const productDetails = productId ? productDetailsMap.get(productId) : null;
         
         // Merge product data: prefer fetched productDetails, fallback to order.product
         const mergedProduct = productDetails ? {
@@ -492,7 +475,7 @@ const MyPurchases = () => {
           completedDate: order.completedDate || order.CompletedDate || (isCompleted ? (order.createdDate || order.CreatedDate) : null), // ✅ WORKAROUND: Use CreatedDate if completed
           cancellationReason: order.cancellationReason || order.CancellationReason || null
         };
-      }));
+      });
       
       // Filter out null values
       const validSales = salesWithDetails.filter(sale => sale !== null);
@@ -740,13 +723,43 @@ const MyPurchases = () => {
                   const realImages = product.images || [];
                   const primaryImage = product.primaryImage || realImages[0];
                   
-                  // ✅ OPTIMIZED: Handle different image formats
+                  // ✅ OPTIMIZED: Handle different image formats - improved extraction
                   let imageUrl = null;
                   if (primaryImage) {
                     if (typeof primaryImage === 'string') {
                       imageUrl = primaryImage;
-                    } else {
-                      imageUrl = primaryImage.imageData || primaryImage.imageUrl || primaryImage.url || primaryImage.ImageData || primaryImage.ImageUrl;
+                    } else if (primaryImage) {
+                      // Try multiple possible field names
+                      imageUrl = primaryImage.imageData || 
+                                primaryImage.imageUrl || 
+                                primaryImage.url || 
+                                primaryImage.ImageData || 
+                                primaryImage.ImageUrl ||
+                                primaryImage.imagePath ||
+                                primaryImage.ImagePath ||
+                                primaryImage.filePath ||
+                                primaryImage.FilePath;
+                      
+                      // If still no URL, try to construct from base64 or other formats
+                      if (!imageUrl && primaryImage.data) {
+                        imageUrl = primaryImage.data;
+                      }
+                    }
+                  }
+                  
+                  // ✅ FALLBACK: Try to get from images array if primaryImage failed
+                  if (!imageUrl && realImages.length > 0) {
+                    const firstImage = realImages[0];
+                    if (typeof firstImage === 'string') {
+                      imageUrl = firstImage;
+                    } else if (firstImage) {
+                      imageUrl = firstImage.imageData || 
+                                firstImage.imageUrl || 
+                                firstImage.url || 
+                                firstImage.ImageData || 
+                                firstImage.ImageUrl ||
+                                firstImage.imagePath ||
+                                firstImage.ImagePath;
                     }
                   }
 
@@ -852,6 +865,28 @@ const MyPurchases = () => {
                             }
                           })()}
                         </div>
+                        
+                        {/* Cancellation info icon - top left */}
+                        {((purchase.orderStatus || purchase.status || '').toLowerCase() === 'cancelled' || 
+                          (purchase.orderStatus || purchase.status || '').toLowerCase() === 'failed') && 
+                          purchase.cancellationReason && (
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setSelectedCancellationReason({
+                                reason: purchase.cancellationReason,
+                                cancelledDate: purchase.cancelledDate || purchase.CancelledDate,
+                                orderId: purchase.orderId || purchase.id
+                              });
+                              setShowCancellationModal(true);
+                            }}
+                            className="absolute top-3 left-3 bg-red-500 text-white rounded-full p-2 hover:bg-red-600 transition-colors shadow-lg z-10"
+                            title="Xem lý do bị hủy"
+                          >
+                            <Info className="h-5 w-5" />
+                          </button>
+                        )}
                       </div>
                     );
                   }
@@ -919,6 +954,28 @@ const MyPurchases = () => {
                           }
                         })()}
                       </div>
+                      
+                      {/* Cancellation info icon - top left */}
+                      {((purchase.orderStatus || purchase.status || '').toLowerCase() === 'cancelled' || 
+                        (purchase.orderStatus || purchase.status || '').toLowerCase() === 'failed') && 
+                        purchase.cancellationReason && (
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setSelectedCancellationReason({
+                              reason: purchase.cancellationReason,
+                              cancelledDate: purchase.cancelledDate || purchase.CancelledDate,
+                              orderId: purchase.orderId || purchase.id
+                            });
+                            setShowCancellationModal(true);
+                          }}
+                          className="absolute top-3 left-3 bg-red-500 text-white rounded-full p-2 hover:bg-red-600 transition-colors shadow-lg z-10"
+                          title="Xem lý do bị hủy"
+                        >
+                          <Info className="h-5 w-5" />
+                        </button>
+                      )}
                     </div>
                   );
                 })()}
@@ -1006,27 +1063,6 @@ const MyPurchases = () => {
                     )}
                   </div>
                   
-                  {/* Show Rejection Reason if order is rejected */}
-                  {((purchase.orderStatus || purchase.status || '').toLowerCase() === 'cancelled' || 
-                    (purchase.orderStatus || purchase.status || '').toLowerCase() === 'failed' ||
-                    (purchase.orderStatus || purchase.status || '').toLowerCase() === 'rejected') && 
-                    purchase.cancellationReason && (
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 mt-4">
-                      <div className="flex items-start space-x-2">
-                        <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
-                        <div className="flex-1">
-                          <h4 className="font-semibold text-red-900 mb-1">Giao dịch đã bị từ chối</h4>
-                          <p className="text-sm text-red-800 mb-1">
-                            <span className="font-medium">Lý do:</span> {purchase.cancellationReason}
-                          </p>
-                          <p className="text-xs text-red-600 mt-2">
-                            Đơn hàng này đã bị admin từ chối. Sản phẩm đã được trả về trang chủ.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  
                   <div className="flex space-x-2">
                     <Link
                       to={`/product/${purchase.productId}`}
@@ -1096,7 +1132,7 @@ const MyPurchases = () => {
                         );
                       }
 
-                      // ✅ OPTIMIZED: Handle different image formats
+                      // ✅ OPTIMIZED: Handle different image formats - improved extraction
                       const realImages = product.images || [];
                       const primaryImage = product.primaryImage || realImages[0];
                       
@@ -1104,8 +1140,38 @@ const MyPurchases = () => {
                       if (primaryImage) {
                         if (typeof primaryImage === 'string') {
                           imageUrl = primaryImage;
-                        } else {
-                          imageUrl = primaryImage.imageData || primaryImage.imageUrl || primaryImage.url || primaryImage.ImageData || primaryImage.ImageUrl;
+                        } else if (primaryImage) {
+                          // Try multiple possible field names
+                          imageUrl = primaryImage.imageData || 
+                                    primaryImage.imageUrl || 
+                                    primaryImage.url || 
+                                    primaryImage.ImageData || 
+                                    primaryImage.ImageUrl ||
+                                    primaryImage.imagePath ||
+                                    primaryImage.ImagePath ||
+                                    primaryImage.filePath ||
+                                    primaryImage.FilePath;
+                          
+                          // If still no URL, try to construct from base64 or other formats
+                          if (!imageUrl && primaryImage.data) {
+                            imageUrl = primaryImage.data;
+                          }
+                        }
+                      }
+                      
+                      // ✅ FALLBACK: Try to get from images array if primaryImage failed
+                      if (!imageUrl && realImages.length > 0) {
+                        const firstImage = realImages[0];
+                        if (typeof firstImage === 'string') {
+                          imageUrl = firstImage;
+                        } else if (firstImage) {
+                          imageUrl = firstImage.imageData || 
+                                    firstImage.imageUrl || 
+                                    firstImage.url || 
+                                    firstImage.ImageData || 
+                                    firstImage.ImageUrl ||
+                                    firstImage.imagePath ||
+                                    firstImage.ImagePath;
                         }
                       }
 
@@ -1197,6 +1263,28 @@ const MyPurchases = () => {
                                 }
                               })()}
                             </div>
+                            
+                            {/* Cancellation info icon - top left */}
+                            {((sale.orderStatus || sale.status || '').toLowerCase() === 'cancelled' || 
+                              (sale.orderStatus || sale.status || '').toLowerCase() === 'failed') && 
+                              sale.cancellationReason && (
+                              <button
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setSelectedCancellationReason({
+                                    reason: sale.cancellationReason,
+                                    cancelledDate: sale.cancelledDate || sale.CancelledDate,
+                                    orderId: sale.orderId || sale.id
+                                  });
+                                  setShowCancellationModal(true);
+                                }}
+                                className="absolute top-3 left-3 bg-red-500 text-white rounded-full p-2 hover:bg-red-600 transition-colors shadow-lg z-10"
+                                title="Xem lý do bị hủy"
+                              >
+                                <Info className="h-5 w-5" />
+                              </button>
+                            )}
                           </div>
                         );
                       }
@@ -1268,6 +1356,28 @@ const MyPurchases = () => {
                               }
                             })()}
                           </div>
+                          
+                          {/* Cancellation info icon - top left */}
+                          {((sale.orderStatus || sale.status || '').toLowerCase() === 'cancelled' || 
+                            (sale.orderStatus || sale.status || '').toLowerCase() === 'failed') && 
+                            sale.cancellationReason && (
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setSelectedCancellationReason({
+                                  reason: sale.cancellationReason,
+                                  cancelledDate: sale.cancelledDate || sale.CancelledDate,
+                                  orderId: sale.orderId || sale.id
+                                });
+                                setShowCancellationModal(true);
+                              }}
+                              className="absolute top-3 left-3 bg-red-500 text-white rounded-full p-2 hover:bg-red-600 transition-colors shadow-lg z-10"
+                              title="Xem lý do bị hủy"
+                            >
+                              <Info className="h-5 w-5" />
+                            </button>
+                          )}
                         </div>
                       );
                     })()}
@@ -1350,27 +1460,6 @@ const MyPurchases = () => {
                         )}
                         <p>Người mua: {sale.buyerName || 'N/A'}</p>
                       </div>
-                      
-                      {/* Show Rejection Reason if order is rejected */}
-                      {((sale.orderStatus || sale.status || '').toLowerCase() === 'cancelled' || 
-                        (sale.orderStatus || sale.status || '').toLowerCase() === 'failed' ||
-                        (sale.orderStatus || sale.status || '').toLowerCase() === 'rejected') && 
-                        sale.cancellationReason && (
-                        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mt-4">
-                          <div className="flex items-start space-x-2">
-                            <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
-                            <div className="flex-1">
-                              <h4 className="font-semibold text-red-900 mb-1">Giao dịch đã bị từ chối</h4>
-                              <p className="text-sm text-red-800 mb-1">
-                                <span className="font-medium">Lý do:</span> {sale.cancellationReason}
-                              </p>
-                              <p className="text-xs text-red-600 mt-2">
-                                Đơn hàng này đã bị admin từ chối. Sản phẩm đã được trả về trang chủ.
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      )}
                       
                       <div className="flex space-x-2">
                         <Link
@@ -1468,6 +1557,62 @@ const MyPurchases = () => {
                   className="flex-1 bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors"
                 >
                   Gửi đánh giá
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Cancellation Reason Modal */}
+        {showCancellationModal && selectedCancellationReason && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black bg-opacity-40" onClick={() => setShowCancellationModal(false)}></div>
+            <div className="relative bg-white rounded-xl shadow-xl max-w-md w-full p-6 z-10">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <XCircle className="h-5 w-5 text-red-600" />
+                  Lý do hủy giao dịch
+                </h3>
+                <button
+                  onClick={() => setShowCancellationModal(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                <div className="flex items-start space-x-2">
+                  <AlertCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-red-900 mb-2">Giao dịch đã bị hủy</h4>
+                    <p className="text-sm text-red-800 mb-1">
+                      <span className="font-medium">Lý do:</span>
+                    </p>
+                    <p className="text-sm text-red-700 mb-3 whitespace-pre-wrap">
+                      {selectedCancellationReason.reason}
+                    </p>
+                    {selectedCancellationReason.cancelledDate && (
+                      <p className="text-xs text-red-600">
+                        Ngày hủy: {formatDate(selectedCancellationReason.cancelledDate)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                <p className="text-xs text-blue-800">
+                  <strong>Lưu ý:</strong> Đơn hàng này đã bị admin hủy. Sản phẩm đã được trả về trang chủ.
+                </p>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setShowCancellationModal(false)}
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+                >
+                  Đóng
                 </button>
               </div>
             </div>

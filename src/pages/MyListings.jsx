@@ -12,6 +12,8 @@ import {
   CheckCircle,
   XCircle,
   Info,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { apiRequest } from "../lib/api";
@@ -35,6 +37,8 @@ export const MyListings = () => {
   const [showRejectionModal, setShowRejectionModal] = useState(false);
   const [selectedRejection, setSelectedRejection] = useState(null);
   const [sellerOrders, setSellerOrders] = useState([]); // Store seller's orders for cancellation info
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(6); // 6 products per page
 
   useEffect(() => {
     console.log("🔍 MyListings useEffect triggered:", {
@@ -599,6 +603,17 @@ export const MyListings = () => {
     return matchesSearch && matchesStatus && matchesProductType;
   });
 
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredListings.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedListings = filteredListings.slice(startIndex, endIndex);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter, productTypeFilter]);
+
   console.log("🔍 MyListings render state:", {
     loading,
     listingsCount: listings.length,
@@ -723,8 +738,9 @@ export const MyListings = () => {
               )}
             </div>
           ) : (
+            <>
             <div className="mylistings-grid">
-              {filteredListings.map((listing) => {
+              {paginatedListings.map((listing) => {
                 const idVal = getListingId(listing);
                 return (
                   <div key={idVal} className="mylistings-card">
@@ -914,6 +930,68 @@ export const MyListings = () => {
                 );
               })}
             </div>
+            
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="mylistings-pagination">
+                <div className="mylistings-pagination-info">
+                  <span className="mylistings-pagination-text">
+                    Hiển thị {startIndex + 1}-{Math.min(endIndex, filteredListings.length)} trong tổng số {filteredListings.length} sản phẩm
+                  </span>
+                </div>
+                <div className="mylistings-pagination-controls">
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                    className={`mylistings-pagination-button ${currentPage === 1 ? 'mylistings-pagination-button-disabled' : ''}`}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    <span>Trước</span>
+                  </button>
+                  
+                  <div className="mylistings-pagination-numbers">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                      // Show first page, last page, current page, and pages around current
+                      if (
+                        page === 1 ||
+                        page === totalPages ||
+                        (page >= currentPage - 1 && page <= currentPage + 1)
+                      ) {
+                        return (
+                          <button
+                            key={page}
+                            onClick={() => setCurrentPage(page)}
+                            className={`mylistings-pagination-number ${currentPage === page ? 'mylistings-pagination-number-active' : ''}`}
+                          >
+                            {page}
+                          </button>
+                        );
+                      } else if (
+                        page === currentPage - 2 ||
+                        page === currentPage + 2
+                      ) {
+                        return (
+                          <span key={page} className="mylistings-pagination-ellipsis">
+                            ...
+                          </span>
+                        );
+                      }
+                      return null;
+                    })}
+                  </div>
+                  
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    disabled={currentPage === totalPages}
+                    className={`mylistings-pagination-button ${currentPage === totalPages ? 'mylistings-pagination-button-disabled' : ''}`}
+                  >
+                    <span>Sau</span>
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+            </>
           )}
 
           {/* Stats */}
