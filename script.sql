@@ -148,6 +148,9 @@ CREATE TABLE [Orders] (
     [PayoutStatus] nvarchar(20) NULL DEFAULT N'Pending',
     [CreatedDate] datetime2 NULL DEFAULT ((getdate())),
     [CompletedDate] datetime2 NULL,
+    [CancellationReason] nvarchar(500) NULL,
+    [CancelledDate] datetime2 NULL,
+    [ContractUrl] nvarchar(max) NULL,
     CONSTRAINT [PK__Orders__C3905BCF658D7C8B] PRIMARY KEY ([OrderId]),
     CONSTRAINT [FK_Orders_Products_ProductId] FOREIGN KEY ([ProductId]) REFERENCES [Products] ([ProductId]),
     CONSTRAINT [FK_Orders_Users_BuyerId] FOREIGN KEY ([BuyerId]) REFERENCES [Users] ([UserId]),
@@ -314,3 +317,52 @@ ALTER TABLE [dbo].[Notifications] ADD [IsRead] BIT NOT NULL DEFAULT 0;
 ALTER TABLE [dbo].[Orders]
 ADD [CancellationReason] nvarchar(500) NULL;    
 
+ALTER TABLE [dbo].[Orders] 
+ADD [CancelledDate] datetime2 NULL;
+
+-- ✅ Add ContractUrl column for contract file uploads
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Orders') AND name = 'ContractUrl')
+BEGIN
+    ALTER TABLE [dbo].[Orders]
+    ADD [ContractUrl] nvarchar(max) NULL;
+    PRINT 'Added ContractUrl column to Orders table.';
+END
+ELSE
+BEGIN
+    PRINT 'ContractUrl column already exists in Orders table.';
+END
+GO
+
+USE [Topic2];
+GO
+
+-- Kiểm tra và thêm cột WarrantyPeriod nếu chưa tồn tại
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Products') AND name = 'WarrantyPeriod')
+BEGIN
+    ALTER TABLE Products ADD WarrantyPeriod nvarchar(100) NULL;
+    PRINT 'Added WarrantyPeriod column to Products table.';
+END
+ELSE
+BEGIN
+    PRINT 'WarrantyPeriod column already exists in Products table.';
+END
+GO
+
+
+USE [Topic2];
+GO
+
+-- Thêm role Staff nếu chưa tồn tại
+IF NOT EXISTS (
+    SELECT * FROM UserRoles WHERE RoleName = N'Staff'
+)
+BEGIN
+    INSERT INTO UserRoles (RoleName)
+    VALUES (N'Staff');
+    PRINT 'Added Staff role successfully.';
+END
+ELSE
+BEGIN
+    PRINT 'Staff role already exists.';
+END
+GO

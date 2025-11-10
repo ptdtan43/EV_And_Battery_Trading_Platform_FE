@@ -107,16 +107,17 @@ const MyPurchases = () => {
       });
       
       // ✅ FIX: Backend /api/Order/buyer already filters by userId, so we should include ALL orders returned
-      // Only filter out orders that are truly invalid (no productId at all)
+      // Don't filter at all - show all orders from backend
+      // Only exclude orders that are completely invalid (no orderId at all)
       const buyerOrders = orders.filter(order => {
+        // Only exclude if order has no orderId at all (completely invalid)
+        if (!order.orderId && !order.OrderId && !order.id) {
+          console.log(`❌ Order has no orderId at all, excluding:`, order);
+          return false;
+        }
+        
+        // Include all other orders
         const orderStatus = (order.status || order.Status || order.orderStatus || order.OrderStatus || '').toLowerCase();
-        const depositStatus = (order.depositStatus || order.DepositStatus || '').toLowerCase();
-        const productStatus = (order.product?.status || order.product?.Status || '').toLowerCase();
-        
-        console.log(`🔍 Order ${order.orderId || order.OrderId} - Order status: ${orderStatus}, Deposit status: ${depositStatus}, Product status: ${productStatus}`);
-        
-        // ✅ FIX: Accept productId from multiple sources (product object OR direct field)
-        // Backend may return productId directly OR in product object
         const productId = order.product?.productId || 
                          order.product?.ProductId || 
                          order.product?.id || 
@@ -125,17 +126,7 @@ const MyPurchases = () => {
                          order.product_id ||
                          order.Product_ID;
         
-        // ✅ FIX: Only exclude if truly no productId (but be lenient - some orders might still be valid)
-        // If order has orderId, it's probably valid even without productId (we'll try to fetch later)
-        if (!productId && !order.orderId && !order.OrderId) {
-          console.log(`❌ Order has no productId and no orderId, excluding:`, order);
-          return false;
-        }
-        
-        // ✅ FIX: Include ALL orders from API (backend already filtered by userId)
-        // Don't filter by status - show all orders (pending, deposited, completed, rejected, etc.)
-        // The status filtering was too strict and was excluding valid orders
-        console.log(`✅ Including order ${order.orderId || order.OrderId} - Order: ${orderStatus}, Deposit: ${depositStatus}, Product: ${productStatus}, ProductId: ${productId}`);
+        console.log(`✅ Including order ${order.orderId || order.OrderId || order.id} - Status: ${orderStatus}, ProductId: ${productId || 'N/A'}`);
         return true;
       });
       
@@ -151,132 +142,105 @@ const MyPurchases = () => {
       // Process orders - pending, deposited, completed, and rejected ones
       console.log(`🔍 About to process ${buyerOrders.length} buyer orders (pending/deposited/completed/rejected)`);
       
-      // ✅ OPTIMIZED: Extract all productIds first
+      // ✅ OPTIMIZED: Backend GetMyPurchases() already returns full product data including:
+      // - Product.ProductId
+      // - Product.ImageData (first image)
+      // - Product.Status
+      // - Product.Title, Price, etc.
+      // So we don't need to fetch product details or images separately!
+      
+      // ✅ OPTIMIZED: Extract productIds only if we need to fetch additional images
       const productIds = [];
-      const orderProductMap = new Map(); // Map order index to productId
-      
-      buyerOrders.forEach((order, index) => {
-        // ✅ FIX: Try multiple sources for productId (same as filter logic)
-        let productId = order.product?.productId || 
-                       order.product?.ProductId || 
-                       order.product?.id || 
-                       order.productId || 
-                       order.ProductId ||
-                       order.product_id ||
-                       order.Product_ID ||
-                       order.itemId || 
-                       order.item_id;
-        
-        // ✅ FIX: Include order even if no productId (we'll try to fetch product details later)
-        // But still try to batch fetch images for orders that have productId
-        if (productId && productId !== null && productId !== undefined) {
-          // Avoid duplicates
-          if (!productIds.includes(productId)) {
-            productIds.push(productId);
-          }
-          orderProductMap.set(index, productId);
-        } else {
-          // Order without productId - we'll handle it separately
-          console.log(`⚠️ Order ${order.orderId || index} has no productId, will try to fetch product details later`);
-          orderProductMap.set(index, null);
+      buyerOrders.forEach((order) => {
+        // Backend returns Product.ProductId
+        const productId = order.product?.productId || 
+                         order.product?.ProductId || 
+                         order.productId || 
+                         order.ProductId;
+        if (productId && !productIds.includes(productId)) {
+          productIds.push(productId);
         }
       });
       
-      // ✅ OPTIMIZED: Batch fetch all images at once
-      console.log(`🖼️ Batch fetching images for ${productIds.length} products...`);
+      // ✅ OPTIMIZED: Only fetch additional images if needed (backend only returns first image)
+      // This is optional - we can use ImageData from backend response
+      console.log(`🖼️ Fetching additional images for ${productIds.length} products (optional, backend already provides ImageData)...`);
       const imagesMap = await batchFetchProductImages(productIds, 5);
-      console.log(`✅ Batch fetched images for ${imagesMap.size} products`);
+      console.log(`✅ Fetched additional images for ${imagesMap.size} products`);
       
-      // ✅ OPTIMIZED: Batch fetch product details in parallel (smaller batches)
-      const productDetailsMap = new Map();
-      const productDetailsPromises = [];
-      const batchSize = 5;
-      
-      for (let i = 0; i < productIds.length; i += batchSize) {
-        const batch = productIds.slice(i, i + batchSize);
-        const batchPromises = batch.map(async (productId) => {
-          try {
-            const details = await apiRequest(`/api/Product/${productId}`, 'GET');
-            return { productId, details };
-          } catch (error) {
-            console.log(`⚠️ Failed to fetch product ${productId} details:`, error.message);
-            return { productId, details: null };
-          }
-        });
-        productDetailsPromises.push(...batchPromises);
-      }
-      
-      const productDetailsResults = await Promise.all(productDetailsPromises);
-      productDetailsResults.forEach(({ productId, details }) => {
-        if (details) {
-          productDetailsMap.set(productId, details);
-        }
-      });
-      
-      // ✅ OPTIMIZED: Process orders with pre-fetched data
+      // ✅ OPTIMIZED: Process orders using backend response directly
       const purchasesWithDetails = buyerOrders.map((order, index) => {
-        const productId = orderProductMap.get(index);
+        // Backend returns Product.ProductId
+        const productId = order.product?.productId || 
+                         order.product?.ProductId || 
+                         order.productId || 
+                         order.ProductId;
         
-        // ✅ FIX: Don't skip orders without productId - try to use what we have
-        // Get pre-fetched data (if productId exists)
-        const productImages = productId ? (imagesMap.get(productId) || []) : [];
-        const productDetails = productId ? productDetailsMap.get(productId) : null;
-        
-        // ✅ FIX: Merge product data - handle both cases (with and without productId)
+        // ✅ FIX: Use backend response directly - it already has all product data
+        // Backend response structure:
+        // - order.product.ProductId
+        // - order.product.ImageData (first image)
+        // - order.product.Status
+        // - order.product.Title, Price, etc.
         let productWithImages;
         if (order.product) {
-          // Order already has product object
-          productWithImages = productDetails ? {
-            ...order.product,
-            ...productDetails,
-            status: productDetails.status || productDetails.Status || order.product?.status || order.product?.Status,
-            images: productImages,
-            primaryImage: productImages?.[0] || null
-          } : {
-            ...order.product,
-            images: productImages,
-            primaryImage: productImages?.[0] || null
-          };
-        } else if (productDetails) {
-          // No product object, but we fetched product details
+          // Backend already provides product data
+          const backendImageData = order.product.imageData || order.product.ImageData;
+          const additionalImages = productId ? (imagesMap.get(productId) || []) : [];
+          
+          // Use ImageData from backend as primaryImage, additional images as fallback
           productWithImages = {
-            ...productDetails,
-            images: productImages,
-            primaryImage: productImages?.[0] || null
-          };
-        } else if (productId) {
-          // Have productId but no product details (fetch might have failed)
-          productWithImages = {
-            productId: productId,
-            title: order.productTitle || 'Sản phẩm không tìm thấy',
-            images: productImages,
-            primaryImage: productImages?.[0] || null
+            ...order.product,
+            productId: productId || order.product.productId || order.product.ProductId,
+            // Use backend ImageData as primary, or first additional image
+            primaryImage: backendImageData || additionalImages[0] || null,
+            // Combine backend image with additional images
+            images: backendImageData 
+              ? [backendImageData, ...additionalImages.filter(img => img !== backendImageData)]
+              : additionalImages
           };
         } else {
-          // No productId and no product object - use minimal data
+          // No product object from backend - use minimal data
+          const additionalImages = productId ? (imagesMap.get(productId) || []) : [];
           productWithImages = {
+            productId: productId || null,
             title: order.productTitle || 'Sản phẩm không tìm thấy',
-            images: [],
-            primaryImage: null
+            price: order.totalAmount || 0,
+            images: additionalImages,
+            primaryImage: additionalImages[0] || null
           };
         }
         
-        return {
+        // ✅ FIX: Ensure we always return a valid object
+        const purchase = {
           ...order,
-          productId: productId || order.productId || order.ProductId || null,
+          productId: productId || order.productId || order.ProductId || order.product?.productId || order.product?.ProductId || null,
           product: productWithImages,
-          sellerId: (() => {
-            const sellerId = order.sellerId || order.seller?.id || order.product?.sellerId || order.SellerId || 1;
-            return sellerId;
-          })(),
-          canReview: !order.hasRating && (order.status || order.orderStatus || '').toLowerCase() !== 'cancelled',
-          orderStatus: order.status || order.orderStatus || order.OrderStatus || order.product?.status || 'pending',
+          sellerId: order.sellerId || order.SellerId || order.seller?.id || 1,
+          canReview: !order.hasRating && (order.status || order.orderStatus || order.Status || '').toLowerCase() !== 'cancelled',
+          orderStatus: order.status || order.orderStatus || order.Status || order.OrderStatus || order.product?.status || 'pending',
           cancellationReason: order.cancellationReason || order.CancellationReason || null
         };
+        
+        console.log(`✅ Processed purchase ${purchase.orderId || index}:`, {
+          orderId: purchase.orderId,
+          productId: purchase.productId,
+          hasProduct: !!purchase.product,
+          productTitle: purchase.product?.title || purchase.product?.Title,
+          hasImage: !!purchase.product?.primaryImage
+        });
+        
+        return purchase;
       });
       
-      // ✅ FIX: No need to filter null values anymore - we handle all orders now
-      const validPurchases = purchasesWithDetails;
+      // ✅ FIX: Filter out only truly invalid purchases (no orderId)
+      const validPurchases = purchasesWithDetails.filter(p => {
+        const isValid = p && (p.orderId || p.OrderId || p.id);
+        if (!isValid) {
+          console.warn(`⚠️ Filtering out invalid purchase:`, p);
+        }
+        return isValid;
+      });
       
       console.log(`🔍 Final purchases count: ${validPurchases.length}`);
       console.log(`🔍 Final purchases details:`, validPurchases.map(p => ({
@@ -287,14 +251,32 @@ const MyPurchases = () => {
         canReview: p.canReview
       })));
       
+      // ✅ FIX: Ensure we set purchases even if empty (to show "Chưa có đơn mua" message)
+      if (validPurchases.length === 0) {
+        console.warn(`⚠️ No valid purchases found. Total orders from API: ${orders.length}, Buyer orders: ${buyerOrders.length}`);
+      }
+      
       setPurchases(validPurchases);
+      console.log(`✅ Set purchases state with ${validPurchases.length} items`);
     } catch (error) {
       console.error('Error loading purchases:', error);
-      show({
-        title: 'Lỗi',
-        description: 'Không thể tải danh sách đơn mua',
-        type: 'error'
-      });
+      
+      // ✅ FIX: Check for database schema error
+      const errorMessage = error.message || error.toString();
+      if (errorMessage.includes('ContractUrl') || errorMessage.includes('Invalid column name')) {
+        show({
+          title: 'Lỗi Database',
+          description: 'Database thiếu cột ContractUrl. Vui lòng chạy migration script: backend/add_contracturl_migration.sql',
+          type: 'error',
+          duration: 10000
+        });
+      } else {
+        show({
+          title: 'Lỗi',
+          description: 'Không thể tải danh sách đơn mua: ' + errorMessage,
+          type: 'error'
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -353,11 +335,15 @@ const MyPurchases = () => {
         }
       }
       
-      // ✅ FIX: Backend /api/Order/seller already returns seller's orders
-      // Backend response: OrderId, TotalAmount, Status, PayoutStatus, CreatedDate, CancellationReason, BuyerName, Product (Title, Price)
-      // Note: Backend doesn't return product.status, so we need to fetch product details later
-      // Show ALL orders from backend (they are already filtered by sellerId on backend)
-      // We'll check product status after fetching product details
+      // ✅ FIX: Backend GetMySales() already returns full product data including:
+      // - ProductId (directly in order object)
+      // - Product.ProductId
+      // - Product.ImageData (first image)
+      // - Product.Status
+      // - Product.Title, Price, etc.
+      // - CompletedDate
+      // So we don't need to fetch product details separately!
+      
       console.log(`✅ Backend returned ${sellerOrders.length} orders for seller. Processing all of them...`);
       
       // Log all order statuses for debugging
@@ -372,123 +358,123 @@ const MyPurchases = () => {
       
       console.log(`✅ Processing ${sellerOrdersFiltered.length} seller orders from backend (all statuses)`);
       
-      // ✅ OPTIMIZED: Extract all productIds first
+      // ✅ OPTIMIZED: Extract productIds only if we need to fetch additional images
       const productIds = [];
-      const orderProductMap = new Map(); // Map order index to productId
-      
-      sellerOrdersFiltered.forEach((order, index) => {
-        // Try to get ProductId from order object first
-        let productId = order.productId || order.ProductId || order.product?.productId || order.product?.id || order.product?.ProductId;
-        
-        // ✅ WORKAROUND: If no ProductId, try to find it from seller's products by matching title
-        if (!productId) {
-          const productTitle = order.product?.title || order.product?.Title || order.productTitle || order.ProductTitle;
-          if (productTitle && allProducts.length > 0) {
-            // Find product by matching title
-            const matchedProduct = allProducts.find(p => {
-              const pTitle = p.title || p.Title || p.productTitle || p.ProductTitle;
-              return pTitle && pTitle.toLowerCase() === productTitle.toLowerCase();
-            });
-            if (matchedProduct) {
-              productId = matchedProduct.productId || matchedProduct.ProductId || matchedProduct.id;
-              console.log(`✅ Found ProductId ${productId} by matching title: "${productTitle}"`);
-            }
-          }
-        }
-        
-        if (productId) {
+      sellerOrdersFiltered.forEach((order) => {
+        // Backend returns ProductId directly AND in Product.ProductId
+        const productId = order.productId || 
+                         order.ProductId || 
+                         order.product?.productId || 
+                         order.product?.ProductId;
+        if (productId && !productIds.includes(productId)) {
           productIds.push(productId);
-          orderProductMap.set(index, productId);
         }
       });
       
-      // ✅ OPTIMIZED: Batch fetch all images at once
-      console.log(`🖼️ Batch fetching images for ${productIds.length} products...`);
+      // ✅ OPTIMIZED: Only fetch additional images if needed (backend only returns first image)
+      // This is optional - we can use ImageData from backend response
+      console.log(`🖼️ Fetching additional images for ${productIds.length} products (optional, backend already provides ImageData)...`);
       const imagesMap = await batchFetchProductImages(productIds, 5);
-      console.log(`✅ Batch fetched images for ${imagesMap.size} products`);
+      console.log(`✅ Fetched additional images for ${imagesMap.size} products`);
       
-      // ✅ OPTIMIZED: Batch fetch product details in parallel (smaller batches)
-      const productDetailsMap = new Map();
-      const productDetailsPromises = [];
-      const batchSize = 5;
-      
-      for (let i = 0; i < productIds.length; i += batchSize) {
-        const batch = productIds.slice(i, i + batchSize);
-        const batchPromises = batch.map(async (productId) => {
-          try {
-            const details = await apiRequest(`/api/Product/${productId}`, 'GET');
-            return { productId, details };
-          } catch (error) {
-            console.log(`⚠️ Failed to fetch product ${productId} details:`, error.message);
-            return { productId, details: null };
-          }
-        });
-        productDetailsPromises.push(...batchPromises);
-      }
-      
-      const productDetailsResults = await Promise.all(productDetailsPromises);
-      productDetailsResults.forEach(({ productId, details }) => {
-        if (details) {
-          productDetailsMap.set(productId, details);
-        }
-      });
-      
-      // ✅ OPTIMIZED: Process orders with pre-fetched data
+      // ✅ OPTIMIZED: Process orders using backend response directly
       const salesWithDetails = sellerOrdersFiltered.map((order, index) => {
-        const productId = orderProductMap.get(index);
+        // Backend returns ProductId directly AND in Product.ProductId
+        const productId = order.productId || 
+                         order.ProductId || 
+                         order.product?.productId || 
+                         order.product?.ProductId;
         
-        // Get pre-fetched data
-        const productImages = productId ? (imagesMap.get(productId) || []) : [];
-        const productDetails = productId ? productDetailsMap.get(productId) : null;
+        // ✅ FIX: Use backend response directly - it already has all product data
+        // Backend response structure:
+        // - order.productId (direct)
+        // - order.product.ProductId
+        // - order.product.ImageData (first image)
+        // - order.product.Status
+        // - order.product.Title, Price, etc.
+        let mergedProduct;
+        if (order.product) {
+          // Backend already provides product data
+          const backendImageData = order.product.imageData || order.product.ImageData;
+          const additionalImages = productId ? (imagesMap.get(productId) || []) : [];
+          
+          // Use ImageData from backend as primaryImage, additional images as fallback
+          mergedProduct = {
+            ...order.product,
+            productId: productId || order.product.productId || order.product.ProductId,
+            // Use backend ImageData as primary, or first additional image
+            primaryImage: backendImageData || additionalImages[0] || null,
+            // Combine backend image with additional images
+            images: backendImageData 
+              ? [backendImageData, ...additionalImages.filter(img => img !== backendImageData)]
+              : additionalImages
+          };
+        } else {
+          // No product object from backend - use minimal data
+          const additionalImages = productId ? (imagesMap.get(productId) || []) : [];
+          mergedProduct = {
+            productId: productId || null,
+            title: 'Sản phẩm không tìm thấy',
+            price: order.totalAmount || order.TotalAmount || 0,
+            images: additionalImages,
+            primaryImage: additionalImages[0] || null
+          };
+        }
         
-        // Merge product data: prefer fetched productDetails, fallback to order.product
-        const mergedProduct = productDetails ? {
-          ...order.product,
-          ...productDetails,
-          title: productDetails.title || productDetails.Title || order.product?.title || order.product?.Title,
-          price: productDetails.price || productDetails.Price || order.product?.price || order.product?.Price,
-          status: productDetails.status || productDetails.Status || order.product?.status || order.product?.Status,
-          images: productImages,
-          primaryImage: productImages?.[0] || null
-        } : {
-          ...order.product,
-          title: order.product?.title || order.product?.Title,
-          price: order.product?.price || order.product?.Price,
-          status: order.product?.status || order.product?.Status, // Backend doesn't return this, will be null
-          images: productImages,
-          primaryImage: productImages?.[0] || null
-        };
-        
-        // ✅ FIX: Backend doesn't return CompletedDate, use null or CreatedDate as fallback
+        // ✅ FIX: Backend GetMySales() returns CompletedDate
         // Backend Status values: "Pending", "Deposited", "Completed", "Cancelled"
         const orderStatus = (order.status || order.Status || order.orderStatus || order.OrderStatus || '').toLowerCase();
-        const isCompleted = orderStatus === 'completed' || orderStatus === 'Completed';
         
         return {
           orderId: order?.orderId || order?.OrderId || null,
-          productId: productId || null, // May be null if can't find
+          productId: productId || null,
           product: mergedProduct,
           buyerName: order.buyerName || order.BuyerName || order.buyer?.fullName || order.user?.fullName || 'N/A',
           orderStatus: order.status || order.Status || order.orderStatus || order.OrderStatus,
           totalAmount: order.totalAmount || order.TotalAmount || order.product?.price || order.product?.Price || mergedProduct?.price || mergedProduct?.Price || 0,
           createdDate: order.createdDate || order.CreatedDate || order.createdAt || order.CreatedAt || order.purchaseDate || order.PurchaseDate,
-          completedDate: order.completedDate || order.CompletedDate || (isCompleted ? (order.createdDate || order.CreatedDate) : null), // ✅ WORKAROUND: Use CreatedDate if completed
+          completedDate: order.completedDate || order.CompletedDate, // ✅ Backend returns this
           cancellationReason: order.cancellationReason || order.CancellationReason || null
         };
       });
       
-      // Filter out null values
-      const validSales = salesWithDetails.filter(sale => sale !== null);
+      // ✅ FIX: Filter out only truly invalid sales (no orderId)
+      const validSales = salesWithDetails.filter(sale => {
+        const isValid = sale && (sale.orderId || sale.OrderId || sale.id);
+        if (!isValid) {
+          console.warn(`⚠️ Filtering out invalid sale:`, sale);
+        }
+        return isValid;
+      });
       
       console.log(`✅ Valid sales count: ${validSales.length}`);
+      
+      // ✅ FIX: Ensure we set sales even if empty (to show "Chưa có đơn bán" message)
+      if (validSales.length === 0) {
+        console.warn(`⚠️ No valid sales found. Total orders from API: ${sellerOrders.length}`);
+      }
+      
       setSales(validSales);
+      console.log(`✅ Set sales state with ${validSales.length} items`);
     } catch (error) {
       console.error('Error loading sales:', error);
-      show({
-        title: 'Lỗi',
-        description: 'Không thể tải danh sách đơn bán',
-        type: 'error'
-      });
+      
+      // ✅ FIX: Check for database schema error
+      const errorMessage = error.message || error.toString();
+      if (errorMessage.includes('ContractUrl') || errorMessage.includes('Invalid column name')) {
+        show({
+          title: 'Lỗi Database',
+          description: 'Database thiếu cột ContractUrl. Vui lòng chạy migration script: backend/add_contracturl_migration.sql',
+          type: 'error',
+          duration: 10000
+        });
+      } else {
+        show({
+          title: 'Lỗi',
+          description: 'Không thể tải danh sách đơn bán: ' + errorMessage,
+          type: 'error'
+        });
+      }
     } finally {
       setSalesLoading(false);
     }
@@ -692,7 +678,9 @@ const MyPurchases = () => {
         {/* Tab Content */}
         {activeTab === 'purchases' && (
           <>
-
+          {/* ✅ DEBUG: Log purchases state */}
+          {console.log(`🔍 RENDERING: activeTab=${activeTab}, purchases.length=${purchases.length}`, purchases)}
+          
         {purchases.length === 0 ? (
           <div className="text-center py-12">
             <Package className="h-16 w-16 text-gray-400 mx-auto mb-4" />
@@ -707,8 +695,8 @@ const MyPurchases = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {purchases.map((purchase) => (
-              <div key={purchase.orderId} className="bg-white rounded-lg shadow-md overflow-hidden">
+            {purchases.map((purchase, index) => (
+              <div key={purchase.orderId || purchase.OrderId || purchase.id || `purchase-${index}`} className="bg-white rounded-lg shadow-md overflow-hidden">
                 {(() => {
                   const product = purchase.product;
                   if (!product) {
@@ -768,11 +756,11 @@ const MyPurchases = () => {
                       <div className="w-full h-48 relative overflow-hidden bg-gray-100">
                         <img
                           src={imageUrl}
-                          alt={product.title || 'Sản phẩm'}
+                          alt={product.title || product.Title || 'Sản phẩm'}
                           className="w-full h-full object-cover transition-opacity duration-300"
                           loading="lazy"
                           onError={(e) => {
-                            console.log(`❌ Image failed to load for ${product.title}:`, imageUrl);
+                            console.log(`❌ Image failed to load for ${product.title || product.Title}:`, imageUrl);
                             // Fallback to placeholder
                             e.target.style.display = 'none';
                             const placeholder = e.target.nextElementSibling;
@@ -800,7 +788,7 @@ const MyPurchases = () => {
                               <Package className="h-8 w-8 text-blue-600" />
                             </div>
                             <h4 className="text-sm font-semibold text-gray-700 mb-1">
-                              {product.title || 'Sản phẩm'}
+                              {product.title || product.Title || 'Sản phẩm'}
                             </h4>
                             <p className="text-xs text-gray-500">
                               {product.vehicleType || product.productType || 'EV Market'}
@@ -1106,6 +1094,9 @@ const MyPurchases = () => {
 
         {activeTab === 'sales' && (
           <>
+          {/* ✅ DEBUG: Log sales state */}
+          {console.log(`🔍 RENDERING: activeTab=${activeTab}, sales.length=${sales.length}`, sales)}
+          
             {sales.length === 0 ? (
               <div className="text-center py-12">
                 <Store className="h-16 w-16 text-gray-400 mx-auto mb-4" />
@@ -1120,8 +1111,8 @@ const MyPurchases = () => {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {sales.map((sale) => (
-                  <div key={sale.orderId} className="bg-white rounded-lg shadow-md overflow-hidden">
+                {sales.map((sale, index) => (
+                  <div key={sale.orderId || sale.OrderId || sale.id || `sale-${index}`} className="bg-white rounded-lg shadow-md overflow-hidden">
                     {(() => {
                       const product = sale.product;
                       if (!product) {
@@ -1180,11 +1171,11 @@ const MyPurchases = () => {
                           <div className="w-full h-48 relative overflow-hidden bg-gray-100">
                             <img
                               src={imageUrl}
-                              alt={product.title || 'Sản phẩm'}
+                              alt={product.title || product.Title || 'Sản phẩm'}
                               className="w-full h-full object-cover transition-opacity duration-300"
                               loading="lazy"
                               onError={(e) => {
-                                console.log(`❌ Image failed to load for ${product.title}:`, imageUrl);
+                                console.log(`❌ Image failed to load for ${product.title || product.Title}:`, imageUrl);
                                 // Fallback to placeholder
                                 e.target.style.display = 'none';
                                 const placeholder = e.target.nextElementSibling;
@@ -1203,7 +1194,7 @@ const MyPurchases = () => {
                                   <Package className="h-8 w-8 text-blue-600" />
                                 </div>
                                 <h4 className="text-sm font-semibold text-gray-700 mb-1">
-                                  {product.title || 'Sản phẩm'}
+                                  {product.title || product.Title || 'Sản phẩm'}
                                 </h4>
                               </div>
                             </div>
@@ -1296,7 +1287,7 @@ const MyPurchases = () => {
                               <Package className="h-8 w-8 text-blue-600" />
                             </div>
                             <h4 className="text-sm font-semibold text-gray-700 mb-1">
-                              {product.title || 'Sản phẩm'}
+                              {product.title || product.Title || 'Sản phẩm'}
                             </h4>
                           </div>
                           <div className="absolute top-3 right-3">
