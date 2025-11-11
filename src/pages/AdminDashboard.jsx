@@ -27,9 +27,10 @@ import {
   AlertTriangle,
   Settings,
   CreditCard,
+  FileText,
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
-import { formatPrice, formatDate } from "../utils/formatters";
+import { formatPrice, formatDate, formatDateTime, getOrderStatusText } from "../utils/formatters";
 import { useToast } from "../contexts/ToastContext";
 import { useAuth } from "../contexts/AuthContext";
 import { notifyPostApproved, notifyPostRejected } from "../lib/notificationApi";
@@ -81,10 +82,12 @@ export const AdminDashboard = () => {
   const [allListings, setAllListings] = useState([]);
   const [filteredListings, setFilteredListings] = useState([]);
   const [orders, setOrders] = useState([]); // Store all orders for transaction management
+  const [filteredOrders, setFilteredOrders] = useState([]); // Filtered orders for transaction management
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [productTypeFilter, setProductTypeFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState("all");
+  const [transactionStatusFilter, setTransactionStatusFilter] = useState("all"); // Filter for transaction status: all, pending, completed, rejected
   const [loading, setLoading] = useState(true);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [expandedDetails, setExpandedDetails] = useState(false);
@@ -95,6 +98,12 @@ export const AdminDashboard = () => {
   const [cancelledOrderContext, setCancelledOrderContext] = useState(null); // Track cancelled order for modal context
   const [processingIds, setProcessingIds] = useState(new Set());
   const [skipImageLoading, setSkipImageLoading] = useState(false); // Add flag to skip image loading if causing issues
+  const [orderDetailModal, setOrderDetailModal] = useState({
+    isOpen: false,
+    order: null,
+    orderDetails: null,
+    loading: false,
+  });
   // Users management state
   const [users, setUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -1196,6 +1205,39 @@ export const AdminDashboard = () => {
     setCancelledOrderContext(null);
   };
 
+  // Filter orders based on transaction status filter
+  useEffect(() => {
+    if (orders.length === 0) {
+      setFilteredOrders([]);
+      return;
+    }
+    
+    let filtered = [...orders];
+    if (transactionStatusFilter !== "all") {
+      filtered = filtered.filter(order => {
+        const status = (order.status || order.orderStatus || order.Status || order.OrderStatus || '').toLowerCase();
+        if (transactionStatusFilter === "pending") {
+          return status === 'pending' || status === 'processing' || status === 'depositpaid' || 
+                 status === 'deposited' || status === 'confirmed';
+        } else if (transactionStatusFilter === "completed") {
+          return status === 'completed';
+        } else if (transactionStatusFilter === "rejected") {
+          return status === 'cancelled' || status === 'failed' || status === 'canceled';
+        }
+        return true;
+      });
+    }
+    
+    // Sort orders by creation date (newest first)
+    filtered.sort((a, b) => {
+      const dateA = new Date(a.createdDate || a.CreatedDate || a.createdAt || a.CreatedAt || a.orderDate || a.OrderDate || 0);
+      const dateB = new Date(b.createdDate || b.CreatedDate || b.createdAt || b.CreatedAt || b.orderDate || b.OrderDate || 0);
+      return dateB.getTime() - dateA.getTime(); // Descending order (newest first)
+    });
+    
+    setFilteredOrders(filtered);
+  }, [orders, transactionStatusFilter]);
+
   useEffect(() => {
     console.log('🔍 AdminDashboard mounted, loading data...');
     const initializeAdmin = async () => {
@@ -1388,13 +1430,30 @@ export const AdminDashboard = () => {
             manufactureYear: item.manufactureYear || item.year || item.modelYear || item.manufacturingYear || "N/A",
             price: parseFloat(item.price || item.listPrice || item.sellingPrice || 0),
             status: (() => {
-              const rawStatus = norm(item.status || item.verificationStatus || item.approvalStatus || "pending");
+              // Check multiple possible status fields (Status, status, etc.)
+              const rawStatus = norm(item.status || item.Status || item.verificationStatus || item.approvalStatus || "pending");
+              
+              // Debug logging for status mapping
+              const productId = getId(item);
+              if (productId && (rawStatus === "reserved" || rawStatus === "sold")) {
+                console.log(`🔍 Product ${productId} status mapping:`, {
+                  productId,
+                  title: item.title,
+                  rawStatus,
+                  itemStatus: item.status,
+                  itemStatusCapital: item.Status,
+                  verificationStatus: item.verificationStatus,
+                  mappedTo: rawStatus === "sold" ? "sold" : rawStatus === "reserved" ? "reserved" : rawStatus
+                });
+              }
+              
               // Map backend statuses to frontend statuses
+              // IMPORTANT: Check "sold" BEFORE "reserved" to ensure sold products show correctly
+              if (rawStatus === "sold") return "sold"; // Đã bán thành công - check this FIRST
               if (rawStatus === "draft" || rawStatus === "re-submit") return "pending";
               if (rawStatus === "active" || rawStatus === "approved") return "Active";
               if (rawStatus === "rejected") return "rejected";
               if (rawStatus === "reserved") return "reserved"; // Đang trong quá trình thanh toán
-              if (rawStatus === "sold") return "sold"; // Đã bán thành công
               return rawStatus;
             })(),
             productType: norm(item.productType || item.type || item.category || "vehicle"),
@@ -3805,50 +3864,168 @@ export const AdminDashboard = () => {
                 </button>
             </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Images */}
                 <div>
-                  <div className="relative h-64 bg-gray-100 rounded-lg overflow-hidden">
-                    {selectedListing.images && selectedListing.images.length > 0 ? (
+                  <h4 className="text-lg font-semibold text-gray-900 mb-4">Hình ảnh</h4>
+                  {selectedListing.images && selectedListing.images.length > 0 ? (
+                    <div className="space-y-4">
+                      <div className="relative">
                         <img
                           src={selectedListing.images[currentImageIndex]}
                           alt={selectedListing.title}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex items-center justify-center h-full">
-                        <Car className="h-16 w-16 text-gray-400" />
-                  </div>
-                )}
-                  </div>
+                          className="w-full h-64 object-cover rounded-lg"
+                        />
+                      </div>
+                      {selectedListing.images.length > 1 && (
+                        <div className="flex space-x-2 overflow-x-auto">
+                          {selectedListing.images.map((img, index) => (
+                            <button
+                              key={index}
+                              onClick={() => setCurrentImageIndex(index)}
+                              className={`flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden ${
+                                index === currentImageIndex ? 'ring-2 ring-blue-500' : ''
+                              }`}
+                            >
+                              <img
+                                src={img}
+                                alt={`${selectedListing.title} ${index + 1}`}
+                                className="w-full h-full object-cover"
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="w-full h-64 bg-gray-200 rounded-lg flex items-center justify-center">
+                      <Car className="h-16 w-16 text-gray-400" />
+                    </div>
+                  )}
                 </div>
 
                 {/* Details */}
-                <div className="space-y-4">
-                    <div>
-                    <h3 className="text-xl font-semibold text-gray-900 mb-2">
-                      {selectedListing.title}
-                    </h3>
-                    <p className="text-lg font-bold text-green-600">
-                      {formatPrice(selectedListing.price)}
-                      </p>
+                <div>
+                  <h4 className="text-lg font-semibold text-gray-900 mb-4">Thông tin chi tiết</h4>
+                  <div className="space-y-4">
+                    {/* Row 1: Loại sản phẩm & Trạng thái */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="flex flex-col">
+                        <p className="text-sm text-gray-500 mb-1">Loại sản phẩm</p>
+                        <p className="font-medium">
+                          <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800">
+                            {selectedListing.productType === "Vehicle" || selectedListing.categoryId === 1 ? "Xe điện" : "Pin"}
+                          </span>
+                        </p>
+                      </div>
+                      <div className="flex flex-col">
+                        <p className="text-sm text-gray-500 mb-1">Trạng thái</p>
+                        <p className="font-medium">
+                          <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                            (selectedListing.status || "").toLowerCase() === "pending" || (selectedListing.status || "").toLowerCase() === "đang chờ duyệt"
+                              ? "bg-yellow-100 text-yellow-800"
+                              : (selectedListing.status || "").toLowerCase() === "approved" || (selectedListing.status || "").toLowerCase() === "đã duyệt"
+                              ? "bg-green-100 text-green-800"
+                              : "bg-red-100 text-red-800"
+                          }`}>
+                            {selectedListing.status || "N/A"}
+                          </span>
+                        </p>
+                      </div>
                     </div>
 
-                  <div className="space-y-2">
-                    <div className="flex items-center text-sm text-gray-600">
-                      <Car className="h-4 w-4 mr-2" />
-                      <span>{selectedListing.brand} {selectedListing.model}</span>
-                  </div>
-                    
-                    <div className="flex items-center text-sm text-gray-600">
-                      <Calendar className="h-4 w-4 mr-2" />
-                      <span>Ngày tạo: {formatDate(selectedListing.createdAt)}</span>
-                </div>
-                    
-                    <div className="flex items-center text-sm text-gray-600">
-                      <Users className="h-4 w-4 mr-2" />
-                      <span>Người bán: {selectedListing.sellerName || "Unknown"}</span>
+                    {/* Row 2: Thương hiệu & Model */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="flex flex-col">
+                        <p className="text-sm text-gray-500 mb-1">Thương hiệu</p>
+                        <p className="font-medium">{selectedListing.brand || "N/A"}</p>
+                      </div>
+                      <div className="flex flex-col">
+                        <p className="text-sm text-gray-500 mb-1">Model</p>
+                        <p className="font-medium">{selectedListing.model || "N/A"}</p>
+                      </div>
                     </div>
+
+                    {(selectedListing.productType === "Vehicle" || selectedListing.categoryId === 1) && (
+                      <>
+                        {/* Row 3: Năm sản xuất & Giá */}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="flex flex-col">
+                            <p className="text-sm text-gray-500 mb-1">Năm sản xuất</p>
+                            <p className="font-medium">{selectedListing.year || "N/A"}</p>
+                          </div>
+                          <div className="flex flex-col">
+                            <p className="text-sm text-gray-500 mb-1">Giá</p>
+                            <p className="font-medium text-green-600">{formatPrice(selectedListing.price || 0)}</p>
+                          </div>
+                        </div>
+
+                        {/* Row 4: Biển số & Số km */}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="flex flex-col">
+                            <p className="text-sm text-gray-500 mb-1">Biển số</p>
+                            <p className="font-medium">{selectedListing.licensePlate || selectedListing.license_plate || "N/A"}</p>
+                          </div>
+                          <div className="flex flex-col">
+                            <p className="text-sm text-gray-500 mb-1">Số km</p>
+                            <p className="font-medium">{selectedListing.mileage || "N/A"}</p>
+                          </div>
+                        </div>
+
+                        {/* Row 5: Tình trạng & Thời hạn bảo hành */}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="flex flex-col">
+                            <p className="text-sm text-gray-500 mb-1">Tình trạng</p>
+                            <p className="font-medium">{selectedListing.condition || "N/A"}</p>
+                          </div>
+                          <div className="flex flex-col">
+                            <p className="text-sm text-gray-500 mb-1">Thời hạn bảo hành</p>
+                            <p className="font-medium">{selectedListing.warrantyPeriod || selectedListing.warranty_period || "Chưa cập nhật"}</p>
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {selectedListing.productType !== "Vehicle" && selectedListing.categoryId !== 1 && (
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="flex flex-col">
+                          <p className="text-sm text-gray-500 mb-1">Năm sản xuất</p>
+                          <p className="font-medium">{selectedListing.year || "N/A"}</p>
+                        </div>
+                        <div className="flex flex-col">
+                          <p className="text-sm text-gray-500 mb-1">Giá</p>
+                          <p className="font-medium text-green-600">{formatPrice(selectedListing.price || 0)}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Row 6: Mô tả - Full width */}
+                    <div className="flex flex-col">
+                      <p className="text-sm text-gray-500 mb-1">Mô tả</p>
+                      <p className="font-medium text-gray-700">{selectedListing.description || "Chưa có mô tả"}</p>
+                    </div>
+
+                    {/* Row 7: Người bán - Full width */}
+                    <div className="flex flex-col">
+                      <p className="text-sm text-gray-500 mb-1">Người bán</p>
+                      <p className="font-medium">{selectedListing.sellerName || "Unknown"}</p>
+                    </div>
+
+                    {/* Row 8: Số điện thoại - Full width */}
+                    {selectedListing.sellerPhone && selectedListing.sellerPhone !== "N/A" && (
+                      <div className="flex flex-col">
+                        <p className="text-sm text-gray-500 mb-1">Số điện thoại</p>
+                        <p className="font-medium">{selectedListing.sellerPhone}</p>
+                      </div>
+                    )}
+
+                    {/* Row 9: Email - Full width */}
+                    {selectedListing.sellerEmail && selectedListing.sellerEmail !== "N/A" && (
+                      <div className="flex flex-col">
+                        <p className="text-sm text-gray-500 mb-1">Email</p>
+                        <p className="font-medium">{selectedListing.sellerEmail}</p>
+                      </div>
+                    )}
                   </div>
 
                   {/* Duplicate License Plate Warning */}
@@ -3950,6 +4127,48 @@ export const AdminDashboard = () => {
                         )}
                       </div>
                     </div>
+              </div>
+
+              {/* Actions */}
+              <div className="mt-6 flex items-center justify-end space-x-3 border-t border-gray-200 pt-6">
+                <button
+                  onClick={() => setShowModal(false)}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  Đóng
+                </button>
+                {((selectedListing.status || "").toLowerCase() === "pending" || 
+                  (selectedListing.status || "").toLowerCase() === "re-submit" || 
+                  (selectedListing.status || "").toLowerCase() === "draft") && (
+                  <>
+                    <button
+                      onClick={() => {
+                        setShowModal(false);
+                        handleApprove(selectedListing.id);
+                      }}
+                      disabled={processingIds.has(selectedListing.id)}
+                      className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+                    >
+                      {processingIds.has(selectedListing.id) ? (
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <CheckCircle className="h-4 w-4" />
+                      )}
+                      <span>Duyệt</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowModal(false);
+                        setRejectModal({ isOpen: true, product: selectedListing });
+                      }}
+                      disabled={processingIds.has(selectedListing.id)}
+                      className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+                    >
+                      <XCircle className="h-4 w-4" />
+                      <span>Từ chối</span>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -4263,30 +4482,58 @@ export const AdminDashboard = () => {
             </h2>
             
             {/* Transaction Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+              <button
+                onClick={() => setTransactionStatusFilter("pending")}
+                className={`bg-yellow-50 border-2 rounded-lg p-4 text-left transition-all hover:shadow-md ${
+                  transactionStatusFilter === "pending" 
+                    ? "border-yellow-400 shadow-md" 
+                    : "border-yellow-200 hover:border-yellow-300"
+                }`}
+              >
                 <div className="flex items-center">
                   <Clock className="h-8 w-8 text-yellow-600 mr-3" />
                   <div>
                     <p className="text-sm font-medium text-yellow-900">Đang trong quá trình thanh toán</p>
                     <p className="text-2xl font-bold text-yellow-600">
-                      {allListings.filter(product => product.status === 'reserved').length}
+                      {orders.filter(order => {
+                        const status = (order.status || order.orderStatus || order.Status || order.OrderStatus || '').toLowerCase();
+                        return status === 'pending' || status === 'processing' || status === 'depositpaid' || 
+                               status === 'deposited' || status === 'confirmed';
+                      }).length}
                     </p>
                   </div>
                 </div>
-              </div>
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              </button>
+              <button
+                onClick={() => setTransactionStatusFilter("completed")}
+                className={`bg-green-50 border-2 rounded-lg p-4 text-left transition-all hover:shadow-md ${
+                  transactionStatusFilter === "completed" 
+                    ? "border-green-400 shadow-md" 
+                    : "border-green-200 hover:border-green-300"
+                }`}
+              >
                 <div className="flex items-center">
                   <DollarSign className="h-8 w-8 text-green-600 mr-3" />
                   <div>
                     <p className="text-sm font-medium text-green-900">Đã hoàn tất</p>
                     <p className="text-2xl font-bold text-green-600">
-                      {allListings.filter(product => product.status === 'sold').length}
+                      {orders.filter(order => {
+                        const status = (order.status || order.orderStatus || order.Status || order.OrderStatus || '').toLowerCase();
+                        return status === 'completed';
+                      }).length}
                     </p>
                   </div>
                 </div>
-              </div>
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              </button>
+              <button
+                onClick={() => setTransactionStatusFilter("rejected")}
+                className={`bg-red-50 border-2 rounded-lg p-4 text-left transition-all hover:shadow-md ${
+                  transactionStatusFilter === "rejected" 
+                    ? "border-red-400 shadow-md" 
+                    : "border-red-200 hover:border-red-300"
+                }`}
+              >
                 <div className="flex items-center">
                   <XCircle className="h-8 w-8 text-red-600 mr-3" />
                   <div>
@@ -4294,94 +4541,305 @@ export const AdminDashboard = () => {
                     <p className="text-2xl font-bold text-red-600">
                       {orders.filter(order => {
                         const status = (order.status || order.orderStatus || order.Status || order.OrderStatus || '').toLowerCase();
-                        return status === 'cancelled' || status === 'failed';
+                        return status === 'cancelled' || status === 'failed' || status === 'canceled';
                       }).length}
                     </p>
                   </div>
                 </div>
-              </div>
+              </button>
             </div>
+            
+            {/* Filter Reset Button */}
+            {transactionStatusFilter !== "all" && (
+              <div className="mb-4">
+                <button
+                  onClick={() => setTransactionStatusFilter("all")}
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium"
+                >
+                  Hiển thị tất cả
+                </button>
+              </div>
+            )}
 
-            {/* Reserved and Sold Products List */}
+            {/* Orders List */}
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-gray-900">Quản lý giao dịch (Đang trong quá trình thanh toán & Đã hoàn tất)</h3>
-              {allListings.filter(product => product.status === 'reserved' || product.status === 'sold').length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {allListings.filter(product => product.status === 'reserved' || product.status === 'sold').map((product) => (
-                    <div key={product.id || product.productId} className={`border rounded-lg p-4 ${product.status === 'reserved' ? 'border-yellow-200 bg-yellow-50' : 'border-blue-200 bg-blue-50'}`}>
-                      <div className="flex items-start space-x-3">
-                        <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0">
-                          {product.images && product.images.length > 0 ? (
-                            <img
-                              className="w-full h-full object-cover"
-                              src={product.images[0]}
-                              alt={product.title || product.name}
-                              onError={(e) => {
-                                console.log("Image failed to load:", product.images[0]);
-                                e.target.style.display = 'none';
-                                e.target.nextSibling.style.display = 'flex';
-                              }}
-                            />
-                          ) : null}
-                          <div 
-                            className={`w-full h-full rounded-lg flex items-center justify-center ${product.status === 'reserved' ? 'bg-yellow-200' : 'bg-blue-200'} ${product.images && product.images.length > 0 ? 'hidden' : ''}`}
-                            style={{ display: product.images && product.images.length > 0 ? 'none' : 'flex' }}
-                          >
-                            {product.status === 'reserved' ? <Clock className="h-6 w-6 text-yellow-600" /> : <DollarSign className="h-6 w-6 text-blue-600" />}
-                          </div>
-                        </div>
-                        <div className="flex-1">
-                          <h4 className="font-medium text-gray-900 line-clamp-2">
-                            {product.title || product.name}
-                          </h4>
-                          <p className="text-lg font-bold text-blue-600 mt-1">
-                            {formatPrice(product.price)}
-                          </p>
-                          <div className="flex items-center mt-2">
-                            {product.status === 'reserved' ? <Clock className="h-4 w-4 text-yellow-600 mr-1" /> : <DollarSign className="h-4 w-4 text-blue-600 mr-1" />}
-                            <span className={`text-sm ${product.status === 'reserved' ? 'text-yellow-600' : 'text-blue-600'}`}>
-                              {product.status === 'reserved' ? 'Đang trong quá trình thanh toán' : 'Đã hoàn tất'}
+              <h3 className="text-lg font-semibold text-gray-900">Danh sách đơn hàng</h3>
+              {filteredOrders.length > 0 ? (
+                <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Mã đơn</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Người mua</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sản phẩm</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tổng tiền</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Trạng thái</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hợp đồng</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ngày tạo</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Thao tác</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {filteredOrders.map((order) => {
+                          const status = (order.status || order.orderStatus || order.Status || order.OrderStatus || "").toLowerCase();
+                          const orderId = order.orderId || order.OrderId || order.id || order.Id;
+                          const hasContract = order.contractUrl || order.ContractUrl;
+                          return (
+                            <tr key={orderId} className="hover:bg-gray-50">
+                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                #{orderId}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {order.buyerName || order.BuyerName || "N/A"}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {order.productName || order.ProductName || "N/A"}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {formatPrice(order.totalAmount || order.TotalAmount || 0)}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                                  status === 'completed' ? 'bg-green-100 text-green-800' :
+                                  status === 'pending' || status === 'processing' || status === 'depositpaid' || status === 'deposited' ? 'bg-yellow-100 text-yellow-800' :
+                                  status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                                  status === 'confirmed' ? 'bg-blue-100 text-blue-800' :
+                                  'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {getOrderStatusText(status)}
                             </span>
-                          </div>
-                          <div className="mt-2 text-sm text-gray-600">
-                            <p>Seller ID: {product.sellerId}</p>
-                            <p>Ngày tạo: {formatDate(product.createdAt || product.createdDate)}</p>
-                          </div>
-                        </div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                {hasContract ? (
+                                  <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">
+                                    Đã có
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800">
+                                    Chưa có
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {(() => {
+                                  // Try multiple date fields from backend
+                                  const dateFields = [
+                                    order.CreatedDate, // Backend returns this (PascalCase)
+                                    order.createdDate,
+                                    order.createdAt,
+                                    order.CreatedAt,
+                                    order.orderDate,
+                                    order.OrderDate,
+                                    order.dateCreated,
+                                    order.DateCreated
+                                  ];
+                                  
+                                  const validDate = dateFields.find(date => {
+                                    if (!date) return false;
+                                    try {
+                                      const dateObj = new Date(date);
+                                      return !isNaN(dateObj.getTime());
+                                    } catch {
+                                      return false;
+                                    }
+                                  });
+                                  
+                                  return validDate ? formatDateTime(validDate) : 'Chưa có';
+                                })()}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                <div className="flex flex-col space-y-2">
+                                  <button
+                                    onClick={async () => {
+                                      setOrderDetailModal({ isOpen: true, order, orderDetails: null, loading: true });
+                                      try {
+                                        const details = await apiRequest(`/api/Order/details/${orderId}`);
+                                        setOrderDetailModal({ isOpen: true, order, orderDetails: details, loading: false });
+                                      } catch (error) {
+                                        console.error("Error loading order details:", error);
+                                        showToast({
+                                          title: "Lỗi",
+                                          description: "Không thể tải chi tiết đơn hàng",
+                                          type: "error",
+                                        });
+                                        setOrderDetailModal({ isOpen: false, order: null, orderDetails: null, loading: false });
+                                      }
+                                    }}
+                                    className="w-full px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center justify-center space-x-1 text-xs"
+                                  >
+                                    <Eye className="h-3.5 w-3.5" />
+                                    <span>Xem chi tiết</span>
+                                  </button>
+                                  
+                                  {/* Show action buttons for orders that can be confirmed or rejected */}
+                                  {status !== 'completed' && status !== 'cancelled' && (
+                                    <div className="flex space-x-1">
+                                      <button
+                                        onClick={async () => {
+                                          if (!window.confirm('Bạn có chắc muốn xác nhận giao dịch này đã hoàn tất thành công?')) {
+                                            return;
+                                          }
+                                          try {
+                                            showToast({
+                                              title: 'Đang xử lý...',
+                                              description: 'Đang xác nhận giao dịch',
+                                              type: 'info',
+                                            });
+                                            
+                                            // LOGIC: When admin confirms order:
+                                            // 1. Update order status to "Completed"
+                                            // 2. Update product status from "Reserved" → "Sold" via admin-confirm endpoint
+                                            
+                                            // First, update order status to Completed
+                                            try {
+                                              await apiRequest(`/api/Order/${orderId}/status`, {
+                                                method: "PUT",
+                                                body: { Status: "Completed" },
+                                              });
+                                              console.log(`✅ [ADMIN CONFIRM] Order ${orderId} status updated to Completed`);
+                                            } catch (orderError) {
+                                              console.error(`❌ [ADMIN CONFIRM] Error updating order status:`, orderError);
+                                              showToast({
+                                                title: "Lỗi",
+                                                description: `Không thể cập nhật order status: ${orderError.message}`,
+                                                type: "error",
+                                              });
+                                              return; // Stop if order update fails
+                                            }
+                                            
+                                            // Backend returns ProductId (PascalCase) - check this FIRST
+                                            let productId = order.ProductId ||  // Backend GetAllOrders() returns ProductId (line 40)
+                                                          order.productId || 
+                                                          order.product?.ProductId ||
+                                                          order.product?.productId || 
+                                                          order.product?.id;
+                                            
+                                            // If still no productId, try to get from order details API
+                                            if (!productId) {
+                                              try {
+                                                console.log(`⚠️ [ADMIN CONFIRM] No productId in order object, fetching order details...`);
+                                                const orderDetails = await apiRequest(`/api/Order/details/${orderId}`);
+                                                productId = orderDetails.productId || orderDetails.ProductId;
+                                                console.log(`✅ [ADMIN CONFIRM] Got productId from order details: ${productId}`);
+                                              } catch (detailError) {
+                                                console.warn(`⚠️ [ADMIN CONFIRM] Could not fetch order details:`, detailError);
+                                              }
+                                            }
+                                            
+                                            console.log(`🔍 [ADMIN CONFIRM] Order confirmation data:`, {
+                                              orderId: orderId,
+                                              productId: productId,
+                                              orderProductId: order.productId,
+                                              orderProductIdCapital: order.ProductId
+                                            });
+                                            
+                                            // Use the dedicated admin-confirm endpoint to update product status
+                                            if (productId) {
+                                              try {
+                                                console.log(`🔄 [ADMIN CONFIRM] Calling /api/Payment/admin-confirm with ProductId: ${productId}...`);
+                                                const acceptResponse = await apiRequest(`/api/Payment/admin-confirm`, {
+                                                  method: "POST",
+                                                  body: { ProductId: productId },
+                                                });
+                                                console.log(`✅ [ADMIN CONFIRM] Admin confirm response:`, acceptResponse);
+                                                
+                                                // Verify the update was successful
+                                                if (acceptResponse?.newStatus?.toLowerCase() === "sold" || acceptResponse?.productStatus?.toLowerCase() === "sold") {
+                                                  console.log(`✅ [ADMIN CONFIRM] SUCCESS: Product ${productId} status is now "Sold"!`);
+                                                } else {
+                                                  console.warn(`⚠️ [ADMIN CONFIRM] Product status may not be updated correctly. Response:`, acceptResponse);
+                                                }
+                                              } catch (acceptError) {
+                                                console.error(`❌ [ADMIN CONFIRM] Error calling admin-confirm:`, acceptError);
+                                                showToast({
+                                                  title: "Cảnh báo",
+                                                  description: `Không thể cập nhật product status: ${acceptError.message}`,
+                                                  type: "warning",
+                                                });
+                                              }
+                                            } else {
+                                              console.error(`❌ [ADMIN CONFIRM] CRITICAL: No productId found in order ${orderId}! Cannot update product status.`);
+                                              showToast({
+                                                title: "Cảnh báo",
+                                                description: `Không tìm thấy ProductId trong order ${orderId}. Order đã được cập nhật nhưng product status chưa được cập nhật.`,
+                                                type: "warning",
+                                              });
+                                            }
+                                            
+                                            // Clear cache to force fresh data reload
+                                            try {
+                                              localStorage.removeItem('admin_cached_processed_listings');
+                                              localStorage.removeItem('admin_cached_users');
+                                              console.log('✅ Cleared admin cache');
+                                            } catch (cacheError) {
+                                              console.warn('⚠️ Could not clear cache:', cacheError);
+                                            }
+                                            
+                                            showToast({
+                                              title: "Thành công",
+                                              description: "Đã xác nhận giao dịch thành công",
+                                              type: "success",
+                                            });
+                                            
+                                            // Reload admin data to reflect status changes
+                                            await loadAdminData();
+                                          } catch (error) {
+                                            console.error("Error confirming transaction:", error);
+                                            showToast({
+                                              title: "Lỗi",
+                                              description: error.message || "Không thể xác nhận giao dịch. Vui lòng thử lại.",
+                                              type: "error",
+                                            });
+                                          }
+                                        }}
+                                        className="flex-1 px-2 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 flex items-center justify-center space-x-1 text-xs"
+                                        title="Xác nhận giao dịch thành công"
+                                      >
+                                        <CheckCircle className="h-3.5 w-3.5" />
+                                        <span>Xác nhận</span>
+                                      </button>
+                                      
+                                      <button
+                                        onClick={() => {
+                                          setTransactionFailureModal({
+                                            isOpen: true,
+                                            product: {
+                                              id: order.productId || order.ProductId,
+                                              productId: order.productId || order.ProductId,
+                                              title: order.productName || order.ProductName
+                                            },
+                                            orderId: orderId,
+                                            reasonCode: '',
+                                            reasonNote: '',
+                                            refundOption: 'refund'
+                                          });
+                                        }}
+                                        className="flex-1 px-2 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 flex items-center justify-center space-x-1 text-xs"
+                                        title="Đánh dấu giao dịch không thành công"
+                                      >
+                                        <XCircle className="h-3.5 w-3.5" />
+                                        <span>Từ chối</span>
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                       </div>
-                      <div className="mt-4 flex space-x-2">
-                        {product.status === 'reserved' && (
-                          <button
-                            onClick={() => handleAdminConfirm(product.id || product.productId)}
-                            className="flex-1 bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
-                          >
-                            Xác nhận giao dịch thành công
-                          </button>
-                        )}
-                        {product.status === 'reserved' && (
-                          <button
-                            onClick={() => handleMarkTransactionFailed(product.id || product.productId)}
-                            className="flex-1 bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
-                          >
-                            Giao dịch không thành công
-                          </button>
-                        )}
-                        {product.status === 'sold' && (
-                          <button
-                            onClick={() => handleViewDetails(product)}
-                            className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-                          >
-                            Xem chi tiết
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
                 </div>
               ) : (
                 <div className="text-center py-8">
                   <Clock className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-600">Chưa có sản phẩm nào đang trong quá trình thanh toán hoặc đã hoàn tất</p>
+                  <p className="text-gray-600">
+                    {transactionStatusFilter !== "all" 
+                      ? `Không có đơn hàng nào với trạng thái "${transactionStatusFilter === "pending" ? "Đang trong quá trình thanh toán" : transactionStatusFilter === "completed" ? "Đã hoàn tất" : "Đã từ chối"}"`
+                      : "Chưa có đơn hàng nào"}
+                  </p>
                 </div>
               )}
             </div>
@@ -4779,6 +5237,284 @@ export const AdminDashboard = () => {
                   <span>Xác nhận hủy giao dịch</span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Order Detail Modal */}
+      {orderDetailModal.isOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full mx-4 my-8">
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-blue-100 rounded-lg">
+                  <Eye className="h-6 w-6 text-blue-600" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900">Chi tiết đơn hàng</h3>
+                  <p className="text-sm text-gray-600">
+                    Đơn hàng #{orderDetailModal.order?.orderId || orderDetailModal.order?.OrderId || orderDetailModal.order?.id}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setOrderDetailModal({ isOpen: false, order: null, orderDetails: null, loading: false })}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6">
+              {orderDetailModal.loading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+                </div>
+              ) : orderDetailModal.orderDetails ? (
+                <div className="space-y-6">
+                  {/* Order Info */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <h4 className="font-semibold text-gray-900 mb-3">Thông tin đơn hàng</h4>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Mã đơn:</span>
+                          <span className="font-medium">#{orderDetailModal.orderDetails.orderId}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Trạng thái:</span>
+                          <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                            (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'completed' ? 'bg-green-100 text-green-800' :
+                            (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'pending' || (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'processing' || (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'depositpaid' || (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'deposited' ? 'bg-yellow-100 text-yellow-800' :
+                            (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'cancelled' ? 'bg-red-100 text-red-800' :
+                            (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'confirmed' ? 'bg-blue-100 text-blue-800' :
+                            'bg-gray-100 text-gray-800'
+                          }`}>
+                            {getOrderStatusText(orderDetailModal.orderDetails.orderStatus)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Tiền cọc:</span>
+                          <span className="font-medium">{formatPrice(orderDetailModal.orderDetails.depositAmount)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Tổng tiền:</span>
+                          <span className="font-medium text-green-600">{formatPrice(orderDetailModal.orderDetails.totalAmount)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Ngày tạo:</span>
+                          <span className="font-medium">{formatDateTime(orderDetailModal.orderDetails.createdAt || orderDetailModal.orderDetails.CreatedAt || orderDetailModal.orderDetails.createdDate || orderDetailModal.orderDetails.CreatedDate)}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <h4 className="font-semibold text-gray-900 mb-3">Thông tin người mua</h4>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Tên:</span>
+                          <span className="font-medium">{orderDetailModal.orderDetails.buyerName || 'Chưa có'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Email:</span>
+                          <span className="font-medium">{orderDetailModal.orderDetails.buyerEmail || 'Chưa có'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Số điện thoại:</span>
+                          <span className="font-medium">{orderDetailModal.orderDetails.buyerPhone || 'Chưa có'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Seller Info */}
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <h4 className="font-semibold text-gray-900 mb-3">Thông tin người bán</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-600 block mb-1">Tên:</span>
+                        <span className="font-medium">{orderDetailModal.orderDetails.sellerName || 'Chưa có'}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600 block mb-1">Email:</span>
+                        <span className="font-medium">{orderDetailModal.orderDetails.sellerEmail || 'Chưa có'}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600 block mb-1">Số điện thoại:</span>
+                        <span className="font-medium">{orderDetailModal.orderDetails.sellerPhone || 'Chưa có'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Product Info */}
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <h4 className="font-semibold text-gray-900 mb-3">Thông tin sản phẩm</h4>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Tên sản phẩm:</span>
+                        <span className="font-medium">{orderDetailModal.orderDetails.productTitle}</span>
+                      </div>
+                      {orderDetailModal.orderDetails.productImages && orderDetailModal.orderDetails.productImages.length > 0 && (
+                        <div className="mt-3">
+                          <img
+                            src={orderDetailModal.orderDetails.productImages[0]}
+                            alt={orderDetailModal.orderDetails.productTitle}
+                            className="w-32 h-32 object-cover rounded-lg"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Contract */}
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <h4 className="font-semibold text-gray-900 mb-3">Hợp đồng</h4>
+                    {orderDetailModal.orderDetails.contractUrl ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center space-x-2">
+                          <FileText className="h-5 w-5 text-green-600" />
+                          <span className="text-sm text-gray-600">Hợp đồng đã được staff gửi lên</span>
+                        </div>
+                        <a
+                          href={orderDetailModal.orderDetails.contractUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-center"
+                        >
+                          Xem hợp đồng
+                        </a>
+                      </div>
+                    ) : (
+                      <div className="flex items-center space-x-2 text-yellow-600">
+                        <AlertTriangle className="h-5 w-5" />
+                        <span className="text-sm">Chưa có hợp đồng. Vui lòng đợi staff gửi hợp đồng.</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Action Buttons */}
+                  {orderDetailModal.orderDetails.contractUrl && 
+                   orderDetailModal.orderDetails.sellerConfirmed && 
+                   !orderDetailModal.orderDetails.adminConfirmed && (
+                    <div className="flex space-x-3 pt-4 border-t border-gray-200">
+                      <button
+                        onClick={async () => {
+                          try {
+                            showToast({
+                              title: 'Đang xử lý...',
+                              description: 'Đang xác nhận giao dịch',
+                              type: 'info',
+                            });
+                            
+                            // LOGIC: When admin confirms order:
+                            // 1. Update order status to "Completed"
+                            // 2. Update product status from "Reserved" → "Sold" via admin-confirm endpoint
+                            
+                            // First, update order status to Completed
+                            try {
+                              await apiRequest(`/api/Order/${orderDetailModal.orderDetails.orderId}/status`, {
+                                method: "PUT",
+                                body: { Status: "Completed" },
+                              });
+                              console.log(`✅ [MODAL CONFIRM] Order ${orderDetailModal.orderDetails.orderId} status updated to Completed`);
+                            } catch (orderError) {
+                              console.error(`❌ [MODAL CONFIRM] Error updating order status:`, orderError);
+                              showToast({
+                                title: "Lỗi",
+                                description: `Không thể cập nhật order status: ${orderError.message}`,
+                                type: "error",
+                              });
+                              return; // Stop if order update fails
+                            }
+                            
+                            // Try multiple sources for productId from order details
+                            let productId = orderDetailModal.orderDetails.productId || 
+                                          orderDetailModal.orderDetails.ProductId ||
+                                          orderDetailModal.orderDetails.product?.productId ||
+                                          orderDetailModal.orderDetails.product?.ProductId ||
+                                          orderDetailModal.orderDetails.product?.id;
+                            
+                            console.log(`🔍 [MODAL CONFIRM] Order confirmation data:`, {
+                              orderId: orderDetailModal.orderDetails.orderId,
+                              productId: productId,
+                              orderDetails: orderDetailModal.orderDetails
+                            });
+                            
+                            // Use the dedicated admin-confirm endpoint to update product status
+                            if (productId) {
+                              try {
+                                console.log(`🔄 [MODAL CONFIRM] Calling /api/Payment/admin-confirm with ProductId: ${productId}...`);
+                                const acceptResponse = await apiRequest(`/api/Payment/admin-confirm`, {
+                                  method: "POST",
+                                  body: { ProductId: productId },
+                                });
+                                console.log(`✅ [MODAL CONFIRM] Admin confirm response:`, acceptResponse);
+                                
+                                // Verify the update was successful
+                                if (acceptResponse?.newStatus?.toLowerCase() === "sold" || acceptResponse?.productStatus?.toLowerCase() === "sold") {
+                                  console.log(`✅ [MODAL CONFIRM] SUCCESS: Product ${productId} status is now "Sold"!`);
+                                } else {
+                                  console.warn(`⚠️ [MODAL CONFIRM] Product status may not be updated correctly. Response:`, acceptResponse);
+                                }
+                              } catch (acceptError) {
+                                console.error(`❌ [MODAL CONFIRM] Error calling admin-confirm:`, acceptError);
+                                showToast({
+                                  title: "Cảnh báo",
+                                  description: `Không thể cập nhật product status: ${acceptError.message}`,
+                                  type: "warning",
+                                });
+                              }
+                            } else {
+                              console.error(`❌ [MODAL CONFIRM] CRITICAL: No productId found in order details! Cannot update product status.`);
+                              showToast({
+                                title: "Cảnh báo",
+                                description: `Không tìm thấy ProductId trong order details. Order đã được cập nhật nhưng product status chưa được cập nhật.`,
+                                type: "warning",
+                              });
+                            }
+                            
+                            // Clear cache to force fresh data reload
+                            try {
+                              localStorage.removeItem('admin_cached_processed_listings');
+                              localStorage.removeItem('admin_cached_users');
+                              console.log('✅ Cleared admin cache');
+                            } catch (cacheError) {
+                              console.warn('⚠️ Could not clear cache:', cacheError);
+                            }
+                            
+                            showToast({
+                              title: "Thành công",
+                              description: "Đã xác nhận giao dịch thành công",
+                              type: "success",
+                            });
+                            setOrderDetailModal({ isOpen: false, order: null, orderDetails: null, loading: false });
+                            // Reload admin data to reflect status changes
+                            await loadAdminData();
+                          } catch (error) {
+                            console.error("Error confirming transaction:", error);
+                            showToast({
+                              title: "Lỗi",
+                              description: error.message || "Không thể xác nhận giao dịch",
+                              type: "error",
+                            });
+                          }
+                        }}
+                        className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center space-x-2"
+                      >
+                        <CheckCircle className="h-5 w-5" />
+                        <span>Xác nhận giao dịch thành công</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-gray-500">
+                  Không thể tải chi tiết đơn hàng
+                </div>
+              )}
             </div>
           </div>
         </div>

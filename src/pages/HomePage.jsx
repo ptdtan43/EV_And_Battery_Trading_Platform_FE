@@ -391,6 +391,40 @@ export const HomePage = () => {
           const isNotRejected = status !== "rejected";
           const isNotReserved = status !== "reserved"; // Filter out reserved products
           const shouldShow = isApproved && isNotSold && isNotRejected && isNotReserved;
+          
+          // Determine product type for logging
+          let productType = "vehicle";
+          if (x.productType) {
+            productType = x.productType.toLowerCase();
+          } else if (x.capacity || x.voltage || x.cycleCount || x.cycle_count) {
+            productType = "battery";
+          }
+          
+          // Debug logging for ALL products (especially batteries) to see their status
+          if (productType === "battery" || productType === "pin") {
+            console.log(`🔋 Battery product ${x.id || x.productId || x.ProductId || 'unknown'}:`, {
+              title: x.title || x.Title,
+              status: status,
+              rawStatus: x.status || x.Status,
+              productType: productType,
+              isApproved,
+              isNotSold,
+              isNotRejected,
+              isNotReserved,
+              shouldShow: shouldShow,
+              willShow: shouldShow ? "✅ YES" : "❌ NO"
+            });
+          }
+          
+          // Log if product is sold but still showing
+          if (status === "sold" && shouldShow) {
+            console.warn(`⚠️ WARNING: Sold product ${x.id || x.productId || x.ProductId} is still showing!`, {
+              title: x.title || x.Title,
+              status: status,
+              productType: productType
+            });
+          }
+          
           return shouldShow;
         })
         .map((x) => {

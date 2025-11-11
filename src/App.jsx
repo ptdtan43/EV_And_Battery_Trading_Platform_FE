@@ -13,6 +13,7 @@ import { HomePage } from "./pages/HomePage";
 import { Dashboard } from "./pages/Dashboard";
 import { Profile } from "./pages/Profile";
 import { AdminDashboard } from "./pages/AdminDashboard";
+import { StaffDashboard } from "./pages/StaffDashboard";
 import { CreateListing } from "./pages/CreateListing";
 import { EditListing } from "./pages/EditListing";
 import { MyListings } from "./pages/MyListings";
@@ -76,14 +77,17 @@ const PublicRoute = ({ children }) => {
       .toString()
       .toLowerCase();
     const isAdmin = roleId === 1 || roleId === "1" || roleName === "admin";
+    const isStaff = roleId === 3 || roleId === "3" || roleName === "staff";
 
-    return <Navigate to={isAdmin ? "/admin" : "/dashboard"} replace />;
+    if (isAdmin) return <Navigate to="/admin" replace />;
+    if (isStaff) return <Navigate to="/staff" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   return children;
 };
 
-const ProtectedRoute = ({ children, adminOnly = false, userOnly = false }) => {
+const ProtectedRoute = ({ children, adminOnly = false, staffOnly = false, userOnly = false }) => {
   const { user, profile, loading } = useAuth();
 
   if (loading) {
@@ -98,7 +102,7 @@ const ProtectedRoute = ({ children, adminOnly = false, userOnly = false }) => {
     return <Navigate to="/login" />;
   }
 
-  // Check admin status using roleId or role
+  // Check admin and staff status using roleId or role
   const roleId = user?.roleId || profile?.roleId || user?.role || profile?.role;
   const roleName = (
     user?.roleName ||
@@ -110,6 +114,7 @@ const ProtectedRoute = ({ children, adminOnly = false, userOnly = false }) => {
     .toString()
     .toLowerCase();
   const isAdmin = roleId === 1 || roleId === "1" || roleName === "admin";
+  const isStaff = roleId === 3 || roleId === "3" || roleName === "staff";
 
   console.log("=== ROLE CHECK DEBUG ===");
   console.log("User object:", user);
@@ -117,14 +122,24 @@ const ProtectedRoute = ({ children, adminOnly = false, userOnly = false }) => {
   console.log("RoleId:", roleId);
   console.log("RoleName:", roleName);
   console.log("IsAdmin:", isAdmin);
+  console.log("IsStaff:", isStaff);
   console.log("========================");
 
   if (adminOnly && !isAdmin) {
+    // Redirect staff to staff dashboard, others to user dashboard
+    if (isStaff) return <Navigate to="/staff" />;
     return <Navigate to="/dashboard" />;
   }
 
-  if (userOnly && isAdmin) {
-    return <Navigate to="/admin" />;
+  if (staffOnly && !isStaff) {
+    // Redirect admin to admin dashboard, others to user dashboard
+    if (isAdmin) return <Navigate to="/admin" />;
+    return <Navigate to="/dashboard" />;
+  }
+
+  if (userOnly && (isAdmin || isStaff)) {
+    if (isAdmin) return <Navigate to="/admin" />;
+    if (isStaff) return <Navigate to="/staff" />;
   }
 
   return children;
@@ -134,6 +149,7 @@ const AppContent = () => {
   const { loading } = useAuth();
   const location = useLocation();
   const isAdminRoute = location.pathname.startsWith('/admin');
+  const isStaffRoute = location.pathname.startsWith('/staff');
 
   // Scroll to top when route changes
   useEffect(() => {
@@ -221,7 +237,7 @@ const AppContent = () => {
 
   return (
     <div className="min-h-screen flex flex-col">
-      {!isAdminRoute && <Header />}
+      {!isAdminRoute && !isStaffRoute && <Header />}
       <main className="flex-grow">
         <Routes>
           <Route path="/" element={<HomePage />} />
@@ -308,6 +324,15 @@ const AppContent = () => {
             }
           />
 
+          <Route
+            path="/staff"
+            element={
+              <ProtectedRoute staffOnly>
+                <StaffDashboard />
+              </ProtectedRoute>
+            }
+          />
+
           {/* Seller Routes */}
           <Route path="/seller/:id" element={<SellerProfile />} />
           <Route path="/seller/:id/products" element={<SellerProducts />} />
@@ -373,7 +398,7 @@ const AppContent = () => {
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </main>
-      {!isAdminRoute && <Footer />}
+      {!isAdminRoute && !isStaffRoute && <Footer />}
     </div>
   );
 };
