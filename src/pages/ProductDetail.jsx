@@ -194,6 +194,16 @@ export const ProductDetail = () => {
         productType: productData.productType || productData.product_type || productData.ProductType || "Vehicle",
         // Normalize verificationStatus (handle various formats)
         verificationStatus: productData.verificationStatus || productData.verification_status || productData.VerificationStatus || "NotRequested",
+        // Normalize year and manufactureYear: convert 0 to null to avoid displaying "0"
+        year: (productData.year && productData.year > 0) ? productData.year : (productData.manufactureYear && productData.manufactureYear > 0) ? productData.manufactureYear : null,
+        manufactureYear: (productData.manufactureYear && productData.manufactureYear > 0) ? productData.manufactureYear : (productData.year && productData.year > 0) ? productData.year : null,
+        // Normalize numeric fields: convert 0 to null for battery products to prevent rendering "0"
+        mileage: productData.mileage && productData.mileage > 0 ? productData.mileage : null,
+        seatCount: productData.seatCount && productData.seatCount > 0 ? productData.seatCount : null,
+        batteryHealth: productData.batteryHealth && productData.batteryHealth > 0 ? productData.batteryHealth : null,
+        capacity: productData.capacity && productData.capacity > 0 ? productData.capacity : null,
+        voltage: productData.voltage && productData.voltage > 0 ? productData.voltage : null,
+        cycleCount: productData.cycleCount && productData.cycleCount > 0 ? productData.cycleCount : null,
       };
 
       console.log("[ProductDetail] Raw product data:", productData);
@@ -1058,19 +1068,14 @@ export const ProductDetail = () => {
 
               {/* Key Features */}
               <div className="grid grid-cols-2 gap-4 mb-6">
-                {product.year && (
+                {/* Show year for vehicles and batteries when year > 0 */}
+                {((product.year && product.year > 0) || (product.manufactureYear && product.manufactureYear > 0)) && (
                   <div className="flex items-center text-gray-600">
                     <Calendar className="h-5 w-5 mr-2 text-blue-600" />
-                    <span>Năm sản xuất: {product.year}</span>
+                    <span>Năm sản xuất: {product.year > 0 ? product.year : (product.manufactureYear > 0 ? product.manufactureYear : '')}</span>
                   </div>
                 )}
-                {product.mileage && (
-                  <div className="flex items-center text-gray-600">
-                    <Gauge className="h-5 w-5 mr-2 text-blue-600" />
-                    <span>Km đã đi: {product.mileage.toLocaleString()}</span>
-                  </div>
-                )}
-                {product.battery_capacity && (
+                {product.battery_capacity && product.battery_capacity > 0 && (
                   <div className="flex items-center text-gray-600">
                     <Battery className="h-5 w-5 mr-2 text-blue-600" />
                     <span>Pin: {product.battery_capacity} kWh</span>
@@ -1305,7 +1310,7 @@ export const ProductDetail = () => {
                 {/* Thông tin xe điện */}
                 {product.productType?.toLowerCase() === "vehicle" && (
                   <>
-                    {product.year && (
+                    {product.year && product.year > 0 && (
                       <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
                         <span className="text-gray-600 font-medium">
                           Năm sản xuất
@@ -1325,7 +1330,7 @@ export const ProductDetail = () => {
                         </span>
                       </div>
                     )}
-                    {product.mileage && (
+                    {product.mileage && product.mileage > 0 && (
                       <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
                         <span className="text-gray-600 font-medium">
                           Số km đã đi
@@ -1362,7 +1367,17 @@ export const ProductDetail = () => {
                 {/* Thông tin pin */}
                 {product.productType?.toLowerCase() === "battery" && (
                   <>
-                    {product.batteryType && (
+                    {((product.year && product.year > 0) || (product.manufactureYear && product.manufactureYear > 0)) && (
+                      <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
+                        <span className="text-gray-600 font-medium">
+                          Năm sản xuất
+                        </span>
+                        <span className="font-semibold text-gray-900">
+                          {product.year > 0 ? product.year : (product.manufactureYear > 0 ? product.manufactureYear : '')}
+                        </span>
+                      </div>
+                    )}
+                    {product.batteryType && product.batteryType !== "0" && product.batteryType !== 0 && product.batteryType !== "" && (
                       <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
                         <span className="text-gray-600 font-medium">
                           Loại pin
@@ -1372,7 +1387,7 @@ export const ProductDetail = () => {
                         </span>
                       </div>
                     )}
-                    {product.batteryHealth && (
+                    {product.batteryHealth && product.batteryHealth > 0 && (
                       <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
                         <span className="text-gray-600 font-medium">
                           Tình trạng pin
@@ -1382,7 +1397,7 @@ export const ProductDetail = () => {
                         </span>
                       </div>
                     )}
-                    {product.capacity && (
+                    {product.capacity && product.capacity > 0 && (
                       <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
                         <span className="text-gray-600 font-medium">
                           Dung lượng
@@ -1392,7 +1407,7 @@ export const ProductDetail = () => {
                         </span>
                       </div>
                     )}
-                    {product.voltage && (
+                    {product.voltage && product.voltage > 0 && (
                       <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
                         <span className="text-gray-600 font-medium">
                           Điện áp
@@ -1402,7 +1417,7 @@ export const ProductDetail = () => {
                         </span>
                       </div>
                     )}
-                    {product.bms && (
+                    {product.bms && product.bms !== "0" && product.bms !== 0 && product.bms !== "" && (
                       <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
                         <span className="text-gray-600 font-medium">BMS</span>
                         <span className="font-semibold text-gray-900">
@@ -1410,7 +1425,7 @@ export const ProductDetail = () => {
                         </span>
                       </div>
                     )}
-                    {product.cellType && (
+                    {product.cellType && product.cellType !== "0" && product.cellType !== 0 && product.cellType !== "" && (
                       <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
                         <span className="text-gray-600 font-medium">
                           Loại cell
@@ -1420,7 +1435,7 @@ export const ProductDetail = () => {
                         </span>
                       </div>
                     )}
-                    {product.cycleCount && (
+                    {product.cycleCount && product.cycleCount > 0 && (
                       <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
                         <span className="text-gray-600 font-medium">
                           Số chu kỳ

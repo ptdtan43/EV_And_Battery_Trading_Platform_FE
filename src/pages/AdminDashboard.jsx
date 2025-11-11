@@ -1348,6 +1348,26 @@ export const AdminDashboard = () => {
         console.log("✅ Products loaded:", listings.length, listings.map(p => ({id: p.id, verificationStatus: p.verificationStatus, productType: p.productType})));
         console.log("🔍 Products with Requested status:", listings.filter(p => p.verificationStatus === "Requested" || p.verificationStatus === "requested"));
         
+        // Debug: Log first battery product to see all fields
+        const firstBattery = listings.find(p => p.productType && p.productType.toLowerCase() !== 'vehicle' && p.productType.toLowerCase() !== 'xe điện');
+        if (firstBattery) {
+          console.log('🔍 First Battery Product from API (FULL DATA):', {
+            id: firstBattery.id || firstBattery.productId,
+            title: firstBattery.title,
+            productType: firstBattery.productType,
+            manufactureYear: firstBattery.manufactureYear,
+            batteryType: firstBattery.batteryType,
+            batteryHealth: firstBattery.batteryHealth,
+            capacity: firstBattery.capacity,
+            voltage: firstBattery.voltage,
+            bms: firstBattery.bms,
+            cellType: firstBattery.cellType,
+            cycleCount: firstBattery.cycleCount,
+            warrantyPeriod: firstBattery.warrantyPeriod,
+            ALL_FIELDS: firstBattery
+          });
+        }
+        
         // Cache the products data
         localStorage.setItem('admin_cached_products', JSON.stringify(listings));
         localStorage.setItem('admin_cached_timestamp', Date.now().toString());
@@ -1441,13 +1461,36 @@ export const AdminDashboard = () => {
             console.log(`No sellerId or users for product ${getId(item)}:`, { sellerId, usersLength: users.length });
           }
 
+          // Debug: Log raw item data for battery products
+          if (item.productType && item.productType.toLowerCase() !== 'vehicle' && item.productType.toLowerCase() !== 'xe điện') {
+            console.log('🔍 Raw Battery Product Data:', {
+              id: getId(item),
+              title: item.title,
+              productType: item.productType,
+              manufactureYear: item.manufactureYear,
+              year: item.year,
+              batteryType: item.batteryType,
+              batteryHealth: item.batteryHealth,
+              capacity: item.capacity,
+              voltage: item.voltage,
+              bms: item.bms,
+              cellType: item.cellType,
+              cycleCount: item.cycleCount,
+              allFields: Object.keys(item).reduce((acc, key) => {
+                acc[key] = item[key];
+                return acc;
+              }, {})
+            });
+          }
+          
           const mapped = {
             id: getId(item),
             title: item.title || item.name || item.productName || "Không có tiêu đề",
             brand: item.brand || item.brandName || "Không rõ",
             model: item.model || item.modelName || "Không rõ",
-            year: item.manufactureYear || item.year || item.modelYear || item.manufacturingYear || "N/A",
-            manufactureYear: item.manufactureYear || item.year || item.modelYear || item.manufacturingYear || "N/A",
+            // Handle manufactureYear: 0 means no year set, null/undefined also means no year
+            year: (item.manufactureYear && item.manufactureYear > 0) ? item.manufactureYear : (item.year && item.year > 0) ? item.year : (item.modelYear && item.modelYear > 0) ? item.modelYear : (item.manufacturingYear && item.manufacturingYear > 0) ? item.manufacturingYear : null,
+            manufactureYear: (item.manufactureYear && item.manufactureYear > 0) ? item.manufactureYear : (item.year && item.year > 0) ? item.year : (item.modelYear && item.modelYear > 0) ? item.modelYear : (item.manufacturingYear && item.manufacturingYear > 0) ? item.manufacturingYear : null,
             price: parseFloat(item.price || item.listPrice || item.sellingPrice || 0),
             status: (() => {
               // Check multiple possible status fields (Status, status, etc.)
@@ -1518,6 +1561,14 @@ export const AdminDashboard = () => {
             condition: item.condition || item.vehicleCondition || "N/A",
             description: item.description || item.details || item.content || "Không có mô tả",
             location: item.location || item.address || item.city || "Không rõ",
+            // Battery specific fields
+            batteryType: item.batteryType || item.BatteryType || null,
+            batteryHealth: item.batteryHealth || item.BatteryHealth || null,
+            capacity: item.capacity || item.Capacity || null,
+            voltage: item.voltage || item.Voltage || null,
+            bms: item.bms || item.Bms || item.BMS || null,
+            cellType: item.cellType || item.CellType || null,
+            cycleCount: item.cycleCount || item.CycleCount || null,
             sellerId: sellerId,
             sellerName: sellerInfo.name,
             sellerPhone: sellerInfo.phone,
@@ -2507,6 +2558,30 @@ export const AdminDashboard = () => {
   };
 
   const openListingModal = async (listing) => {
+    // Debug: Log product data to see what we're getting
+    console.log('🔍 Selected Listing Data:', {
+      id: listing.id,
+      title: listing.title,
+      productType: listing.productType,
+      categoryId: listing.categoryId,
+      isVehicle: listing.productType === "Vehicle" || listing.categoryId === 1,
+      isBattery: listing.productType !== "Vehicle" && listing.categoryId !== 1,
+      manufactureYear: listing.manufactureYear,
+      year: listing.year,
+      batteryType: listing.batteryType,
+      batteryHealth: listing.batteryHealth,
+      capacity: listing.capacity,
+      voltage: listing.voltage,
+      bms: listing.bms,
+      cellType: listing.cellType,
+      cycleCount: listing.cycleCount,
+      warrantyPeriod: listing.warrantyPeriod,
+      allFields: Object.keys(listing).reduce((acc, key) => {
+        acc[key] = listing[key];
+        return acc;
+      }, {})
+    });
+    
     setSelectedListing(listing);
     setCurrentImageIndex(0);
     closeDetailsModal();
@@ -3807,16 +3882,29 @@ export const AdminDashboard = () => {
                       </div>
                         </div>
 
-                            <div className="grid grid-cols-2 gap-4">
-                        <div>
-                                <p className="text-sm text-gray-500">Năm sản xuất</p>
-                                <p className="font-medium">{product.year}</p>
-                            </div>
-                      <div>
-                                <p className="text-sm text-gray-500">Giá</p>
-                                <p className="font-medium text-green-600">{formatPrice(product.price)}</p>
-                      </div>
-                    </div>
+                            {/* Only show year for vehicles */}
+                            {(product.productType?.toLowerCase().includes("vehicle") || product.categoryId === 1) && (
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <p className="text-sm text-gray-500">Năm sản xuất</p>
+                                  <p className="font-medium">{product.year || product.manufactureYear || "N/A"}</p>
+                                </div>
+                                <div>
+                                  <p className="text-sm text-gray-500">Giá</p>
+                                  <p className="font-medium text-green-600">{formatPrice(product.price)}</p>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* For batteries, show price and technical specs */}
+                            {product.productType?.toLowerCase() !== "vehicle" && product.categoryId !== 1 && (
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <p className="text-sm text-gray-500">Giá</p>
+                                  <p className="font-medium text-green-600">{formatPrice(product.price)}</p>
+                                </div>
+                              </div>
+                            )}
 
                             {product.productType?.toLowerCase().includes("vehicle") && (
                               <>
@@ -4074,13 +4162,20 @@ export const AdminDashboard = () => {
                       </div>
                     </div>
 
-                    {(selectedListing.productType === "Vehicle" || selectedListing.categoryId === 1) && (
+                    {/* Vehicle-specific details - Only show for vehicles */}
+                    {((selectedListing.productType && selectedListing.productType.toLowerCase() === "vehicle") || selectedListing.categoryId === 1) && (
                       <>
                         {/* Row 3: Năm sản xuất & Giá */}
                         <div className="grid grid-cols-2 gap-4">
                           <div className="flex flex-col">
                             <p className="text-sm text-gray-500 mb-1">Năm sản xuất</p>
-                            <p className="font-medium">{selectedListing.year || "N/A"}</p>
+                            <p className="font-medium">{
+                              (selectedListing.manufactureYear && selectedListing.manufactureYear !== "N/A" && selectedListing.manufactureYear !== null && selectedListing.manufactureYear !== undefined) 
+                                ? selectedListing.manufactureYear 
+                                : (selectedListing.year && selectedListing.year !== "N/A" && selectedListing.year !== null && selectedListing.year !== undefined) 
+                                  ? selectedListing.year 
+                                  : "N/A"
+                            }</p>
                           </div>
                           <div className="flex flex-col">
                             <p className="text-sm text-gray-500 mb-1">Giá</p>
@@ -4114,17 +4209,70 @@ export const AdminDashboard = () => {
                       </>
                     )}
 
-                    {selectedListing.productType !== "Vehicle" && selectedListing.categoryId !== 1 && (
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="flex flex-col">
-                          <p className="text-sm text-gray-500 mb-1">Năm sản xuất</p>
-                          <p className="font-medium">{selectedListing.year || "N/A"}</p>
+                    {/* Battery Product Details - Thông số kỹ thuật pin */}
+                    {selectedListing.productType && selectedListing.productType.toLowerCase() !== "vehicle" && selectedListing.categoryId !== 1 && (
+                      <>
+                        {/* Row 3: Giá - Full width for battery */}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="flex flex-col">
+                            <p className="text-sm text-gray-500 mb-1">Giá</p>
+                            <p className="font-medium text-green-600">{formatPrice(selectedListing.price || 0)}</p>
+                          </div>
                         </div>
-                        <div className="flex flex-col">
-                          <p className="text-sm text-gray-500 mb-1">Giá</p>
-                          <p className="font-medium text-green-600">{formatPrice(selectedListing.price || 0)}</p>
+
+                        {/* Thông số kỹ thuật pin */}
+                        <div className="mt-4 pt-4 border-t border-gray-200">
+                          <h5 className="text-base font-semibold text-gray-900 mb-4">Thông số kỹ thuật</h5>
+                          
+                          {/* Row 1: Loại pin & Tình trạng pin */}
+                          <div className="grid grid-cols-2 gap-4 mb-4">
+                            <div className="flex flex-col">
+                              <p className="text-sm text-gray-500 mb-1">Loại pin</p>
+                              <p className="font-medium">{selectedListing.batteryType || selectedListing.BatteryType || "N/A"}</p>
+                            </div>
+                            <div className="flex flex-col">
+                              <p className="text-sm text-gray-500 mb-1">Tình trạng pin</p>
+                              <p className="font-medium">{selectedListing.batteryHealth || selectedListing.BatteryHealth || "N/A"}</p>
+                            </div>
+                          </div>
+
+                          {/* Row 2: Dung lượng & Điện áp */}
+                          <div className="grid grid-cols-2 gap-4 mb-4">
+                            <div className="flex flex-col">
+                              <p className="text-sm text-gray-500 mb-1">Dung lượng</p>
+                              <p className="font-medium">{selectedListing.capacity || selectedListing.Capacity || "N/A"}</p>
+                            </div>
+                            <div className="flex flex-col">
+                              <p className="text-sm text-gray-500 mb-1">Điện áp</p>
+                              <p className="font-medium">{selectedListing.voltage || selectedListing.Voltage || "N/A"}</p>
+                            </div>
+                          </div>
+
+                          {/* Row 3: BMS & Loại cell */}
+                          <div className="grid grid-cols-2 gap-4 mb-4">
+                            <div className="flex flex-col">
+                              <p className="text-sm text-gray-500 mb-1">BMS</p>
+                              <p className="font-medium">{selectedListing.bms || selectedListing.Bms || selectedListing.BMS || "N/A"}</p>
+                            </div>
+                            <div className="flex flex-col">
+                              <p className="text-sm text-gray-500 mb-1">Loại cell</p>
+                              <p className="font-medium">{selectedListing.cellType || selectedListing.CellType || "N/A"}</p>
+                            </div>
+                          </div>
+
+                          {/* Row 4: Số chu kỳ sạc & Thời hạn bảo hành */}
+                          <div className="grid grid-cols-2 gap-4 mb-4">
+                            <div className="flex flex-col">
+                              <p className="text-sm text-gray-500 mb-1">Số chu kỳ sạc</p>
+                              <p className="font-medium">{(selectedListing.cycleCount !== null && selectedListing.cycleCount !== undefined) ? selectedListing.cycleCount : (selectedListing.CycleCount !== null && selectedListing.CycleCount !== undefined) ? selectedListing.CycleCount : "N/A"}</p>
+                            </div>
+                            <div className="flex flex-col">
+                              <p className="text-sm text-gray-500 mb-1">Thời hạn bảo hành</p>
+                              <p className="font-medium">{selectedListing.warrantyPeriod || selectedListing.warranty_period || selectedListing.WarrantyPeriod || "Chưa cập nhật"}</p>
+                            </div>
+                          </div>
                         </div>
-                      </div>
+                      </>
                     )}
 
                     {/* Row 6: Mô tả - Full width */}
