@@ -576,11 +576,12 @@ export const CreateListing = () => {
         throw new Error("Giá bán phải là một số dương hợp lệ.");
       }
 
-      // Validate year if provided (only for vehicles)
-      if (formData.productType === "vehicle" && formData.manufactureYear) {
+      // Validate year if provided (for vehicles and batteries)
+      if (formData.manufactureYear) {
         const year = parseInt(formData.manufactureYear);
-        if (isNaN(year) || year < 2010 || year > 2024) {
-          throw new Error("Năm sản xuất phải là số từ 2010 đến 2024.");
+        const currentYear = new Date().getFullYear();
+        if (isNaN(year) || year < 2000 || year > currentYear) {
+          throw new Error(`Năm sản xuất phải là số từ 2000 đến ${currentYear}.`);
         }
       }
 
@@ -622,6 +623,10 @@ export const CreateListing = () => {
           formData.productType === "vehicle"
             ? formData.manufactureYear || formData.year
               ? parseInt(formData.manufactureYear || formData.year)
+              : 0
+            : formData.productType === "battery"
+            ? formData.manufactureYear
+              ? parseInt(formData.manufactureYear)
               : 0
             : 0,
         mileage:
@@ -1550,6 +1555,25 @@ export const CreateListing = () => {
                     <option value="MotorcycleBattery">Pin xe máy</option>
                     <option value="BikeBattery">Pin xe đạp điện</option>
                   </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Năm sản xuất pin
+                  </label>
+                  <input
+                    type="number"
+                    name="manufactureYear"
+                    value={formData.manufactureYear}
+                    onChange={handleChange}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="VD: 2023"
+                    min="2000"
+                    max={new Date().getFullYear()}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Năm sản xuất của pin
+                  </p>
                 </div>
 
                 <div>
