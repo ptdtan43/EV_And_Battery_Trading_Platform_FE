@@ -87,7 +87,7 @@ namespace EVTB_Backend.Controllers
                         phone = user.Phone,
                         avatar = user.Avatar,
                         roleId = user.RoleId,
-                        roleName = user.RoleId == 1 ? "Admin" : "User",
+                        roleName = user.RoleId == 1 ? "Admin" : user.RoleId == 3 ? "Staff" : "User",
                         role = user.RoleId,
                         accountStatus = user.AccountStatus
                     }
@@ -418,7 +418,7 @@ namespace EVTB_Backend.Controllers
                 new Claim(ClaimTypes.NameIdentifier, user.UserId.ToString()),
                 new Claim(ClaimTypes.Email, user.Email),
                 new Claim(ClaimTypes.Name, user.FullName),
-                new Claim(ClaimTypes.Role, user.RoleId == 1 ? "Admin" : "User"),
+                new Claim(ClaimTypes.Role, user.RoleId == 1 ? "Admin" : user.RoleId == 3 ? "Staff" : "User"),
                 new Claim("roleId", user.RoleId.ToString()),
                 new Claim("accountStatus", user.AccountStatus)
             };

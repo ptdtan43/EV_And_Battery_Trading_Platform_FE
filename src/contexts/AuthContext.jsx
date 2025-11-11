@@ -623,11 +623,18 @@ export const AuthProvider = ({ children }) => {
                   user?.email === 'admin@evtrading.com' ||
                   user?.email === 'admin@gmail.com';
 
+  // Check if user is staff based on role
+  const isStaff = user?.role === 'staff' || 
+                  user?.role === 'Staff' || 
+                  user?.role === 3 || 
+                  user?.roleId === 3;
+
   const value = {
     user,
     profile,
     loading,
     isAdmin,
+    isStaff,
     signIn,
     signUp,
     signOut,

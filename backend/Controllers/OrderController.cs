@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
 
 namespace EVTB_Backend.Controllers
 {
@@ -191,14 +192,20 @@ namespace EVTB_Backend.Controllers
                 }
 
                 var orders = await query
+                    .Include(o => o.Product)
+                    .Include(o => o.User)
+                    .Include(o => o.Seller)
                     .Select(o => new
                     {
                         orderId = o.OrderId,
                         userId = o.UserId,
                         productId = o.ProductId,
+                        productName = o.Product != null ? o.Product.Title : "Unknown",
+                        buyerName = o.User != null ? o.User.FullName : "Unknown",
                         orderStatus = o.OrderStatus,
                         depositAmount = o.DepositAmount,
                         totalAmount = o.TotalAmount,
+                        contractUrl = o.ContractUrl,
                         createdAt = o.CreatedAt,
                         updatedAt = o.UpdatedAt,
                         adminNotes = o.AdminNotes,
@@ -270,6 +277,79 @@ namespace EVTB_Backend.Controllers
             {
                 _logger.LogError(ex, $"Error getting completed orders for user {userId}");
                 return StatusCode(500, new { message = "Có lỗi xảy ra khi lấy danh sách đơn hàng đã hoàn thành" });
+            }
+        }
+
+        /// <summary>
+        /// Get order details with contract for admin
+        /// </summary>
+        [HttpGet("details/{id}")]
+        [Authorize]
+        public async Task<ActionResult<object>> GetOrderDetails(int id)
+        {
+            try
+            {
+                // Get user ID from JWT token
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(new { message = "Không thể xác định người dùng" });
+                }
+
+                // Check if user is admin (roleId = 1) or staff (roleId = 3)
+                var user = await _context.Users.FindAsync(userId);
+                if (user == null || (user.RoleId != 1 && user.RoleId != 3))
+                {
+                    return Forbid("Chỉ admin hoặc staff mới có quyền xem chi tiết đơn hàng");
+                }
+
+                var order = await _context.Orders
+                    .Include(o => o.Product)
+                    .Include(o => o.User)
+                    .Include(o => o.Seller)
+                    .FirstOrDefaultAsync(o => o.OrderId == id);
+
+                if (order == null)
+                {
+                    return NotFound(new { message = "Không tìm thấy đơn hàng" });
+                }
+
+                return Ok(new
+                {
+                    orderId = order.OrderId,
+                    userId = order.UserId,
+                    productId = order.ProductId,
+                    productTitle = order.Product?.Title ?? "Unknown",
+                    productImages = order.Product != null ? _context.ProductImages
+                        .Where(pi => pi.ProductId == order.ProductId)
+                        .Select(pi => pi.ImageUrl)
+                        .ToList() : new List<string>(),
+                    buyerName = order.User?.FullName ?? "Unknown",
+                    buyerEmail = order.User?.Email ?? "Unknown",
+                    buyerPhone = order.User?.Phone ?? "Unknown",
+                    sellerId = order.SellerId ?? 0,
+                    sellerName = order.Seller?.FullName ?? "Unknown",
+                    sellerEmail = order.Seller?.Email ?? "Unknown",
+                    sellerPhone = order.Seller?.Phone ?? "Unknown",
+                    orderStatus = order.OrderStatus,
+                    depositAmount = order.DepositAmount,
+                    totalAmount = order.TotalAmount,
+                    contractUrl = order.ContractUrl,
+                    sellerConfirmed = order.SellerConfirmed,
+                    sellerConfirmedDate = order.SellerConfirmedDate,
+                    adminConfirmed = order.AdminConfirmed,
+                    adminConfirmedDate = order.AdminConfirmedDate,
+                    adminNotes = order.AdminNotes,
+                    createdAt = order.CreatedAt,
+                    updatedAt = order.UpdatedAt,
+                    completedDate = order.CompletedDate,
+                    finalPaymentDueDate = order.FinalPaymentDueDate
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error getting order details for order {id}");
+                return StatusCode(500, new { message = "Có lỗi xảy ra khi lấy chi tiết đơn hàng" });
             }
         }
 
@@ -431,74 +511,6 @@ namespace EVTB_Backend.Controllers
         }
 
         /// <summary>
-        /// Admin confirms transaction completion
-        /// </summary>
-        [HttpPost("{id}/admin-confirm")]
-        [Authorize]
-        public async Task<ActionResult<object>> AdminConfirmTransaction(int id, [FromBody] AdminConfirmRequest request)
-        {
-            try
-            {
-                // Get user ID from JWT token
-                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
-                {
-                    return Unauthorized(new { message = "Không thể xác định người dùng" });
-                }
-
-                // Check if user is admin (roleId = 1)
-                var user = await _context.Users.FindAsync(userId);
-                if (user == null || user.RoleId != 1)
-                {
-                    return Forbid("Chỉ admin mới có quyền xác nhận giao dịch");
-                }
-
-                var order = await _context.Orders
-                    .Include(o => o.Product)
-                    .Include(o => o.User)
-                    .Include(o => o.Seller)
-                    .FirstOrDefaultAsync(o => o.OrderId == id);
-
-                if (order == null)
-                {
-                    return NotFound(new { message = "Không tìm thấy đơn hàng" });
-                }
-
-                if (!order.SellerConfirmed)
-                {
-                    return BadRequest(new { message = "Seller chưa xác nhận giao dịch" });
-                }
-
-                // Update admin confirmation
-                order.AdminConfirmed = true;
-                order.AdminConfirmedDate = DateTime.UtcNow;
-                order.AdminNotes = request.AdminNotes;
-                order.OrderStatus = "Completed";
-                order.CompletedDate = DateTime.UtcNow;
-                order.UpdatedAt = DateTime.UtcNow;
-
-                await _context.SaveChangesAsync();
-
-                _logger.LogInformation($"Order {id} confirmed by admin {userId}");
-
-                return Ok(new
-                {
-                    message = "Admin đã xác nhận giao dịch thành công",
-                    orderId = order.OrderId,
-                    adminConfirmed = order.AdminConfirmed,
-                    adminConfirmedDate = order.AdminConfirmedDate,
-                    orderStatus = order.OrderStatus,
-                    completedDate = order.CompletedDate
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Error admin confirming transaction for order {id}");
-                return StatusCode(500, new { message = "Có lỗi xảy ra khi admin xác nhận giao dịch" });
-            }
-        }
-
-        /// <summary>
         /// Get orders waiting for seller confirmation
         /// </summary>
         [HttpGet("seller-pending")]
@@ -541,87 +553,6 @@ namespace EVTB_Backend.Controllers
             {
                 _logger.LogError(ex, "Error getting seller pending orders");
                 return StatusCode(500, new { message = "Có lỗi xảy ra khi lấy danh sách đơn hàng chờ xác nhận" });
-            }
-        }
-
-        /// <summary>
-        /// Admin rejects/cancels transaction
-        /// </summary>
-        [HttpPost("{id}/admin-reject")]
-        [Authorize]
-        public async Task<ActionResult<object>> AdminRejectTransaction(int id, [FromBody] AdminRejectRequest request)
-        {
-            try
-            {
-                // Get user ID from JWT token
-                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
-                {
-                    return Unauthorized(new { message = "Không thể xác định người dùng" });
-                }
-
-                // Check if user is admin (roleId = 1)
-                var user = await _context.Users.FindAsync(userId);
-                if (user == null || user.RoleId != 1)
-                {
-                    return Forbid("Chỉ admin mới có quyền hủy giao dịch");
-                }
-
-                var order = await _context.Orders
-                    .Include(o => o.Product)
-                    .Include(o => o.User)
-                    .Include(o => o.Seller)
-                    .FirstOrDefaultAsync(o => o.OrderId == id);
-
-                if (order == null)
-                {
-                    return NotFound(new { message = "Không tìm thấy đơn hàng" });
-                }
-
-                // Validate reason
-                if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Length < 3)
-                {
-                    return BadRequest(new { message = "Lý do hủy phải có ít nhất 3 ký tự" });
-                }
-
-                // Update order status
-                order.OrderStatus = "Cancelled";
-                order.AdminNotes = request.Reason;
-                order.RefundOption = request.RefundOption;
-                order.UpdatedAt = DateTime.UtcNow;
-
-                // Update product status back to Active
-                if (order.Product != null)
-                {
-                    order.Product.Status = "Active";
-                    order.Product.UpdatedAt = DateTime.UtcNow;
-                }
-
-                await _context.SaveChangesAsync();
-
-                _logger.LogInformation($"Order {id} rejected by admin {userId}. Reason: {request.Reason}, Refund: {request.RefundOption}");
-
-                // Prepare response
-                var response = new
-                {
-                    message = "Đã hủy giao dịch thành công",
-                    orderId = order.OrderId,
-                    productId = order.ProductId,
-                    buyerId = order.UserId,
-                    sellerId = order.SellerId,
-                    orderStatus = order.OrderStatus,
-                    reason = request.Reason,
-                    refundOption = request.RefundOption,
-                    refundAmount = request.RefundOption == "refund" ? order.DepositAmount : 0,
-                    cancelledAt = DateTime.UtcNow
-                };
-
-                return Ok(response);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Error admin rejecting transaction for order {id}");
-                return StatusCode(500, new { message = "Có lỗi xảy ra khi hủy giao dịch" });
             }
         }
 
@@ -683,6 +614,100 @@ namespace EVTB_Backend.Controllers
                 return StatusCode(500, new { message = "Có lỗi xảy ra khi lấy danh sách đơn hàng chờ admin duyệt" });
             }
         }
+        /// <summary>
+        /// Staff uploads contract file for an order
+        /// </summary>
+        [HttpPost("{id}/upload-contract")]
+        [Authorize]
+        public async Task<ActionResult<object>> UploadContract(int id, [FromForm] IFormFile? file)
+        {
+            try
+            {
+                // Get user ID from JWT token
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(new { message = "Không thể xác định người dùng" });
+                }
+
+                // Check if user is staff (roleId = 3) or admin (roleId = 1)
+                var user = await _context.Users.FindAsync(userId);
+                if (user == null || (user.RoleId != 3 && user.RoleId != 1))
+                {
+                    return Forbid("Chỉ staff hoặc admin mới có quyền upload hợp đồng");
+                }
+
+                var order = await _context.Orders
+                    .Include(o => o.Product)
+                    .FirstOrDefaultAsync(o => o.OrderId == id);
+
+                if (order == null)
+                {
+                    return NotFound(new { message = "Không tìm thấy đơn hàng" });
+                }
+
+                string contractUrl = string.Empty;
+
+                // Handle file upload
+                if (file != null && file.Length > 0)
+                {
+                    // Validate file size (max 10MB)
+                    if (file.Length > 10 * 1024 * 1024)
+                    {
+                        return BadRequest(new { message = "File không được vượt quá 10MB" });
+                    }
+
+                    // Generate unique file name
+                    var fileName = $"{order.OrderId}_{DateTime.UtcNow:yyyyMMddHHmmss}_{file.FileName}";
+                    var fileExtension = Path.GetExtension(file.FileName).ToLower();
+                    
+                    // For now, we'll store a placeholder URL
+                    // In production, you should upload to cloud storage (Azure Blob, AWS S3, etc.)
+                    // For demo purposes, we'll create a relative path
+                    var uploadsFolder = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "contracts");
+                    if (!Directory.Exists(uploadsFolder))
+                    {
+                        Directory.CreateDirectory(uploadsFolder);
+                    }
+
+                    var filePath = Path.Combine(uploadsFolder, fileName);
+                    using (var stream = new FileStream(filePath, FileMode.Create))
+                    {
+                        await file.CopyToAsync(stream);
+                    }
+
+                    // Generate URL (adjust based on your server configuration)
+                    contractUrl = $"/contracts/{fileName}";
+                    
+                    _logger.LogInformation($"File uploaded: {fileName}, Size: {file.Length} bytes");
+                }
+                else
+                {
+                    return BadRequest(new { message = "Vui lòng chọn file để upload" });
+                }
+
+                // Update contract URL
+                order.ContractUrl = contractUrl;
+                order.UpdatedAt = DateTime.UtcNow;
+
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation($"Contract uploaded for order {id} by staff {userId}");
+
+                return Ok(new
+                {
+                    message = "Upload hợp đồng thành công",
+                    orderId = order.OrderId,
+                    contractUrl = order.ContractUrl
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error uploading contract for order {id}");
+                return StatusCode(500, new { message = "Có lỗi xảy ra khi upload hợp đồng" });
+            }
+        }
+
         /// <summary>
         /// Lấy danh sách đơn hàng đã hoàn tất của user
         /// </summary>
@@ -752,14 +777,8 @@ namespace EVTB_Backend.Controllers
         public string? OrderStatus { get; set; }
     }
 
-    public class AdminRejectRequest
+    public class UploadContractRequest
     {
-        public string Reason { get; set; } = string.Empty;
-        public string RefundOption { get; set; } = "refund"; // "refund" or "no_refund"
-    }
-
-    public class AdminConfirmRequest
-    {
-        public string? AdminNotes { get; set; }
+        public string ContractUrl { get; set; } = string.Empty;
     }
 }

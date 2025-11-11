@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, Filter, Car, Battery, Tag, DollarSign } from "lucide-react";
+import { X, Filter, Car, Battery, Tag, DollarSign, Hash } from "lucide-react";
 
 export const AdvancedSearchFilter = ({ initialFilters = {}, onFilterChange, onClose }) => {
   const [activeTab, setActiveTab] = useState("vehicle"); // vehicle, battery
@@ -10,6 +10,7 @@ export const AdvancedSearchFilter = ({ initialFilters = {}, onFilterChange, onCl
     condition: initialFilters.condition || "",
     brand: initialFilters.brand || "",
     model: initialFilters.model || "",
+    licensePlate: initialFilters.licensePlate || "",
     year: initialFilters.year || "",
     vehicleType: initialFilters.vehicleType || "",
     maxMileage: initialFilters.maxMileage || "",
@@ -50,6 +51,7 @@ export const AdvancedSearchFilter = ({ initialFilters = {}, onFilterChange, onCl
       condition: "",
       brand: "",
       model: "",
+      licensePlate: "",
       year: "",
       vehicleType: "",
       maxMileage: "",
@@ -295,6 +297,21 @@ export const AdvancedSearchFilter = ({ initialFilters = {}, onFilterChange, onCl
                   value={filters.model}
                   onChange={(e) => handleInputChange("model", e.target.value)}
                   placeholder="VF e34, Model 3..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white text-sm"
+                />
+              </div>
+
+              {/* License Plate */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <Hash className="h-4 w-4 inline mr-1" />
+                  Biển số xe
+                </label>
+                <input
+                  type="text"
+                  value={filters.licensePlate}
+                  onChange={(e) => handleInputChange("licensePlate", e.target.value)}
+                  placeholder="30A-12345"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white text-sm"
                 />
               </div>
