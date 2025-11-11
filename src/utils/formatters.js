@@ -72,8 +72,8 @@ export const getOrderStatusText = (status) => {
 
   const statusLower = status.toLowerCase();
   const statusMap = {
-    pending: 'Đang trong quá trình thanh toán',
-    processing: 'Đang xử lý',
+    pending: 'Đã thanh toán cọc',
+    processing: 'Đã thanh toán cọc',
     confirmed: 'Đã xác nhận',
     depositpaid: 'Đã thanh toán cọc',
     deposited: 'Đã thanh toán cọc',
@@ -81,7 +81,7 @@ export const getOrderStatusText = (status) => {
     cancelled: 'Đã hủy',
     canceled: 'Đã hủy',
     active: 'Hoạt động',
-    reserved: 'Đã đặt cọc',
+    reserved: 'Đã thanh toán cọc',
     sold: 'Đã bán',
   };
   return statusMap[statusLower] || status;

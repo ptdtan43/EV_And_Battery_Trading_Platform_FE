@@ -1085,6 +1085,11 @@ export const AdminDashboard = () => {
           console.log('✅ Refund option:', refundOption);
           console.log('✅ Admin-reject response:', response);
           
+          // ✅ NOTE: Backend admin-reject endpoint already updates product status from "Reserved" → "Active"
+          // No need to call PUT /api/Product/{id} separately as it requires all required fields (Brand, Title, ProductType)
+          // Backend OrderController.AdminRejectOrder() handles product status update automatically
+          console.log(`✅ [ADMIN REJECT] Backend has automatically updated product status to Active`);
+          
           // Send notification to buyer
           try {
             const buyerId = response.buyerId || order?.userId;
@@ -1128,9 +1133,24 @@ export const AdminDashboard = () => {
 
       showToast({
         title: 'Thành công!',
-        description: 'Lý do từ chối đã được lưu. Sản phẩm vẫn hiển thị trong danh sách quản lý giao dịch.',
+        description: 'Đã hủy giao dịch và cập nhật trạng thái sản phẩm.',
         type: 'success',
       });
+
+      // Clear cache to force fresh data reload
+      try {
+        localStorage.removeItem('admin_cached_processed_listings');
+        localStorage.removeItem('admin_cached_users');
+        localStorage.removeItem('admin_cached_products');
+        localStorage.removeItem('admin_cached_timestamp');
+        localStorage.removeItem('admin_cached_orders');
+        console.log('✅ Cleared admin cache (including products cache)');
+      } catch (cacheError) {
+        console.warn('⚠️ Could not clear cache:', cacheError);
+      }
+
+      // Wait a bit for backend to finish updating product status
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       // Reload data to update UI
       await loadAdminData();
@@ -1435,6 +1455,38 @@ export const AdminDashboard = () => {
               
               // Debug logging for status mapping
               const productId = getId(item);
+              
+              // ✅ FIX: Cross-check with order status - if order is completed, product should be sold
+              // ✅ FIX: Cross-check with order status - if order is cancelled, product should be Active
+              if (productId && transactions && transactions.length > 0) {
+                // First check for completed orders
+                const completedOrder = transactions.find(o => {
+                  const orderProductId = o.productId || o.ProductId || o.product?.productId || o.product?.id;
+                  const orderStatus = (o.status || o.orderStatus || o.Status || o.OrderStatus || '').toLowerCase();
+                  return (orderProductId == productId || orderProductId === productId) && orderStatus === 'completed';
+                });
+                
+                if (completedOrder) {
+                  // If order is completed, product should be sold regardless of product status
+                  console.log(`✅ Product ${productId} has completed order - forcing status to "sold"`);
+                  return "sold";
+                }
+                
+                // Then check for cancelled/rejected orders
+                const cancelledOrder = transactions.find(o => {
+                  const orderProductId = o.productId || o.ProductId || o.product?.productId || o.product?.id;
+                  const orderStatus = (o.status || o.orderStatus || o.Status || o.OrderStatus || '').toLowerCase();
+                  return (orderProductId == productId || orderProductId === productId) && 
+                         (orderStatus === 'cancelled' || orderStatus === 'canceled' || orderStatus === 'rejected' || orderStatus === 'failed');
+                });
+                
+                if (cancelledOrder) {
+                  // If order is cancelled, product should be Active (available for sale again) regardless of product status
+                  console.log(`✅ Product ${productId} has cancelled order - forcing status to "Active"`);
+                  return "Active";
+                }
+              }
+              
               if (productId && (rawStatus === "reserved" || rawStatus === "sold")) {
                 console.log(`🔍 Product ${productId} status mapping:`, {
                   productId,
@@ -1453,7 +1505,7 @@ export const AdminDashboard = () => {
               if (rawStatus === "draft" || rawStatus === "re-submit") return "pending";
               if (rawStatus === "active" || rawStatus === "approved") return "Active";
               if (rawStatus === "rejected") return "rejected";
-              if (rawStatus === "reserved") return "reserved"; // Đang trong quá trình thanh toán
+              if (rawStatus === "reserved") return "reserved"; // Đã thanh toán cọc
               return rawStatus;
             })(),
             productType: norm(item.productType || item.type || item.category || "vehicle"),
@@ -1636,7 +1688,83 @@ export const AdminDashboard = () => {
       });
 
       setAllListings(sortedListings);
-      setOrders(Array.isArray(transactions) ? transactions : []); // Store orders in state
+      
+      // ✅ FIX: Remove duplicate orders based on orderId AND productId+buyerId combination
+      const ordersArray = Array.isArray(transactions) ? transactions : [];
+      
+      // First pass: Remove duplicates by orderId
+      const seenOrderIds = new Set();
+      const ordersByOrderId = [];
+      for (const order of ordersArray) {
+        const orderId = order.orderId || order.OrderId || order.id || order.Id;
+        if (orderId && !seenOrderIds.has(orderId)) {
+          seenOrderIds.add(orderId);
+          ordersByOrderId.push(order);
+        } else if (!orderId) {
+          ordersByOrderId.push(order);
+        }
+      }
+      
+      // Second pass: Remove duplicates by productId + buyerId combination
+      // Keep the order with highest priority status (completed > deposited > pending)
+      const orderPriority = {
+        'completed': 3,
+        'deposited': 2,
+        'depositpaid': 2,
+        'pending': 1,
+        'processing': 1,
+        'confirmed': 1,
+        'cancelled': 0,
+        'failed': 0
+      };
+      
+      const ordersByProductBuyer = new Map();
+      for (const order of ordersByOrderId) {
+        const productId = order.productId || order.ProductId || order.product?.productId || order.product?.id;
+        const buyerId = order.buyerId || order.BuyerId || order.userId || order.UserId;
+        const status = (order.status || order.orderStatus || order.Status || order.OrderStatus || '').toLowerCase();
+        const priority = orderPriority[status] || 0;
+        
+        // Create unique key from productId + buyerId
+        const key = `${productId}_${buyerId}`;
+        
+        if (!productId || !buyerId) {
+          // Keep orders without productId or buyerId (shouldn't happen, but just in case)
+          ordersByProductBuyer.set(`order_${order.orderId || order.OrderId || order.id}`, order);
+          continue;
+        }
+        
+        const existing = ordersByProductBuyer.get(key);
+        if (!existing) {
+          ordersByProductBuyer.set(key, order);
+        } else {
+          // Compare priority - keep the one with higher priority
+          const existingStatus = (existing.status || existing.orderStatus || existing.Status || existing.OrderStatus || '').toLowerCase();
+          const existingPriority = orderPriority[existingStatus] || 0;
+          
+          if (priority > existingPriority) {
+            // Current order has higher priority, replace
+            ordersByProductBuyer.set(key, order);
+            console.log(`🔄 Replaced order ${existing.orderId || existing.OrderId} with ${order.orderId || order.OrderId} (higher priority: ${status} > ${existingStatus})`);
+          } else if (priority === existingPriority) {
+            // Same priority, keep the newer one
+            const existingDate = new Date(existing.createdDate || existing.CreatedDate || existing.createdAt || existing.CreatedAt || 0);
+            const currentDate = new Date(order.createdDate || order.CreatedDate || order.createdAt || order.CreatedAt || 0);
+            if (currentDate > existingDate) {
+              ordersByProductBuyer.set(key, order);
+              console.log(`🔄 Replaced order ${existing.orderId || existing.OrderId} with ${order.orderId || order.OrderId} (newer date)`);
+            } else {
+              console.log(`⏭️ Skipped duplicate order ${order.orderId || order.OrderId} (same priority, older date)`);
+            }
+          } else {
+            console.log(`⏭️ Skipped duplicate order ${order.orderId || order.OrderId} (lower priority: ${status} < ${existingStatus})`);
+          }
+        }
+      }
+      
+      const uniqueOrders = Array.from(ordersByProductBuyer.values());
+      console.log(`✅ Deduplicated orders: ${ordersArray.length} → ${uniqueOrders.length} (removed ${ordersArray.length - uniqueOrders.length} duplicates)`);
+      setOrders(uniqueOrders); // Store unique orders in state
       console.log("DEBUG: allListings set to:", sortedListings.length, "items. Content:", sortedListings.map(l => ({id: l.id, verificationStatus: l.verificationStatus, productType: l.productType})));
       
       // Cache the processed data for future use
@@ -2399,7 +2527,7 @@ export const AdminDashboard = () => {
       pending: { color: "bg-yellow-100 text-yellow-800", text: "Đang chờ duyệt" },
       Active: { color: "bg-green-100 text-green-800", text: "Đã duyệt" },
       rejected: { color: "bg-red-100 text-red-800", text: "Bị từ chối" },
-      reserved: { color: "bg-orange-100 text-orange-800", text: "Đang trong quá trình thanh toán" },
+      reserved: { color: "bg-orange-100 text-orange-800", text: "Đã thanh toán cọc" },
       sold: { color: "bg-blue-100 text-blue-800", text: "Đã bán thành công" },
     };
 
@@ -3403,7 +3531,7 @@ export const AdminDashboard = () => {
                 <option value="pending">Đang chờ duyệt ({allListings.filter(l => l.status === "pending").length})</option>
                 <option value="approved">Đã duyệt ({allListings.filter(l => l.status === "Active").length})</option>
                 <option value="rejected">Bị từ chối ({allListings.filter(l => l.status === "rejected").length})</option>
-                <option value="reserved">Đang trong quá trình thanh toán ({allListings.filter(l => l.status === "reserved").length})</option>
+                <option value="reserved">Đã thanh toán cọc ({allListings.filter(l => l.status === "reserved").length})</option>
                 <option value="sold">Đã bán thành công ({allListings.filter(l => l.status === "sold").length})</option>
                 <option value="verification_requested">Yêu cầu kiểm định ({allListings.filter(l => l.verificationStatus === "Requested" || l.verificationStatus === "InProgress").length})</option>
               </select>
@@ -4494,7 +4622,7 @@ export const AdminDashboard = () => {
                 <div className="flex items-center">
                   <Clock className="h-8 w-8 text-yellow-600 mr-3" />
                   <div>
-                    <p className="text-sm font-medium text-yellow-900">Đang trong quá trình thanh toán</p>
+                    <p className="text-sm font-medium text-yellow-900">Đã thanh toán cọc</p>
                     <p className="text-2xl font-bold text-yellow-600">
                       {orders.filter(order => {
                         const status = (order.status || order.orderStatus || order.Status || order.OrderStatus || '').toLowerCase();
@@ -4594,7 +4722,21 @@ export const AdminDashboard = () => {
                                 {order.buyerName || order.BuyerName || "N/A"}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                {order.productName || order.ProductName || "N/A"}
+                                {(() => {
+                                  const product = order.Product || order.product;
+                                  if (product) {
+                                    const brand = product.Brand || product.brand || "";
+                                    const model = product.Model || product.model || "";
+                                    if (brand && model) {
+                                      return `${brand} ${model}`;
+                                    } else if (brand) {
+                                      return brand;
+                                    } else if (model) {
+                                      return model;
+                                    }
+                                  }
+                                  return order.productName || order.ProductName || "N/A";
+                                })()}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                 {formatPrice(order.totalAmount || order.TotalAmount || 0)}
@@ -4676,7 +4818,18 @@ export const AdminDashboard = () => {
                                   {status !== 'completed' && status !== 'cancelled' && (
                                     <div className="flex space-x-1">
                                       <button
+                                        disabled={!hasContract}
                                         onClick={async () => {
+                                          // Prevent action if no contract
+                                          if (!hasContract) {
+                                            showToast({
+                                              title: "Không thể xác nhận",
+                                              description: "Vui lòng đợi staff gửi hợp đồng trước khi xác nhận giao dịch",
+                                              type: "warning",
+                                            });
+                                            return;
+                                          }
+                                          
                                           if (!window.confirm('Bạn có chắc muốn xác nhận giao dịch này đã hoàn tất thành công?')) {
                                             return;
                                           }
@@ -4771,7 +4924,10 @@ export const AdminDashboard = () => {
                                             try {
                                               localStorage.removeItem('admin_cached_processed_listings');
                                               localStorage.removeItem('admin_cached_users');
-                                              console.log('✅ Cleared admin cache');
+                                              localStorage.removeItem('admin_cached_products');
+                                              localStorage.removeItem('admin_cached_timestamp');
+                                              localStorage.removeItem('admin_cached_orders');
+                                              console.log('✅ Cleared admin cache (including products cache)');
                                             } catch (cacheError) {
                                               console.warn('⚠️ Could not clear cache:', cacheError);
                                             }
@@ -4793,8 +4949,12 @@ export const AdminDashboard = () => {
                                             });
                                           }
                                         }}
-                                        className="flex-1 px-2 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 flex items-center justify-center space-x-1 text-xs"
-                                        title="Xác nhận giao dịch thành công"
+                                        className={`flex-1 px-2 py-1.5 rounded flex items-center justify-center space-x-1 text-xs ${
+                                          hasContract
+                                            ? "bg-green-600 text-white hover:bg-green-700 cursor-pointer"
+                                            : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                                        }`}
+                                        title={hasContract ? "Xác nhận giao dịch thành công" : "Vui lòng đợi staff gửi hợp đồng"}
                                       >
                                         <CheckCircle className="h-3.5 w-3.5" />
                                         <span>Xác nhận</span>
@@ -4837,7 +4997,7 @@ export const AdminDashboard = () => {
                   <Clock className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                   <p className="text-gray-600">
                     {transactionStatusFilter !== "all" 
-                      ? `Không có đơn hàng nào với trạng thái "${transactionStatusFilter === "pending" ? "Đang trong quá trình thanh toán" : transactionStatusFilter === "completed" ? "Đã hoàn tất" : "Đã từ chối"}"`
+                      ? `Không có đơn hàng nào với trạng thái "${transactionStatusFilter === "pending" ? "Đã thanh toán cọc" : transactionStatusFilter === "completed" ? "Đã hoàn tất" : "Đã từ chối"}"`
                       : "Chưa có đơn hàng nào"}
                   </p>
                 </div>
@@ -5396,12 +5556,21 @@ export const AdminDashboard = () => {
                   </div>
 
                   {/* Action Buttons */}
-                  {orderDetailModal.orderDetails.contractUrl && 
-                   orderDetailModal.orderDetails.sellerConfirmed && 
+                  {orderDetailModal.orderDetails.sellerConfirmed && 
                    !orderDetailModal.orderDetails.adminConfirmed && (
                     <div className="flex space-x-3 pt-4 border-t border-gray-200">
                       <button
+                        disabled={!orderDetailModal.orderDetails.contractUrl}
                         onClick={async () => {
+                          // Prevent action if no contract
+                          if (!orderDetailModal.orderDetails.contractUrl) {
+                            showToast({
+                              title: "Không thể xác nhận",
+                              description: "Vui lòng đợi staff gửi hợp đồng trước khi xác nhận giao dịch",
+                              type: "warning",
+                            });
+                            return;
+                          }
                           try {
                             showToast({
                               title: 'Đang xử lý...',
@@ -5480,7 +5649,10 @@ export const AdminDashboard = () => {
                             try {
                               localStorage.removeItem('admin_cached_processed_listings');
                               localStorage.removeItem('admin_cached_users');
-                              console.log('✅ Cleared admin cache');
+                              localStorage.removeItem('admin_cached_products');
+                              localStorage.removeItem('admin_cached_timestamp');
+                              localStorage.removeItem('admin_cached_orders');
+                              console.log('✅ Cleared admin cache (including products cache)');
                             } catch (cacheError) {
                               console.warn('⚠️ Could not clear cache:', cacheError);
                             }
@@ -5502,7 +5674,12 @@ export const AdminDashboard = () => {
                             });
                           }
                         }}
-                        className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center space-x-2"
+                        className={`flex-1 px-4 py-2 rounded-lg transition-colors flex items-center justify-center space-x-2 ${
+                          orderDetailModal.orderDetails.contractUrl
+                            ? "bg-green-600 text-white hover:bg-green-700 cursor-pointer"
+                            : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                        }`}
+                        title={!orderDetailModal.orderDetails.contractUrl ? "Vui lòng đợi staff gửi hợp đồng" : ""}
                       >
                         <CheckCircle className="h-5 w-5" />
                         <span>Xác nhận giao dịch thành công</span>

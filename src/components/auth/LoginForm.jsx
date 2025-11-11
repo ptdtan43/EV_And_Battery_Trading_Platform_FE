@@ -57,18 +57,29 @@ export const LoginForm = () => {
         .toString()
         .toLowerCase();
       const isAdmin = rid === 1 || roleName === "admin";
+      const isStaff = rid === 3 || rid === "3" || roleName === "staff";
 
       console.log("Raw roleId:", rawId);
       console.log("Processed roleId:", rid);
       console.log("Role name:", roleName);
       console.log("Is admin:", isAdmin);
-      console.log("Will navigate to:", isAdmin ? "/admin" : "/");
+      console.log("Is staff:", isStaff);
+      
+      // Determine redirect path based on role
+      let redirectPath = "/";
+      if (isAdmin) {
+        redirectPath = "/admin";
+      } else if (isStaff) {
+        redirectPath = "/staff";
+      }
+      
+      console.log("Will navigate to:", redirectPath);
       console.log("==================");
 
       // Add a small delay to ensure state is updated before navigation
       setTimeout(() => {
         setLoading(false);
-        navigate(isAdmin ? "/admin" : "/"); // Admin goes to /admin, User goes to HomePage
+        navigate(redirectPath);
       }, 200);
     } catch (err) {
       setError(getErrorMessage(err));

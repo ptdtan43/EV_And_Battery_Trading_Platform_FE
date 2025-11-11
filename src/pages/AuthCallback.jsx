@@ -21,7 +21,17 @@ export const AuthCallback = () => {
         .toString()
         .toLowerCase();
       const isAdmin = roleId === 1 || roleName === "admin";
-      navigate(isAdmin ? "/admin" : "/dashboard", { replace: true });
+      const isStaff = roleId === 3 || roleId === "3" || roleName === "staff";
+      
+      // Determine redirect path based on role
+      let redirectPath = "/dashboard";
+      if (isAdmin) {
+        redirectPath = "/admin";
+      } else if (isStaff) {
+        redirectPath = "/staff";
+      }
+      
+      navigate(redirectPath, { replace: true });
     };
 
     (async () => {
