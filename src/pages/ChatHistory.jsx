@@ -7,13 +7,8 @@ import signalRService from "../services/signalRService";
 import { validateAndShowWarning } from "../utils/messageValidator";
 import { 
   ArrowLeft, 
-  Search, 
-  MessageCircle, 
-  User, 
-  Send,
-  Phone,
-  Mail,
-  MoreVertical
+  MessageCircle,
+  User
 } from "lucide-react";
 import { format } from "date-fns";
 import { vi } from "date-fns/locale";
@@ -530,13 +525,12 @@ export const ChatHistory = () => {
             {/* Search */}
             <div className="p-3 border-b">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input
                   type="text"
                   placeholder="Tìm kiếm..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
             </div>
@@ -617,27 +611,9 @@ export const ChatHistory = () => {
                     
                     <div>
                       <h2 className="font-semibold">{selectedChat.partner.name}</h2>
-                      {selectedChat.partner.phone && (
-                        <p className="text-sm text-gray-500">{selectedChat.partner.phone}</p>
-                      )}
                     </div>
                   </div>
 
-                  <div className="flex items-center space-x-2">
-                    {selectedChat.partner.phone && (
-                      <a href={`tel:${selectedChat.partner.phone}`} className="p-2 hover:bg-gray-100 rounded-lg">
-                        <Phone className="h-5 w-5 text-gray-600" />
-                      </a>
-                    )}
-                    {selectedChat.partner.email && (
-                      <a href={`mailto:${selectedChat.partner.email}`} className="p-2 hover:bg-gray-100 rounded-lg">
-                        <Mail className="h-5 w-5 text-gray-600" />
-                      </a>
-                    )}
-                    <button className="p-2 hover:bg-gray-100 rounded-lg">
-                      <MoreVertical className="h-5 w-5 text-gray-600" />
-                    </button>
-                  </div>
                 </div>
 
                 {/* Messages */}
@@ -670,11 +646,6 @@ export const ChatHistory = () => {
                                 <span className={`text-xs ${isOwn ? 'text-blue-100' : 'text-gray-500'}`}>
                                   {formatMessageTime(msg.createdDate)}
                                 </span>
-                                {isOwn && (
-                                  <span className="text-xs text-blue-100 ml-2">
-                                    {msg.isRead ? '✓✓' : '✓'}
-                                  </span>
-                                )}
                               </div>
                             </div>
                           </div>
@@ -699,15 +670,12 @@ export const ChatHistory = () => {
                     <button
                       type="submit"
                       disabled={!newMessage.trim() || sending}
-                      className="px-6 py-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+                      className="px-6 py-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {sending ? (
                         <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                       ) : (
-                        <>
-                          <Send className="h-5 w-5" />
-                          <span className="hidden sm:inline">Gửi</span>
-                        </>
+                        <span>Gửi</span>
                       )}
                     </button>
                   </div>

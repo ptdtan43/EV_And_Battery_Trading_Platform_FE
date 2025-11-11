@@ -38,6 +38,7 @@ namespace EVTB_Backend.Models
         public bool AdminConfirmed { get; set; } = false;
         public DateTime? AdminConfirmedDate { get; set; }
         public string? AdminNotes { get; set; }
+        public string? RefundOption { get; set; } // "refund" or "no_refund"
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

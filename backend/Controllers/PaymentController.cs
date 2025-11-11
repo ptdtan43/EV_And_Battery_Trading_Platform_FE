@@ -163,16 +163,89 @@ namespace EVTB_Backend.Controllers
                         payment.PaymentStatus = "Succeeded";
                         payment.VNPayTransactionId = vnp_TransactionNo;
                         payment.UpdatedAt = DateTime.UtcNow;
+                        payment.CompletedDate = DateTime.UtcNow;
                         
-                        // If this is a deposit payment, update product status to Reserved
-                        if (payment.PaymentType == "Deposit" && payment.ProductId.HasValue)
+                        // Handle product status and order creation based on payment type
+                        if (payment.ProductId.HasValue)
                         {
                             var product = await _context.Products.FirstOrDefaultAsync(p => p.ProductId == payment.ProductId.Value);
-                            if (product != null && product.Status != "Reserved" && product.Status != "Sold")
+                            
+                            if (product != null)
                             {
-                                product.Status = "Reserved";
-                                product.UpdatedAt = DateTime.UtcNow;
-                                _logger.LogInformation($"Product {product.ProductId} status updated to Reserved");
+                                // If this is a deposit payment, update product status to Reserved
+                                if (payment.PaymentType == "Deposit" && product.Status != "Reserved" && product.Status != "Sold")
+                                {
+                                    product.Status = "Reserved";
+                                    product.UpdatedAt = DateTime.UtcNow;
+                                    _logger.LogInformation($"Product {product.ProductId} status updated to Reserved");
+                                }
+                                // If this is a FinalPayment or FullPayment, update product status to Sold and create/update order
+                                else if (payment.PaymentType == "FinalPayment" || payment.PaymentType == "FullPayment" || payment.PaymentType == "Complete")
+                                {
+                                    product.Status = "Sold";
+                                    product.UpdatedAt = DateTime.UtcNow;
+                                    _logger.LogInformation($"Product {product.ProductId} status updated to Sold");
+                                    
+                                    // Create order if it doesn't exist
+                                    if (!payment.OrderId.HasValue)
+                                    {
+                                        var order = new Order
+                                        {
+                                            UserId = payment.UserId,
+                                            ProductId = product.ProductId,
+                                            SellerId = payment.SellerId ?? product.SellerId,
+                                            OrderStatus = "Completed",
+                                            DepositAmount = 0, // Full payment doesn't have deposit
+                                            TotalAmount = payment.Amount,
+                                            CompletedDate = DateTime.UtcNow,
+                                            CreatedAt = DateTime.UtcNow,
+                                            UpdatedAt = DateTime.UtcNow
+                                        };
+                                        
+                                        _context.Orders.Add(order);
+                                        await _context.SaveChangesAsync(); // Save to get OrderId
+                                        
+                                        // Update payment with the new OrderId
+                                        payment.OrderId = order.OrderId;
+                                        _logger.LogInformation($"Order {order.OrderId} created for {payment.PaymentType} {paymentIdStr}");
+                                    }
+                                    else
+                                    {
+                                        // Update existing order to Completed
+                                        var order = await _context.Orders.FirstOrDefaultAsync(o => o.OrderId == payment.OrderId.Value);
+                                        if (order != null)
+                                        {
+                                            order.OrderStatus = "Completed";
+                                            order.CompletedDate = DateTime.UtcNow;
+                                            order.UpdatedAt = DateTime.UtcNow;
+                                            _logger.LogInformation($"Order {order.OrderId} updated to Completed");
+                                        }
+                                    }
+                                }
+                                // For any other payment type that results in product being sold, create order if needed
+                                else if (product.Status == "Sold" && !payment.OrderId.HasValue)
+                                {
+                                    // Product is already sold but no order exists - create one
+                                    var order = new Order
+                                    {
+                                        UserId = payment.UserId,
+                                        ProductId = product.ProductId,
+                                        SellerId = payment.SellerId ?? product.SellerId,
+                                        OrderStatus = "Completed",
+                                        DepositAmount = 0,
+                                        TotalAmount = payment.Amount,
+                                        CompletedDate = DateTime.UtcNow,
+                                        CreatedAt = DateTime.UtcNow,
+                                        UpdatedAt = DateTime.UtcNow
+                                    };
+                                    
+                                    _context.Orders.Add(order);
+                                    await _context.SaveChangesAsync(); // Save to get OrderId
+                                    
+                                    // Update payment with the new OrderId
+                                    payment.OrderId = order.OrderId;
+                                    _logger.LogInformation($"Order {order.OrderId} created for payment {paymentIdStr} (product already sold)");
+                                }
                             }
                         }
                         
@@ -496,15 +569,29 @@ namespace EVTB_Backend.Controllers
                 product.Status = "Sold";
                 product.UpdatedAt = DateTime.UtcNow;
 
-                // Find and update related order
+                // ✅ SỬA ĐỔI: Tìm order theo ProductId, không phụ thuộc vào OrderStatus
+                // Vì có thể OrderStatus là "Deposited", "Deposit", "deposited", etc.
                 var order = await _context.Orders
-                    .FirstOrDefaultAsync(o => o.ProductId == request.ProductId && o.OrderStatus == "Deposited");
+                    .FirstOrDefaultAsync(o => o.ProductId == request.ProductId);
 
                 if (order != null)
                 {
-                    order.OrderStatus = "Completed";
-                    order.CompletedDate = DateTime.UtcNow;
-                    order.UpdatedAt = DateTime.UtcNow;
+                    // ✅ Chỉ update nếu order chưa completed
+                    if (order.OrderStatus?.ToLower() != "completed")
+                    {
+                        order.OrderStatus = "Completed";
+                        order.CompletedDate = DateTime.UtcNow;
+                        order.UpdatedAt = DateTime.UtcNow;
+                        
+                        // ✅ Cũng update AdminConfirmed nếu có field này trong Order model
+                        order.AdminConfirmed = true;
+                        order.AdminConfirmedDate = DateTime.UtcNow;
+                    }
+                }
+                else
+                {
+                    // Log warning nếu không tìm thấy order
+                    _logger.LogWarning($"Admin {adminId} confirmed product {request.ProductId} but no order found for this product.");
                 }
 
                 // Save changes

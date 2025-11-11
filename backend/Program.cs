@@ -14,7 +14,11 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.PropertyNamingPolicy = null; // Use PascalCase (default)
         options.JsonSerializerOptions.PropertyNameCaseInsensitive = true; // Allow case-insensitive matching
     });
-builder.Services.AddSignalR();
+// ✅ FIX: Configure SignalR with CORS support
+builder.Services.AddSignalR(options =>
+{
+    options.EnableDetailedErrors = true; // Enable detailed errors for debugging
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -56,9 +60,19 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 var accessToken = context.Request.Query["access_token"];
                 var path = context.HttpContext.Request.Path;
 
+                // ✅ FIX: Handle token from query string for SignalR
                 if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/chatHub"))
                 {
                     context.Token = accessToken!;
+                }
+                // ✅ FIX: Also try Authorization header as fallback
+                else if (string.IsNullOrEmpty(context.Token))
+                {
+                    var authHeader = context.Request.Headers["Authorization"].ToString();
+                    if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer "))
+                    {
+                        context.Token = authHeader.Substring("Bearer ".Length);
+                    }
                 }
                 return Task.CompletedTask;
             },
@@ -106,10 +120,10 @@ builder.Services.AddCors(options =>
                 "http://localhost:5179", 
                 "http://localhost:5181", 
                 "http://localhost:5182")
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials() // Quan trọng: cho phép credentials
-              .WithExposedHeaders("*"); // Expose all headers
+              .AllowAnyHeader() // ✅ Includes SignalR headers like X-SignalR-User-Agent
+              .AllowAnyMethod() // ✅ Includes OPTIONS for preflight
+              .AllowCredentials() // ✅ CRITICAL: Required for SignalR with credentials
+              .WithExposedHeaders("*"); // ✅ Expose all headers for SignalR
     });
     
     // Add default policy for development
@@ -145,18 +159,83 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// ✅ CORS MUST be called BEFORE UseHttpsRedirection and UseAuthentication
-// Use default policy for maximum compatibility
-app.UseCors();
+// ✅ CRITICAL: Disable HTTPS redirection in development to avoid CORS issues
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
-app.UseHttpsRedirection();
+// ✅ CRITICAL: CORS MUST be FIRST middleware (after Swagger) to handle preflight requests
+// This ensures SignalR negotiation requests get proper CORS headers
+app.UseCors("AllowFrontend");
+
+// ✅ CRITICAL: Handle OPTIONS preflight requests explicitly for SignalR
+// This is a fallback in case CORS middleware doesn't handle it properly
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path;
+    var method = context.Request.Method;
+    var origin = context.Request.Headers["Origin"].ToString();
+    
+    // Log all requests to SignalR endpoints for debugging
+    if (path.StartsWithSegments("/chatHub"))
+    {
+        Console.WriteLine($"🔍 SignalR Request: {method} {path}, Origin: {origin}");
+    }
+    
+    // Handle OPTIONS requests explicitly (backup for CORS middleware)
+    if (method == "OPTIONS")
+    {
+        var allowedOrigins = new[] { 
+            "http://localhost:5173", 
+            "http://localhost:5174",
+            "http://localhost:5177", 
+            "http://localhost:5179", 
+            "http://localhost:5181", 
+            "http://localhost:5182" 
+        };
+        
+        if (!string.IsNullOrEmpty(origin) && allowedOrigins.Contains(origin))
+        {
+            Console.WriteLine($"✅ Explicitly handling OPTIONS preflight from origin: {origin} for path: {path}");
+            // Set CORS headers explicitly
+            if (!context.Response.Headers.ContainsKey("Access-Control-Allow-Origin"))
+            {
+                context.Response.Headers["Access-Control-Allow-Origin"] = origin;
+            }
+            if (!context.Response.Headers.ContainsKey("Access-Control-Allow-Credentials"))
+            {
+                context.Response.Headers["Access-Control-Allow-Credentials"] = "true";
+            }
+            if (!context.Response.Headers.ContainsKey("Access-Control-Allow-Methods"))
+            {
+                context.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH";
+            }
+            if (!context.Response.Headers.ContainsKey("Access-Control-Allow-Headers"))
+            {
+                context.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, X-SignalR-User-Agent, Accept";
+            }
+            if (!context.Response.Headers.ContainsKey("Access-Control-Max-Age"))
+            {
+                context.Response.Headers["Access-Control-Max-Age"] = "86400";
+            }
+            context.Response.StatusCode = 200;
+            await context.Response.WriteAsync("");
+            return;
+        }
+    }
+    await next();
+});
 
 // Authentication & Authorization
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
-// SignalR hub endpoint
-app.MapHub<EVTB_Backend.RealTime.ChatHub>("/chatHub");
+
+// ✅ FIX: Map SignalR hub with explicit CORS policy
+// SignalR negotiation endpoint will use CORS middleware automatically
+app.MapHub<EVTB_Backend.RealTime.ChatHub>("/chatHub")
+   .RequireCors("AllowFrontend");
 
 app.Run();

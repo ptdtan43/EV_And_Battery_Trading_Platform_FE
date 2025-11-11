@@ -51,36 +51,68 @@ export async function updateVerificationStatus(productId, status, notes = '') {
   try {
     console.log(`🔍 Updating verification status for product ${productId} to ${status}...`);
     
-    // Try using verificationStatus first, fallback to inspectionRequested
+    // First, get the current product data to include required fields
+    const currentProduct = await apiRequest(`/api/Product/${productId}`);
+    console.log('📋 Current product data:', currentProduct);
+    
+    // Prepare update data with all required fields
+    const updateData = {
+      // Required fields from current product
+      title: currentProduct.title || currentProduct.Title || '',
+      brand: currentProduct.brand || currentProduct.Brand || '',
+      productType: currentProduct.productType || currentProduct.ProductType || 'Vehicle',
+      // Optional fields (preserve existing values)
+      description: currentProduct.description || currentProduct.Description || '',
+      price: currentProduct.price || currentProduct.Price || 0,
+      condition: currentProduct.condition || currentProduct.Condition || 'excellent',
+      // Verification fields to update
+      verificationStatus: status,
+      verificationNotes: notes || null
+    };
+    
+    // Include vehicle-specific fields if it's a vehicle
+    if (updateData.productType === 'Vehicle' || updateData.productType === 'vehicle') {
+      updateData.vehicleType = currentProduct.vehicleType || currentProduct.VehicleType || null;
+      updateData.manufactureYear = currentProduct.manufactureYear || currentProduct.ManufactureYear || currentProduct.year || currentProduct.Year || null;
+      updateData.mileage = currentProduct.mileage || currentProduct.Mileage || null;
+      updateData.licensePlate = currentProduct.licensePlate || currentProduct.LicensePlate || currentProduct.license_plate || null;
+    }
+    
+    // Include battery-specific fields if it's a battery
+    if (updateData.productType === 'Battery' || updateData.productType === 'battery') {
+      updateData.batteryType = currentProduct.batteryType || currentProduct.BatteryType || null;
+      updateData.batteryHealth = currentProduct.batteryHealth || currentProduct.BatteryHealth || null;
+      updateData.capacity = currentProduct.capacity || currentProduct.Capacity || null;
+      updateData.voltage = currentProduct.voltage || currentProduct.Voltage || null;
+      updateData.bms = currentProduct.bms || currentProduct.Bms || null;
+      updateData.cellType = currentProduct.cellType || currentProduct.CellType || null;
+      updateData.cycleCount = currentProduct.cycleCount || currentProduct.CycleCount || null;
+    }
+    
     try {
       const response = await apiRequest(`/api/Product/${productId}`, {
         method: 'PUT',
-        body: {
-          verificationStatus: status,
-          verificationNotes: notes
-        }
+        body: updateData
       });
       
-      console.log('✅ Verification status updated successfully (verificationStatus):', response);
+      console.log('✅ Verification status updated successfully:', response);
       return response;
     } catch (verificationError) {
-      console.warn('⚠️ verificationStatus field not supported, trying inspectionRequested...');
+      console.warn('⚠️ Standard update failed, trying admin update endpoint...', verificationError);
       
-      // Map status to inspectionRequested boolean
-      let inspectionRequested = false;
-      if (status === 'Requested' || status === 'InProgress') {
-        inspectionRequested = true;
+      // Try admin update endpoint as fallback
+      try {
+        const response = await apiRequest(`/api/Product/admin/update/${productId}`, {
+          method: 'PUT',
+          body: updateData
+        });
+        
+        console.log('✅ Verification status updated via admin endpoint:', response);
+        return response;
+      } catch (adminError) {
+        console.error('❌ Admin update endpoint also failed:', adminError);
+        throw verificationError; // Throw original error
       }
-      
-      const response = await apiRequest(`/api/Product/${productId}`, {
-        method: 'PUT',
-        body: {
-          inspectionRequested: inspectionRequested
-        }
-      });
-      
-      console.log('✅ Verification status updated successfully (inspectionRequested):', response);
-      return response;
     }
   } catch (error) {
     console.error('❌ Failed to update verification status:', error);

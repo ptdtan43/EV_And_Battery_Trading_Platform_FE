@@ -49,6 +49,7 @@ namespace EVTB_Backend.Controllers
                         manufactureYear = p.ManufactureYear,
                         mileage = p.Mileage,
                         licensePlate = p.LicensePlate,
+                        warrantyPeriod = p.WarrantyPeriod,
                         batteryType = p.BatteryType,
                         batteryHealth = p.BatteryHealth,
                         capacity = p.Capacity,
@@ -60,16 +61,23 @@ namespace EVTB_Backend.Controllers
                         createdDate = p.CreatedAt,
                         createdAt = p.CreatedAt,
                         updatedAt = p.UpdatedAt,
-                        seller = new
+                        seller = p.Seller != null ? new
                         {
                             id = p.Seller.UserId,
                             userId = p.Seller.UserId,
                             fullName = p.Seller.FullName,
                             email = p.Seller.Email,
                             phone = p.Seller.Phone
-                        }
+                        } : null
                     })
                     .ToListAsync();
+
+                // ✅ DEBUG: Log seller information for first product
+                if (products.Any())
+                {
+                    var firstProduct = products.First();
+                    _logger.LogInformation($"First product seller info - SellerId: {firstProduct.sellerId}, FullName: {firstProduct.seller?.fullName}");
+                }
 
                 _logger.LogInformation($"Retrieved {products.Count} products");
                 return Ok(products);
@@ -116,6 +124,7 @@ namespace EVTB_Backend.Controllers
                     manufactureYear = product.ManufactureYear,
                     mileage = product.Mileage,
                     licensePlate = product.LicensePlate,
+                    warrantyPeriod = product.WarrantyPeriod,
                     batteryType = product.BatteryType,
                     batteryHealth = product.BatteryHealth,
                     capacity = product.Capacity,
@@ -175,6 +184,7 @@ namespace EVTB_Backend.Controllers
                         manufactureYear = p.ManufactureYear,
                         mileage = p.Mileage,
                         licensePlate = p.LicensePlate,
+                        warrantyPeriod = p.WarrantyPeriod,
                         batteryType = p.BatteryType,
                         batteryHealth = p.BatteryHealth,
                         capacity = p.Capacity,
@@ -371,6 +381,7 @@ namespace EVTB_Backend.Controllers
                     ManufactureYear = request.ManufactureYear,
                     Mileage = request.Mileage,
                     LicensePlate = request.LicensePlate,
+                    WarrantyPeriod = request.WarrantyPeriod,
                     BatteryType = request.BatteryType,
                     BatteryHealth = request.BatteryHealth,
                     Capacity = request.Capacity,
@@ -462,6 +473,7 @@ namespace EVTB_Backend.Controllers
                 product.ManufactureYear = request.ManufactureYear ?? product.ManufactureYear;
                 product.Mileage = request.Mileage ?? product.Mileage;
                 product.LicensePlate = request.LicensePlate ?? product.LicensePlate;
+                product.WarrantyPeriod = request.WarrantyPeriod ?? product.WarrantyPeriod;
                 product.BatteryType = request.BatteryType ?? product.BatteryType;
                 product.BatteryHealth = request.BatteryHealth ?? product.BatteryHealth;
                 product.Capacity = request.Capacity ?? product.Capacity;
@@ -568,6 +580,7 @@ namespace EVTB_Backend.Controllers
         public int? ManufactureYear { get; set; }
         public int? Mileage { get; set; }
         public string? LicensePlate { get; set; }
+        public string? WarrantyPeriod { get; set; }
         public string? BatteryType { get; set; }
         public string? BatteryHealth { get; set; }
         public string? Capacity { get; set; }
@@ -587,6 +600,7 @@ namespace EVTB_Backend.Controllers
         public int? ManufactureYear { get; set; }
         public int? Mileage { get; set; }
         public string? LicensePlate { get; set; }
+        public string? WarrantyPeriod { get; set; }
         public string? BatteryType { get; set; }
         public string? BatteryHealth { get; set; }
         public string? Capacity { get; set; }
