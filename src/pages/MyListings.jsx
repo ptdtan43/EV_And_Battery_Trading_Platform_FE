@@ -56,6 +56,27 @@ export const MyListings = () => {
   const norm = (val) => String(val || "").toLowerCase();
   const getStatus = (l) => {
     const raw = norm(l?.status ?? l?.Status ?? l?.state);
+    
+    // ✅ FIX: Check for sold status FIRST (highest priority)
+    // This ensures that if product is sold, it shows "Đã bán" instead of "Đang trong quá trình thanh toán"
+    if (raw.includes("sold") || raw.includes("đã bán")) return "sold";
+    
+    // ✅ FIX: Cross-check with order status if available
+    // If there's a completed order for this product, it should be "sold"
+    const productId = l?.id ?? l?.productId ?? l?.Id ?? l?.listingId ?? l?.product_id;
+    if (productId && sellerOrders && sellerOrders.length > 0) {
+      const completedOrder = sellerOrders.find(o => {
+        const orderProductId = o.productId || o.ProductId || o.product?.productId || o.product?.id;
+        const orderStatus = (o.status || o.orderStatus || o.Status || o.OrderStatus || '').toLowerCase();
+        return (orderProductId == productId || orderProductId === productId) && orderStatus === 'completed';
+      });
+      
+      if (completedOrder) {
+        console.log(`✅ Product ${productId} has completed order - forcing status to "sold"`);
+        return "sold";
+      }
+    }
+    
     if (raw.includes("draft") || raw.includes("pending") || raw.includes("chờ"))
       return "pending";
     if (
@@ -72,7 +93,6 @@ export const MyListings = () => {
       return "approved";
     if (raw.includes("reject") || raw.includes("từ chối")) return "rejected";
     if (raw.includes("reserved") || raw.includes("thanh toán")) return "reserved";
-    if (raw.includes("sold") || raw.includes("đã bán")) return "sold";
     return raw || "pending";
   };
 

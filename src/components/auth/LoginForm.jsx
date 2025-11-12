@@ -244,7 +244,7 @@ export const LoginForm = () => {
 
           
             
-
+            
             {/* Social Login Buttons */}
             <div className="auth-social-buttons">
               <button

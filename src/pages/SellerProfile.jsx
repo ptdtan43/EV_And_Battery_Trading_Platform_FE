@@ -35,25 +35,6 @@ export const SellerProfile = () => {
   const [activeTab, setActiveTab] = useState("profile");
   const [adminUserDetail, setAdminUserDetail] = useState(null);
 
-  const confirmSale = async (productId) => {
-    try {
-      // Cập nhật sản phẩm thành Sold
-      await apiRequest(`/api/Product/${productId}/status`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          status: 'Sold'
-        })
-      });
-      
-      // Reload data để cập nhật UI
-      await loadSellerData();
-      
-      alert('Đã xác nhận bán sản phẩm thành công!');
-    } catch (error) {
-      console.error('Error confirming sale:', error);
-      alert('Có lỗi xảy ra khi xác nhận bán sản phẩm');
-    }
-  };
 
   useEffect(() => {
     if (id) {
@@ -398,35 +379,62 @@ export const SellerProfile = () => {
                   
                   {products.length > 0 ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {products.map((product, index) => (
-                        <div key={product.id || product.productId || index} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                          <div className="flex items-start space-x-3">
-                            <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center">
-                              <Package className="h-6 w-6 text-gray-400" />
-                            </div>
-                            <div className="flex-1">
-                              <h4 className="font-medium text-gray-900 line-clamp-2">
-                                {product.title}
-                              </h4>
-                              <p className="text-lg font-bold text-blue-600 mt-1">
-                                {formatPrice(product.price)}
-                              </p>
-                              <div className="flex items-center mt-2">
-                                <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
-                                <span className="text-sm text-green-600">Đã duyệt</span>
+                      {products.map((product, index) => {
+                        // ✅ FIX: Get product image
+                        const productId = product.id || product.productId || product.ProductId;
+                        const images = product.images || [];
+                        const primaryImage = product.primaryImage || images[0];
+                        const imageUrl = primaryImage?.imageData || primaryImage?.imageUrl || primaryImage?.url || primaryImage;
+                        
+                        return (
+                          <div key={product.id || product.productId || index} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                            <div className="flex items-start space-x-3">
+                              {/* ✅ FIX: Display product image instead of placeholder */}
+                              {imageUrl ? (
+                                <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0">
+                                  <img
+                                    src={imageUrl}
+                                    alt={product.title || 'Sản phẩm'}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      // Fallback to placeholder if image fails to load
+                                      e.target.style.display = 'none';
+                                      e.target.nextSibling.style.display = 'flex';
+                                    }}
+                                  />
+                                  <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center" style={{display: 'none'}}>
+                                    <Package className="h-6 w-6 text-gray-400" />
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center flex-shrink-0">
+                                  <Package className="h-6 w-6 text-gray-400" />
+                                </div>
+                              )}
+                              <div className="flex-1">
+                                <h4 className="font-medium text-gray-900 line-clamp-2">
+                                  {product.title}
+                                </h4>
+                                <p className="text-lg font-bold text-blue-600 mt-1">
+                                  {formatPrice(product.price)}
+                                </p>
+                                <div className="flex items-center mt-2">
+                                  <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
+                                  <span className="text-sm text-green-600">Đã duyệt</span>
+                                </div>
                               </div>
                             </div>
+                            <div className="mt-3">
+                              <Link
+                                to={`/product/${product.id || product.productId}`}
+                                className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                              >
+                                Xem chi tiết →
+                              </Link>
+                            </div>
                           </div>
-                          <div className="mt-3">
-                            <Link
-                              to={`/product/${product.id || product.productId}`}
-                              className="text-blue-600 hover:text-blue-700 text-sm font-medium"
-                            >
-                              Xem chi tiết →
-                            </Link>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="text-center py-8">
@@ -445,41 +453,62 @@ export const SellerProfile = () => {
                 </h3>
                 {pendingProducts.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {pendingProducts.map((product) => (
-                      <div key={product.id || product.productId} className="border border-yellow-200 rounded-lg p-4 bg-yellow-50">
-                        <div className="flex items-start space-x-3">
-                          <div className="w-16 h-16 bg-yellow-200 rounded-lg flex items-center justify-center">
-                            <Clock className="h-6 w-6 text-yellow-600" />
-                          </div>
-                          <div className="flex-1">
-                            <h4 className="font-medium text-gray-900 line-clamp-2">
-                              {product.title}
-                            </h4>
-                            <p className="text-lg font-bold text-blue-600 mt-1">
-                              {formatPrice(product.price)}
-                            </p>
-                            <div className="flex items-center mt-2">
-                              <Clock className="h-4 w-4 text-yellow-600 mr-1" />
-                              <span className="text-sm text-yellow-600">Đang trong quá trình thanh toán</span>
+                    {pendingProducts.map((product) => {
+                      // ✅ FIX: Get product image
+                      const productId = product.id || product.productId || product.ProductId;
+                      const images = product.images || [];
+                      const primaryImage = product.primaryImage || images[0];
+                      const imageUrl = primaryImage?.imageData || primaryImage?.imageUrl || primaryImage?.url || primaryImage;
+                      
+                      return (
+                        <div key={product.id || product.productId} className="border border-yellow-200 rounded-lg p-4 bg-yellow-50">
+                          <div className="flex items-start space-x-3">
+                            {/* ✅ FIX: Display product image instead of placeholder */}
+                            {imageUrl ? (
+                              <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0">
+                                <img
+                                  src={imageUrl}
+                                  alt={product.title || 'Sản phẩm'}
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    // Fallback to placeholder if image fails to load
+                                    e.target.style.display = 'none';
+                                    e.target.nextSibling.style.display = 'flex';
+                                  }}
+                                />
+                                <div className="w-16 h-16 bg-yellow-200 rounded-lg flex items-center justify-center" style={{display: 'none'}}>
+                                  <Clock className="h-6 w-6 text-yellow-600" />
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="w-16 h-16 bg-yellow-200 rounded-lg flex items-center justify-center flex-shrink-0">
+                                <Clock className="h-6 w-6 text-yellow-600" />
+                              </div>
+                            )}
+                            <div className="flex-1">
+                              <h4 className="font-medium text-gray-900 line-clamp-2">
+                                {product.title}
+                              </h4>
+                              <p className="text-lg font-bold text-blue-600 mt-1">
+                                {formatPrice(product.price)}
+                              </p>
+                              <div className="flex items-center mt-2">
+                                <Clock className="h-4 w-4 text-yellow-600 mr-1" />
+                                <span className="text-sm text-yellow-600">Đang trong quá trình thanh toán</span>
+                              </div>
                             </div>
                           </div>
+                          <div className="mt-4">
+                            <Link
+                              to={`/product/${product.id || product.productId}`}
+                              className="w-full block bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium text-center"
+                            >
+                              Xem chi tiết
+                            </Link>
+                          </div>
                         </div>
-                        <div className="mt-4 flex space-x-2">
-                          <button
-                            onClick={() => confirmSale(product.id || product.productId)}
-                            className="flex-1 bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
-                          >
-                            Xác nhận bán
-                          </button>
-                          <Link
-                            to={`/product/${product.id || product.productId}`}
-                            className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium text-center"
-                          >
-                            Xem chi tiết
-                          </Link>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="text-center py-8">
