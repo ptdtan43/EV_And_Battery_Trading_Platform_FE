@@ -2787,6 +2787,20 @@ export const AdminDashboard = () => {
             </div>
           </div>
         </nav>
+
+        {/* Logout Button */}
+        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200">
+          <button
+            onClick={() => {
+              signOut();
+              navigate("/");
+            }}
+            className="w-full flex items-center space-x-3 p-3 text-gray-700 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors"
+          >
+            <LogOut className="h-5 w-5" />
+            <span className="font-medium">Đăng xuất</span>
+          </button>
+        </div>
       </div>
 
       {/* Main Content */}
@@ -2812,16 +2826,6 @@ export const AdminDashboard = () => {
                 {activeTab === "fees" && "Quản lý phí đặt cọc và phí kiểm định"}
               </p>
             </div>
-            <button
-              onClick={() => {
-                signOut();
-                navigate("/");
-              }}
-              className="p-2 text-gray-900 hover:bg-gray-100 rounded-lg transition-colors duration-200"
-              title="Đăng xuất"
-            >
-              <LogOut className="h-5 w-5" />
-            </button>
           </div>
         </div>
 
