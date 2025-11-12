@@ -49,12 +49,41 @@ const brandModelMapping = {
   Other: [] // Cho phép nhập tự do nếu chọn "Khác"
 };
 
-// Function để lấy danh sách model dựa trên brand
-const getModelsByBrand = (brand) => {
+// Mapping giữa các hãng pin và model tương ứng
+const batteryBrandModelMapping = {
+  "CATL": ["CATL NCM811", "CATL LFP", "CATL NCM622", "CATL NCM523", "CATL Qilin"],
+  "BYD": ["BYD Blade", "BYD LFP", "BYD NCM", "BYD DM-i"],
+  "LG Chem": ["LG Chem NCM622", "LG Chem NCM811", "LG Chem NCM712"],
+  "Panasonic": ["Panasonic NCA", "Panasonic 2170", "Panasonic 4680"],
+  "Samsung SDI": ["Samsung SDI NCM622", "Samsung SDI NCM811", "Samsung SDI NCM712"],
+  "SK Innovation": ["SK Innovation NCM622", "SK Innovation NCM811", "SK Innovation NCM712"],
+  "Tesla": ["Tesla 2170", "Tesla 4680", "Tesla LFP"],
+  "Contemporary Amperex": ["CATL NCM811", "CATL LFP", "CATL NCM622"],
+  "EVE Energy": ["EVE LFP", "EVE NCM", "EVE LCO"],
+  "Gotion High-tech": ["Gotion LFP", "Gotion NCM", "Gotion LCO"],
+  "Farasis Energy": ["Farasis NCM", "Farasis LFP"],
+  "SVOLT": ["SVOLT NCM", "SVOLT LFP"],
+  "CALB": ["CALB LFP", "CALB NCM"],
+  "Lishen": ["Lishen LFP", "Lishen NCM"],
+  "BAK Battery": ["BAK LFP", "BAK NCM"],
+  "A123 Systems": ["A123 LFP", "A123 NCM"],
+  "Saft": ["Saft LFP", "Saft NCM"],
+  "EnerDel": ["EnerDel LFP", "EnerDel NCM"],
+  "AESC": ["AESC NCM", "AESC LFP"],
+  "Other": [] // Cho phép nhập tự do nếu chọn "Khác"
+};
+
+// Function để lấy danh sách model dựa trên brand và productType
+const getModelsByBrand = (brand, productType = "vehicle") => {
   if (!brand || brand === "Other") {
     return [];
   }
-  return brandModelMapping[brand] || [];
+  
+  if (productType === "battery") {
+    return batteryBrandModelMapping[brand] || [];
+  } else {
+    return brandModelMapping[brand] || [];
+  }
 };
 
 export const CreateListing = () => {
@@ -210,9 +239,17 @@ export const CreateListing = () => {
         ...formData,
         [name]: numericPrice,
       });
+    } else if (name === "productType") {
+      // Khi productType thay đổi, reset brand và model vì danh sách khác nhau giữa vehicle và battery
+      setFormData({
+        ...formData,
+        productType: value,
+        brand: "",
+        model: "",
+      });
     } else if (name === "brand") {
       // Khi brand thay đổi, reset model nếu model hiện tại không thuộc brand mới
-      const newModels = getModelsByBrand(value);
+      const newModels = getModelsByBrand(value, formData.productType);
       const currentModel = formData.model;
       const shouldResetModel = value && value !== "Other" && !newModels.includes(currentModel);
       
@@ -515,11 +552,10 @@ export const CreateListing = () => {
       if (formData.productType === "battery") {
         if (
           !formData.batteryType ||
-          !formData.batteryHealth ||
           !formData.capacity
         ) {
           throw new Error(
-            "Vui lòng điền đầy đủ thông tin pin: loại pin, tình trạng pin, và dung lượng."
+            "Vui lòng điền đầy đủ thông tin pin: loại pin và dung lượng."
           );
         }
       }
@@ -540,21 +576,15 @@ export const CreateListing = () => {
         throw new Error("Giá bán phải là một số dương hợp lệ.");
       }
 
-      // Validate year if provided (only for vehicles)
-      if (formData.productType === "vehicle" && formData.manufactureYear) {
+      // Validate year if provided (for vehicles and batteries)
+      if (formData.manufactureYear) {
         const year = parseInt(formData.manufactureYear);
-        if (isNaN(year) || year < 2010 || year > 2024) {
-          throw new Error("Năm sản xuất phải là số từ 2010 đến 2024.");
+        const currentYear = new Date().getFullYear();
+        if (isNaN(year) || year < 2000 || year > currentYear) {
+          throw new Error(`Năm sản xuất phải là số từ 2000 đến ${currentYear}.`);
         }
       }
 
-      // Validate battery health (only for batteries)
-      if (formData.productType === "battery" && formData.batteryHealth) {
-        const health = parseFloat(formData.batteryHealth);
-        if (isNaN(health) || health < 0 || health > 100) {
-          throw new Error("Tình trạng pin phải là số từ 0 đến 100%.");
-        }
-      }
 
       // Validate capacity (only for batteries)
       if (formData.productType === "battery" && formData.capacity) {
@@ -593,6 +623,10 @@ export const CreateListing = () => {
           formData.productType === "vehicle"
             ? formData.manufactureYear || formData.year
               ? parseInt(formData.manufactureYear || formData.year)
+              : 0
+            : formData.productType === "battery"
+            ? formData.manufactureYear
+              ? parseInt(formData.manufactureYear)
               : 0
             : 0,
         mileage:
@@ -1244,7 +1278,7 @@ export const CreateListing = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Model * <span className="text-red-500">(Bắt buộc)</span>
                   </label>
-                  {formData.brand && formData.brand !== "Other" && getModelsByBrand(formData.brand).length > 0 ? (
+                  {formData.brand && formData.brand !== "Other" && getModelsByBrand(formData.brand, formData.productType).length > 0 ? (
                     <select
                       name="model"
                       value={formData.model}
@@ -1253,7 +1287,7 @@ export const CreateListing = () => {
                       required
                     >
                       <option value="">Chọn model</option>
-                      {getModelsByBrand(formData.brand).map((model) => (
+                      {getModelsByBrand(formData.brand, formData.productType).map((model) => (
                         <option key={model} value={model}>
                           {model}
                         </option>
@@ -1266,9 +1300,13 @@ export const CreateListing = () => {
                       value={formData.model}
                       onChange={handleChange}
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder={formData.brand === "Other" ? "Nhập model xe" : "Chọn hãng xe trước"}
+                      placeholder={
+                        formData.brand === "Other" 
+                          ? (formData.productType === "battery" ? "Nhập model pin" : "Nhập model xe")
+                          : (formData.productType === "battery" ? "Chọn hãng pin trước" : "Chọn hãng xe trước")
+                      }
                       required
-                      disabled={!formData.brand || (formData.brand !== "Other" && getModelsByBrand(formData.brand).length > 0)}
+                      disabled={!formData.brand || (formData.brand !== "Other" && getModelsByBrand(formData.brand, formData.productType).length > 0)}
                     />
                   )}
                 </div>
@@ -1521,21 +1559,21 @@ export const CreateListing = () => {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Tình trạng pin (%) *
+                    Năm sản xuất pin
                   </label>
                   <input
                     type="number"
-                    name="batteryHealth"
-                    value={formData.batteryHealth}
+                    name="manufactureYear"
+                    value={formData.manufactureYear}
                     onChange={handleChange}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="VD: 85"
-                    min="0"
-                    max="100"
-                    step="0.01"
-                    required
+                    placeholder="VD: 2023"
+                    min="2000"
+                    max={new Date().getFullYear()}
                   />
-                  <p className="text-xs text-gray-500 mt-1">Đơn vị: %</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Năm sản xuất của pin
+                  </p>
                 </div>
 
                 <div>

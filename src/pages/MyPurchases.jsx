@@ -212,12 +212,18 @@ const MyPurchases = () => {
         }
         
         // ✅ FIX: Ensure we always return a valid object
+        const orderStatus = (order.status || order.orderStatus || order.Status || order.OrderStatus || '').toLowerCase();
+        const productStatus = (order.product?.status || order.product?.Status || '').toLowerCase();
+        const isCompleted = orderStatus === 'completed' || productStatus === 'sold' || productStatus === 'completed';
+        const isCancelled = orderStatus === 'cancelled' || orderStatus === 'failed';
+        
         const purchase = {
           ...order,
           productId: productId || order.productId || order.ProductId || order.product?.productId || order.product?.ProductId || null,
           product: productWithImages,
           sellerId: order.sellerId || order.SellerId || order.seller?.id || 1,
-          canReview: !order.hasRating && (order.status || order.orderStatus || order.Status || '').toLowerCase() !== 'cancelled',
+          // ✅ FIX: Chỉ cho phép đánh giá khi đơn hàng đã hoàn thành (completed) và chưa có rating
+          canReview: !order.hasRating && isCompleted && !isCancelled,
           orderStatus: order.status || order.orderStatus || order.Status || order.OrderStatus || order.product?.status || 'pending',
           cancellationReason: order.cancellationReason || order.CancellationReason || null
         };

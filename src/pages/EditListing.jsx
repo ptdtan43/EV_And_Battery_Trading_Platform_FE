@@ -45,12 +45,41 @@ const brandModelMapping = {
   Other: [] // Cho phép nhập tự do nếu chọn "Khác"
 };
 
-// Function để lấy danh sách model dựa trên brand
-const getModelsByBrand = (brand) => {
+// Mapping giữa các hãng pin và model tương ứng
+const batteryBrandModelMapping = {
+  "CATL": ["CATL NCM811", "CATL LFP", "CATL NCM622", "CATL NCM523", "CATL Qilin"],
+  "BYD": ["BYD Blade", "BYD LFP", "BYD NCM", "BYD DM-i"],
+  "LG Chem": ["LG Chem NCM622", "LG Chem NCM811", "LG Chem NCM712"],
+  "Panasonic": ["Panasonic NCA", "Panasonic 2170", "Panasonic 4680"],
+  "Samsung SDI": ["Samsung SDI NCM622", "Samsung SDI NCM811", "Samsung SDI NCM712"],
+  "SK Innovation": ["SK Innovation NCM622", "SK Innovation NCM811", "SK Innovation NCM712"],
+  "Tesla": ["Tesla 2170", "Tesla 4680", "Tesla LFP"],
+  "Contemporary Amperex": ["CATL NCM811", "CATL LFP", "CATL NCM622"],
+  "EVE Energy": ["EVE LFP", "EVE NCM", "EVE LCO"],
+  "Gotion High-tech": ["Gotion LFP", "Gotion NCM", "Gotion LCO"],
+  "Farasis Energy": ["Farasis NCM", "Farasis LFP"],
+  "SVOLT": ["SVOLT NCM", "SVOLT LFP"],
+  "CALB": ["CALB LFP", "CALB NCM"],
+  "Lishen": ["Lishen LFP", "Lishen NCM"],
+  "BAK Battery": ["BAK LFP", "BAK NCM"],
+  "A123 Systems": ["A123 LFP", "A123 NCM"],
+  "Saft": ["Saft LFP", "Saft NCM"],
+  "EnerDel": ["EnerDel LFP", "EnerDel NCM"],
+  "AESC": ["AESC NCM", "AESC LFP"],
+  "Other": [] // Cho phép nhập tự do nếu chọn "Khác"
+};
+
+// Function để lấy danh sách model dựa trên brand và productType
+const getModelsByBrand = (brand, productType = "vehicle") => {
   if (!brand || brand === "Other") {
     return [];
   }
-  return brandModelMapping[brand] || [];
+  
+  if (productType === "battery") {
+    return batteryBrandModelMapping[brand] || [];
+  } else {
+    return brandModelMapping[brand] || [];
+  }
 };
 
 export const EditListing = () => {
@@ -524,9 +553,17 @@ export const EditListing = () => {
         ...formData,
         [name]: numericPrice,
       });
+    } else if (name === "productType") {
+      // Khi productType thay đổi, reset brand và model vì danh sách khác nhau giữa vehicle và battery
+      setFormData({
+        ...formData,
+        productType: value,
+        brand: "",
+        model: "",
+      });
     } else if (name === "brand") {
       // Khi brand thay đổi, reset model nếu model hiện tại không thuộc brand mới
-      const newModels = getModelsByBrand(value);
+      const newModels = getModelsByBrand(value, formData.productType);
       const currentModel = formData.model;
       const shouldResetModel = value && value !== "Other" && !newModels.includes(currentModel);
       
@@ -1172,7 +1209,7 @@ export const EditListing = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Model *
                   </label>
-                  {formData.brand && formData.brand !== "Other" && getModelsByBrand(formData.brand).length > 0 ? (
+                  {formData.brand && formData.brand !== "Other" && getModelsByBrand(formData.brand, formData.productType).length > 0 ? (
                     <select
                       name="model"
                       value={formData.model}
@@ -1181,7 +1218,7 @@ export const EditListing = () => {
                       required
                     >
                       <option value="">Chọn model</option>
-                      {getModelsByBrand(formData.brand).map((model) => (
+                      {getModelsByBrand(formData.brand, formData.productType).map((model) => (
                         <option key={model} value={model}>
                           {model}
                         </option>
@@ -1194,9 +1231,13 @@ export const EditListing = () => {
                       value={formData.model}
                       onChange={handleChange}
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder={formData.brand === "Other" ? "Nhập model xe" : "Chọn hãng xe trước"}
+                      placeholder={
+                        formData.brand === "Other" 
+                          ? (formData.productType === "battery" ? "Nhập model pin" : "Nhập model xe")
+                          : (formData.productType === "battery" ? "Chọn hãng pin trước" : "Chọn hãng xe trước")
+                      }
                       required
-                      disabled={!formData.brand || (formData.brand !== "Other" && getModelsByBrand(formData.brand).length > 0)}
+                      disabled={!formData.brand || (formData.brand !== "Other" && getModelsByBrand(formData.brand, formData.productType).length > 0)}
                     />
                   )}
                 </div>
@@ -1361,26 +1402,6 @@ export const EditListing = () => {
                     <option value="MotorcycleBattery">Pin xe máy</option>
                     <option value="BikeBattery">Pin xe đạp điện</option>
                   </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Tình trạng pin (%)
-                  </label>
-                  <input
-                    type="number"
-                    name="batteryHealth"
-                    value={formData.batteryHealth}
-                    onChange={handleChange}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="VD: 85"
-                    min="0"
-                    max="100"
-                    step="0.1"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Tình trạng pin từ 0-100%
-                  </p>
                 </div>
 
                 <div>

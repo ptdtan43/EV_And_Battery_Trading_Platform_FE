@@ -366,7 +366,7 @@ export const RegisterForm = () => {
                     value={formData.fullName}
                     onChange={handleChange}
                     className="auth-input"
-                    placeholder="Nguyễn Văn A"
+                    placeholder="Điền họ và tên"
                     required
                   />
                 </div>
@@ -386,7 +386,7 @@ export const RegisterForm = () => {
                     value={formData.email}
                     onChange={handleChange}
                     className="auth-input"
-                    placeholder="your@email.com"
+                    placeholder="Nhập email"
                     required
                   />
                 </div>
@@ -406,7 +406,7 @@ export const RegisterForm = () => {
                     value={formData.phone}
                     onChange={handleChange}
                     className={`auth-input ${phoneError ? "border-red-500" : ""}`}
-                    placeholder="0123456789"
+                    placeholder="0xxxxxxxxx"
                     maxLength={10}
                     required
                   />
@@ -433,7 +433,7 @@ export const RegisterForm = () => {
                     value={formData.password}
                     onChange={handleChange}
                     className="auth-input"
-                    placeholder="••••••••"
+                    placeholder="Nhập mật khẩu"
                     required
                   />
                   <button
@@ -464,7 +464,7 @@ export const RegisterForm = () => {
                     value={formData.confirmPassword}
                     onChange={handleChange}
                     className="auth-input"
-                    placeholder="••••••••"
+                    placeholder="Nhập lại mật khẩu"
                     required
                   />
                   <button

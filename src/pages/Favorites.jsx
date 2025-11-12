@@ -13,6 +13,8 @@ import {
   Trash2,
   Eye,
   ShoppingCart,
+  Car,
+  Battery,
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
 import { formatPrice } from "../utils/formatters";
@@ -30,6 +32,15 @@ export const Favorites = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [viewMode, setViewMode] = useState("grid");
   const [sortBy, setSortBy] = useState("newest");
+  const [productTypeFilter, setProductTypeFilter] = useState("all"); // all, vehicle, battery
+
+  // Calculate counts for tabs
+  const vehicleCount = favorites.filter(
+    (p) => (p.productType || "").toLowerCase() === "vehicle" || (p.productType || "").toLowerCase() === "xe"
+  ).length;
+  const batteryCount = favorites.filter(
+    (p) => (p.productType || "").toLowerCase() === "battery" || (p.productType || "").toLowerCase() === "pin"
+  ).length;
 
   useEffect(() => {
     if (user) {
@@ -42,7 +53,7 @@ export const Favorites = () => {
   useEffect(() => {
     console.log("Favorites changed, re-filtering:", favorites);
     filterAndSortFavorites();
-  }, [favorites, searchTerm, sortBy]);
+  }, [favorites, searchTerm, sortBy, productTypeFilter]);
 
   const loadFavorites = async () => {
     try {
@@ -51,25 +62,88 @@ export const Favorites = () => {
 
       // Get user's favorite product IDs
       const favoritesData = await apiRequest(`/api/Favorite/user/${userId}`);
-      const favoriteIds = Array.isArray(favoritesData)
-        ? favoritesData.map((fav) => fav.productId)
-        : [];
+      console.log("🔍 Favorites data from API:", favoritesData);
+      console.log("🔍 Favorites data type:", Array.isArray(favoritesData) ? "Array" : typeof favoritesData);
+      
+      // Handle different response formats
+      let favoriteList = [];
+      if (Array.isArray(favoritesData)) {
+        favoriteList = favoritesData;
+      } else if (favoritesData && Array.isArray(favoritesData.items)) {
+        favoriteList = favoritesData.items;
+      } else if (favoritesData && favoritesData.data && Array.isArray(favoritesData.data)) {
+        favoriteList = favoritesData.data;
+      }
+      
+      const favoriteIds = favoriteList
+        .map((fav) => fav.productId || fav.ProductId || fav.product_id || fav.Id)
+        .filter((id) => id != null && id !== undefined); // Remove null/undefined
+
+      console.log("🔍 Favorite product IDs:", favoriteIds);
+      console.log("🔍 Total favorites:", favoriteIds.length);
 
       if (favoriteIds.length === 0) {
         setFavorites([]);
+        setLoading(false);
         return;
       }
 
       // ✅ Get product details for each favorite in parallel
       const productPromises = favoriteIds.map(async (productId, index) => {
+        // Use favoriteList from outer scope
+        const favList = favoriteList;
         try {
-          // ✅ NO MORE DELAYS - Load all products in parallel with timeout
-          const productPromise = apiRequest(`/api/Product/${productId}`);
-          const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Timeout')), 3000)
-          );
+          console.log(`🔍 Loading product ${index + 1}/${favoriteIds.length}:`, productId);
           
-          const productData = await Promise.race([productPromise, timeoutPromise]);
+          // ✅ Call API và kiểm tra status code
+          let productData;
+          try {
+            const productPromise = apiRequest(`/api/Product/${productId}`);
+            const timeoutPromise = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error(`Timeout loading product ${productId}`)), 10000)
+            );
+            
+            productData = await Promise.race([productPromise, timeoutPromise]);
+            
+            // Nếu productData là null hoặc có error message, có thể product không tồn tại
+            if (!productData || (productData.message && productData.message.includes("Không tìm thấy"))) {
+              throw new Error(`Product ${productId} not found`);
+            }
+            
+            console.log(`✅ Loaded product ${productId}:`, productData?.title || productData?.name);
+          } catch (apiError) {
+            // Kiểm tra xem có phải lỗi 404 không
+            const errorMessage = apiError.message || apiError.toString();
+            const isNotFound = 
+              apiError.status === 404 || 
+              errorMessage.includes("not found") || 
+              errorMessage.includes("404") || 
+              errorMessage.includes("Không tìm thấy");
+              
+            if (isNotFound) {
+              console.warn(`⚠️ Product ${productId} không tồn tại (404), sẽ tự động xóa khỏi favorites`);
+              // Tự động xóa khỏi favorites
+              const favoriteObj = favList.find(
+                (fav) => 
+                  (fav.productId || fav.ProductId || fav.product_id) == productId ||
+                  (fav.productId || fav.ProductId || fav.product_id) === productId
+              );
+              const favoriteId = favoriteObj?.favoriteId || favoriteObj?.FavoriteId || favoriteObj?.id || favoriteObj?.Id;
+              
+              if (favoriteId) {
+                try {
+                  await apiRequest(`/api/Favorite/${favoriteId}`, { method: "DELETE" });
+                  console.log(`✅ Đã xóa favorite ${favoriteId} cho product ${productId} không tồn tại`);
+                } catch (deleteError) {
+                  console.error(`❌ Không thể xóa favorite ${favoriteId}:`, deleteError);
+                }
+              }
+              
+              // Return null để filter ra khỏi danh sách
+              return null;
+            }
+            throw apiError;
+          }
 
           // Load product images
           let images = [];
@@ -80,27 +154,92 @@ export const Favorites = () => {
             const productImages = Array.isArray(imagesData)
               ? imagesData
               : imagesData?.items || [];
-            images = productImages.map(
-              (img) => img.imageData || img.imageUrl || img.url
-            );
+            
+            // Filter chỉ lấy product images (Vehicle/Battery), không lấy Document images
+            const filteredImages = productImages.filter((img) => {
+              const imageName = (img.name || img.Name || "").toLowerCase();
+              const imageType = (img.imageType || img.type || img.image_type || "").toLowerCase();
+              // Chỉ lấy product images, không lấy document images
+              return imageName !== "document" && imageName !== "doc" && imageType !== "document";
+            });
+            
+            images = filteredImages
+              .map((img) => img.imageData || img.imageUrl || img.url)
+              .filter(Boolean); // Remove empty values
           } catch (imageError) {
-            console.log("No images found for product:", productId);
+            console.log("⚠️ No images found for product:", productId, imageError);
           }
+
+          // Find favoriteId from favoritesData
+          const favoriteObj = favList.find(
+            (fav) => 
+              (fav.productId || fav.ProductId || fav.product_id) == productId ||
+              (fav.productId || fav.ProductId || fav.product_id) === productId
+          );
+          const favoriteId = favoriteObj?.favoriteId || favoriteObj?.FavoriteId || favoriteObj?.id || favoriteObj?.Id;
 
           return {
             ...productData,
+            id: productData.id || productData.productId || productData.ProductId || productId,
+            productId: productData.productId || productData.ProductId || productData.id || productId,
             images,
-            favoriteId: favoritesData.find((fav) => fav.productId === productId)
-              ?.favoriteId,
+            favoriteId,
           };
         } catch (error) {
-          console.warn(`Failed to load product ${productId}:`, error);
-          return null;
+          console.error(`❌ Failed to load product ${productId}:`, error);
+          console.error("Error details:", {
+            productId,
+            errorMessage: error.message,
+            errorStack: error.stack,
+          });
+          
+          // Nếu không phải lỗi 404, vẫn giữ lại với thông báo lỗi
+          const favoriteObj = favList.find(
+            (fav) => 
+              (fav.productId || fav.ProductId || fav.product_id) == productId ||
+              (fav.productId || fav.ProductId || fav.product_id) === productId
+          );
+          const favoriteId = favoriteObj?.favoriteId || favoriteObj?.FavoriteId || favoriteObj?.id || favoriteObj?.Id;
+          
+          return {
+            id: productId,
+            productId: productId,
+            title: `Product ${productId} (Failed to load)`,
+            price: 0,
+            images: [],
+            error: error.message,
+            favoriteId: favoriteId,
+            canRetry: true, // Đánh dấu có thể retry
+          };
         }
       });
 
       const products = await Promise.all(productPromises);
+      console.log("🔍 All loaded products:", products);
+      
+      // Filter null (products đã bị xóa) và giữ lại products có lỗi để retry
       const validProducts = products.filter((product) => product !== null);
+      const deletedProducts = products.filter((product) => product === null).length;
+      
+      console.log(`✅ Loaded ${validProducts.length}/${favoriteIds.length} products successfully`);
+      
+      if (deletedProducts > 0) {
+        showToast({
+          title: "✅ Đã cập nhật danh sách",
+          description: `Đã xóa ${deletedProducts} sản phẩm không tồn tại khỏi danh sách yêu thích.`,
+          type: "success",
+        });
+      }
+      
+      if (validProducts.length < favoriteIds.length && deletedProducts === 0) {
+        const failedCount = favoriteIds.length - validProducts.length;
+        console.warn(`⚠️ ${failedCount} products failed to load`);
+        showToast({
+          title: "⚠️ Một số sản phẩm không tải được",
+          description: `Đã tải ${validProducts.length}/${favoriteIds.length} sản phẩm. Vui lòng refresh trang.`,
+          type: "warning",
+        });
+      }
 
       setFavorites(validProducts);
     } catch (error) {
@@ -117,7 +256,20 @@ export const Favorites = () => {
   };
 
   const filterAndSortFavorites = () => {
-    let filtered = favorites;
+    let filtered = [...favorites];
+
+    // Product Type filter
+    if (productTypeFilter !== "all") {
+      filtered = filtered.filter((product) => {
+        const productType = (product.productType || "").toLowerCase();
+        if (productTypeFilter === "vehicle") {
+          return productType === "vehicle" || productType === "xe";
+        } else if (productTypeFilter === "battery") {
+          return productType === "battery" || productType === "pin";
+        }
+        return true;
+      });
+    }
 
     // Search filter
     if (searchTerm) {
@@ -223,7 +375,13 @@ export const Favorites = () => {
                 Sản phẩm yêu thích
               </h1>
               <p className="text-gray-600 mt-1">
-                {favorites.length} sản phẩm trong danh sách yêu thích
+                {filteredFavorites.length} / {favorites.length} sản phẩm
+                {productTypeFilter === "vehicle"
+                  ? " xe"
+                  : productTypeFilter === "battery"
+                  ? " pin"
+                  : ""}{" "}
+                trong danh sách yêu thích
               </p>
             </div>
             <div className="flex items-center space-x-4">
@@ -239,6 +397,47 @@ export const Favorites = () => {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Product Type Tabs */}
+        <div className="bg-white rounded-xl shadow-sm p-4 mb-6">
+          <div className="flex items-center space-x-4">
+            <span className="text-sm font-medium text-gray-700">Loại sản phẩm:</span>
+            <div className="flex space-x-2">
+              <button
+                onClick={() => setProductTypeFilter("all")}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  productTypeFilter === "all"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                }`}
+              >
+                Tất cả ({favorites.length})
+              </button>
+              <button
+                onClick={() => setProductTypeFilter("vehicle")}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center ${
+                  productTypeFilter === "vehicle"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                }`}
+              >
+                <Car className="h-4 w-4 mr-1" />
+                Xe điện ({vehicleCount})
+              </button>
+              <button
+                onClick={() => setProductTypeFilter("battery")}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center ${
+                  productTypeFilter === "battery"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                }`}
+              >
+                <Battery className="h-4 w-4 mr-1" />
+                Pin ({batteryCount})
+              </button>
+            </div>
+          </div>
+        </div>
+
         {/* Filters and Search */}
         <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0 md:space-x-4">
@@ -312,15 +511,20 @@ export const Favorites = () => {
                 <div key={product.id || product.productId || index}>
                   {viewMode === "grid" ? (
                     <div className="border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow">
-                      {/* Product Image */}
+                        {/* Product Image */}
                       <div className="aspect-w-16 aspect-h-9 bg-gray-200 relative">
                         {product.images && product.images.length > 0 ? (
                           <img
                             src={product.images[0]}
                             alt={product.title}
                             className="w-full h-48 object-cover"
+                            onError={(e) => {
+                              e.target.style.display = "none";
+                              e.target.nextElementSibling?.classList.remove("hidden");
+                            }}
                           />
-                        ) : (
+                        ) : null}
+                        {(!product.images || product.images.length === 0) && (
                           <div className="flex items-center justify-center h-48">
                             <Package className="h-12 w-12 text-gray-400" />
                           </div>
@@ -340,13 +544,27 @@ export const Favorites = () => {
                         </button>
                       </div>
 
-                      {/* Product Info */}
+                        {/* Product Info */}
                       <div className="p-4">
-                        <h3 className="font-medium text-gray-900 line-clamp-2 mb-2">
-                          {product.title}
-                        </h3>
+                        <div className="flex items-start justify-between mb-2">
+                          <h3 className="font-medium text-gray-900 line-clamp-2 flex-1">
+                            {product.title}
+                          </h3>
+                          {/* Product Type Badge */}
+                          {(product.productType || "").toLowerCase() === "battery" || (product.productType || "").toLowerCase() === "pin" ? (
+                            <span className="ml-2 px-2 py-0.5 bg-purple-100 text-purple-800 text-xs rounded-full flex items-center whitespace-nowrap">
+                              <Battery className="h-3 w-3 mr-1" />
+                              Pin
+                            </span>
+                          ) : (
+                            <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 text-xs rounded-full flex items-center whitespace-nowrap">
+                              <Car className="h-3 w-3 mr-1" />
+                              Xe
+                            </span>
+                          )}
+                        </div>
                         <p className="text-lg font-bold text-blue-600 mb-2">
-                          {formatPrice(product.price)}
+                          {formatPrice(product.price || 0)}
                         </p>
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center text-gray-600">
@@ -358,9 +576,9 @@ export const Favorites = () => {
                           <div className="flex items-center text-gray-600">
                             <Calendar className="h-4 w-4 mr-1" />
                             <span className="text-sm">
-                              {new Date(
-                                product.createdDate || product.created_date
-                              ).toLocaleDateString("vi-VN")}
+                              {product.createdDate || product.created_date
+                                ? new Date(product.createdDate || product.created_date).toLocaleDateString("vi-VN")
+                                : "N/A"}
                             </span>
                           </div>
                         </div>
@@ -393,25 +611,44 @@ export const Favorites = () => {
                   ) : (
                     <div className="flex items-center space-x-4 p-4 border border-gray-200 rounded-lg hover:shadow-md transition-shadow">
                       {/* Product Image */}
-                      <div className="w-20 h-20 bg-gray-200 rounded-lg flex items-center justify-center flex-shrink-0">
+                      <div className="w-20 h-20 bg-gray-200 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
                         {product.images && product.images.length > 0 ? (
                           <img
                             src={product.images[0]}
                             alt={product.title}
                             className="w-full h-full object-cover rounded-lg"
+                            onError={(e) => {
+                              e.target.style.display = "none";
+                              e.target.nextElementSibling?.classList.remove("hidden");
+                            }}
                           />
-                        ) : (
+                        ) : null}
+                        {(!product.images || product.images.length === 0) && (
                           <Package className="h-8 w-8 text-gray-400" />
                         )}
                       </div>
 
                       {/* Product Info */}
                       <div className="flex-1">
-                        <h3 className="font-medium text-gray-900 mb-1">
-                          {product.title}
-                        </h3>
+                        <div className="flex items-start justify-between mb-1">
+                          <h3 className="font-medium text-gray-900 flex-1">
+                            {product.title}
+                          </h3>
+                          {/* Product Type Badge */}
+                          {(product.productType || "").toLowerCase() === "battery" || (product.productType || "").toLowerCase() === "pin" ? (
+                            <span className="ml-2 px-2 py-0.5 bg-purple-100 text-purple-800 text-xs rounded-full flex items-center whitespace-nowrap">
+                              <Battery className="h-3 w-3 mr-1" />
+                              Pin
+                            </span>
+                          ) : (
+                            <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 text-xs rounded-full flex items-center whitespace-nowrap">
+                              <Car className="h-3 w-3 mr-1" />
+                              Xe
+                            </span>
+                          )}
+                        </div>
                         <p className="text-lg font-bold text-blue-600 mb-2">
-                          {formatPrice(product.price)}
+                          {formatPrice(product.price || 0)}
                         </p>
                         <div className="flex items-center space-x-4 text-sm text-gray-600">
                           <div className="flex items-center">
@@ -421,9 +658,9 @@ export const Favorites = () => {
                           <div className="flex items-center">
                             <Calendar className="h-4 w-4 mr-1" />
                             <span>
-                              {new Date(
-                                product.createdDate || product.created_date
-                              ).toLocaleDateString("vi-VN")}
+                              {product.createdDate || product.created_date
+                                ? new Date(product.createdDate || product.created_date).toLocaleDateString("vi-VN")
+                                : "N/A"}
                             </span>
                           </div>
                         </div>

@@ -6,11 +6,41 @@ export const formatPrice = (price) => {
 };
 
 export const formatDate = (date) => {
-  return new Date(date).toLocaleDateString('vi-VN', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+  if (!date) return 'Chưa có';
+
+  try {
+    const dateObj = new Date(date);
+    if (isNaN(dateObj.getTime())) {
+      return 'Chưa có';
+    }
+    return dateObj.toLocaleDateString('vi-VN', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  } catch (error) {
+    return 'Chưa có';
+  }
+};
+
+export const formatDateTime = (date) => {
+  if (!date) return 'Chưa có';
+
+  try {
+    const dateObj = new Date(date);
+    if (isNaN(dateObj.getTime())) {
+      return 'Chưa có';
+    }
+    return dateObj.toLocaleString('vi-VN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch (error) {
+    return 'Chưa có';
+  }
 };
 
 export const formatNumber = (num) => {
@@ -35,6 +65,26 @@ export const getStatusText = (status) => {
     sold: 'Đã bán',
   };
   return statuses[status] || status;
+};
+
+export const getOrderStatusText = (status) => {
+  if (!status) return 'Không xác định';
+
+  const statusLower = status.toLowerCase();
+  const statusMap = {
+    pending: 'Đã thanh toán cọc',
+    processing: 'Đã thanh toán cọc',
+    confirmed: 'Đã xác nhận',
+    depositpaid: 'Đã thanh toán cọc',
+    deposited: 'Đã thanh toán cọc',
+    completed: 'Hoàn tất',
+    cancelled: 'Đã hủy',
+    canceled: 'Đã hủy',
+    active: 'Hoạt động',
+    reserved: 'Đã thanh toán cọc',
+    sold: 'Đã bán',
+  };
+  return statusMap[statusLower] || status;
 };
 
 export const getProductTypeText = (type) => {

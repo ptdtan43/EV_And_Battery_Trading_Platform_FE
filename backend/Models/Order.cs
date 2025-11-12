@@ -39,6 +39,7 @@ namespace EVTB_Backend.Models
         public DateTime? AdminConfirmedDate { get; set; }
         public string? AdminNotes { get; set; }
         public string? RefundOption { get; set; } // "refund" or "no_refund"
+        public string? ContractUrl { get; set; } // Contract file URL uploaded by staff
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

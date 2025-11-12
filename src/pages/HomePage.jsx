@@ -391,6 +391,40 @@ export const HomePage = () => {
           const isNotRejected = status !== "rejected";
           const isNotReserved = status !== "reserved"; // Filter out reserved products
           const shouldShow = isApproved && isNotSold && isNotRejected && isNotReserved;
+          
+          // Determine product type for logging
+          let productType = "vehicle";
+          if (x.productType) {
+            productType = x.productType.toLowerCase();
+          } else if (x.capacity || x.voltage || x.cycleCount || x.cycle_count) {
+            productType = "battery";
+          }
+          
+          // Debug logging for ALL products (especially batteries) to see their status
+          if (productType === "battery" || productType === "pin") {
+            console.log(`🔋 Battery product ${x.id || x.productId || x.ProductId || 'unknown'}:`, {
+              title: x.title || x.Title,
+              status: status,
+              rawStatus: x.status || x.Status,
+              productType: productType,
+              isApproved,
+              isNotSold,
+              isNotRejected,
+              isNotReserved,
+              shouldShow: shouldShow,
+              willShow: shouldShow ? "✅ YES" : "❌ NO"
+            });
+          }
+          
+          // Log if product is sold but still showing
+          if (status === "sold" && shouldShow) {
+            console.warn(`⚠️ WARNING: Sold product ${x.id || x.productId || x.ProductId} is still showing!`, {
+              title: x.title || x.Title,
+              status: status,
+              productType: productType
+            });
+          }
+          
           return shouldShow;
         })
         .map((x) => {
@@ -696,10 +730,45 @@ export const HomePage = () => {
         // Tìm kiếm tổng quát theo hãng xe, mẫu xe hoặc biển số trong dữ liệu cục bộ
         results = searchProducts(searchQuery.trim(), allProducts);
         searchType = "hãng xe, mẫu xe hoặc biển số";
+        
+        // Nếu đang ở tab "Xe điện", tự động filter chỉ xe và ưu tiên search theo biển số
+        if (selectedCategory === "vehicle") {
+          // Filter chỉ xe điện
+          results = results.filter(product => {
+            const productTypeLower = (product.productType || product.ProductType || "").toLowerCase();
+            return productTypeLower === "vehicle" || productTypeLower === "xe";
+          });
+          
+          // Kiểm tra xem query có phải biển số không (format: XX-X hoặc có dấu gạch ngang)
+          const query = searchQuery.trim();
+          const looksLikeLicensePlate = /^[0-9]{2}[A-Z]-[0-9]{5}$/i.test(query) || 
+                                        /^[0-9]{2}[A-Z]/i.test(query) || 
+                                        query.includes('-');
+          
+          if (looksLikeLicensePlate) {
+            // Ưu tiên tìm theo biển số bằng API nếu có thể
+            try {
+              const licensePlateResults = await searchProductsByLicensePlate(query);
+              if (licensePlateResults && licensePlateResults.length > 0) {
+                // Filter chỉ xe điện
+                const vehicleResults = licensePlateResults.filter(product => {
+                  const productTypeLower = (product.productType || product.ProductType || "").toLowerCase();
+                  return productTypeLower === "vehicle" || productTypeLower === "xe";
+                });
+                if (vehicleResults.length > 0) {
+                  results = vehicleResults;
+                  searchType = "biển số xe";
+                }
+              }
+            } catch (error) {
+              console.log("⚠️ License plate API search failed, using local search:", error);
+            }
+          }
+        }
       }
       
-      // Lọc theo loại sản phẩm nếu được chọn
-      if (productType && productType !== "license-plate" && productType !== "") {
+      // Lọc theo loại sản phẩm nếu được chọn (trừ khi đã filter ở trên)
+      if (productType && productType !== "license-plate" && productType !== "" && selectedCategory !== "vehicle") {
         results = results.filter(product => {
           const productTypeLower = (product.productType || product.ProductType || "").toLowerCase();
           return productTypeLower === productType;
@@ -947,13 +1016,6 @@ export const HomePage = () => {
           <div className="absolute bottom-1/3 left-1/3 w-14 h-14 bg-blue-300 bg-opacity-20 rounded-full animate-pulse energy-effect-2"></div>
           <div className="absolute bottom-1/4 right-1/4 w-10 h-10 bg-white bg-opacity-30 rounded-full animate-bounce energy-effect-3"></div>
 
-          {/* Electric spark effects */}
-          <div className="absolute inset-0">
-            <div className="absolute top-1/4 left-1/5 w-2 h-8 bg-yellow-400 rounded-full animate-pulse opacity-80"></div>
-            <div className="absolute top-1/3 right-1/4 w-2 h-6 bg-yellow-300 rounded-full animate-pulse opacity-70 spark-effect-1"></div>
-            <div className="absolute top-1/2 left-1/6 w-2 h-10 bg-yellow-400 rounded-full animate-pulse opacity-60 spark-effect-2"></div>
-            <div className="absolute bottom-1/3 right-1/5 w-2 h-7 bg-yellow-300 rounded-full animate-pulse opacity-75 spark-effect-3"></div>
-          </div>
 
           {/* Charging cable glow effect */}
           <div className="absolute top-1/2 right-1/4 w-1 h-32 bg-blue-400 bg-opacity-40 rounded-full animate-pulse transform rotate-12"></div>
@@ -993,9 +1055,6 @@ export const HomePage = () => {
                     <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
                   </svg>
                 </div>
-                {/* Energy sparks */}
-                <div className="energy-spark-1"></div>
-                <div className="energy-spark-2"></div>
               </div>
             </div>
 
