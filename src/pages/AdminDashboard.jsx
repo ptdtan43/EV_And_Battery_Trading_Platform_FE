@@ -4962,9 +4962,8 @@ export const AdminDashboard = () => {
                                     <span>Xem chi tiết</span>
                                   </button>
                                   
-                                  {/* Show action buttons for orders that can be confirmed or rejected */}
+                                  {/* Show action button for orders that can be confirmed - Admin only has confirm button, reject is handled by staff */}
                                   {status !== 'completed' && status !== 'cancelled' && (
-                                    <div className="flex space-x-1">
                                       <button
                                         disabled={!hasContract}
                                         onClick={async () => {
@@ -5097,7 +5096,7 @@ export const AdminDashboard = () => {
                                             });
                                           }
                                         }}
-                                        className={`flex-1 px-2 py-1.5 rounded flex items-center justify-center space-x-1 text-xs ${
+                                      className={`w-full px-3 py-1.5 rounded flex items-center justify-center space-x-1 text-xs ${
                                           hasContract
                                             ? "bg-green-600 text-white hover:bg-green-700 cursor-pointer"
                                             : "bg-gray-300 text-gray-500 cursor-not-allowed"
@@ -5107,29 +5106,6 @@ export const AdminDashboard = () => {
                                         <CheckCircle className="h-3.5 w-3.5" />
                                         <span>Xác nhận</span>
                                       </button>
-                                      
-                                      <button
-                                        onClick={() => {
-                                          setTransactionFailureModal({
-                                            isOpen: true,
-                                            product: {
-                                              id: order.productId || order.ProductId,
-                                              productId: order.productId || order.ProductId,
-                                              title: order.productName || order.ProductName
-                                            },
-                                            orderId: orderId,
-                                            reasonCode: '',
-                                            reasonNote: '',
-                                            refundOption: 'refund'
-                                          });
-                                        }}
-                                        className="flex-1 px-2 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 flex items-center justify-center space-x-1 text-xs"
-                                        title="Đánh dấu giao dịch không thành công"
-                                      >
-                                        <XCircle className="h-3.5 w-3.5" />
-                                        <span>Từ chối</span>
-                                      </button>
-                                    </div>
                                   )}
                                 </div>
                               </td>

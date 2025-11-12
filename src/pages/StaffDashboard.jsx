@@ -30,7 +30,7 @@ import {
   Download,
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
-import { formatPrice, formatDate, formatDateTime } from "../utils/formatters";
+import { formatPrice, formatDate, formatDateTime, getOrderStatusText } from "../utils/formatters";
 import { useToast } from "../contexts/ToastContext";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -77,6 +77,38 @@ export const StaffDashboard = () => {
     fileName: "",
     filePreview: null,
   });
+
+  // Transaction failure modal state for staff to reject transactions
+  const [transactionFailureModal, setTransactionFailureModal] = useState({
+    isOpen: false,
+    product: null,
+    orderId: null,
+    reasonCode: '',
+    reasonNote: '',
+    refundOption: 'refund', // 'refund' or 'no_refund'
+  });
+
+  // Order detail modal state
+  const [orderDetailModal, setOrderDetailModal] = useState({
+    isOpen: false,
+    order: null,
+    orderDetails: null,
+    loading: false,
+  });
+
+  // Transaction failure reason options
+  const transactionFailureReasons = [
+    { code: 'BUYER_REQUEST', label: 'Người mua yêu cầu hủy' },
+    { code: 'SELLER_CANCEL', label: 'Người bán hủy giao dịch' },
+    { code: 'PAYMENT_FAILED', label: 'Thanh toán thất bại' },
+    { code: 'PRODUCT_DAMAGED', label: 'Sản phẩm bị hư hỏng' },
+    { code: 'MISMATCH_DESCRIPTION', label: 'Sản phẩm không đúng mô tả' },
+    { code: 'FRAUD_SUSPECT', label: 'Nghi ngờ gian lận' },
+    { code: 'OUT_OF_STOCK', label: 'Sản phẩm không còn hàng' },
+    { code: 'PRICE_DISPUTE', label: 'Tranh chấp về giá' },
+    { code: 'DELIVERY_ISSUE', label: 'Vấn đề giao hàng' },
+    { code: 'OTHER', label: 'Lý do khác' },
+  ];
 
   // Persist selected tab
   useEffect(() => {
@@ -387,6 +419,139 @@ export const StaffDashboard = () => {
     return statusMap[statusLower] || status;
   };
 
+  // Handle mark transaction as failed - Staff can reject transactions using admin-reject endpoint
+  const handleMarkTransactionFailed = async (failureReason = null) => {
+    if (!failureReason) {
+      return;
+    }
+
+    try {
+      showToast({
+        title: 'Đang xử lý...',
+        description: 'Đang lưu lý do từ chối',
+        type: 'info',
+      });
+
+      const orderId = transactionFailureModal.orderId;
+      if (!orderId) {
+        showToast({
+          title: 'Lỗi',
+          description: 'Không tìm thấy đơn hàng',
+          type: 'error',
+        });
+        return;
+      }
+
+      // Build failure reason text from ReasonCode + ReasonNote
+      const reasonCode = failureReason.reasonCode || '';
+      const reasonNote = failureReason.reasonNote || '';
+      const reasonOption = transactionFailureReasons.find(r => r.code === reasonCode);
+      let cancellationReasonText = '';
+      
+      if (reasonOption && reasonCode !== 'OTHER') {
+        cancellationReasonText = reasonOption.label;
+        if (reasonNote.trim()) {
+          cancellationReasonText += `: ${reasonNote.trim()}`;
+        }
+      } else if (reasonNote.trim()) {
+        cancellationReasonText = reasonNote.trim();
+      } else {
+        cancellationReasonText = 'Không xác định';
+      }
+
+      // Call API to save cancellation reason to Order using admin-reject endpoint
+      // Note: This endpoint may only allow admin. If staff gets 403, backend needs to be updated
+      try {
+        const refundOption = failureReason.refundOption || 'refund';
+        
+        // Use admin-reject endpoint (same as admin uses)
+        const response = await apiRequest(`/api/Order/${orderId}/admin-reject`, {
+          method: 'POST',
+          body: {
+            Reason: cancellationReasonText,
+            RefundOption: refundOption
+          }
+        });
+        
+        console.log('✅ Staff rejection - Cancellation reason saved to Order:', cancellationReasonText);
+        console.log('✅ Staff rejection - Refund option:', refundOption);
+        console.log('✅ Staff rejection - Response:', response);
+        
+        // Send notification to buyer
+        try {
+          // Get order details to find buyer
+          const orderDetails = await apiRequest(`/api/Order/details/${orderId}`);
+          const buyerId = orderDetails.userId || orderDetails.UserId || response.buyerId;
+          
+          if (buyerId) {
+            const order = orders.find(o => (o.orderId || o.OrderId || o.id) == orderId);
+            const refundMessage = refundOption === 'refund' 
+              ? `Số tiền cọc ${formatPrice(response.refundAmount || order?.depositAmount || order?.totalAmount || 0)} sẽ được hoàn lại vào tài khoản của bạn trong vòng 3-5 ngày làm việc.`
+              : 'Số tiền cọc sẽ không được hoàn lại do điều khoản hủy giao dịch.';
+            
+            await apiRequest('/api/Notification', {
+              method: 'POST',
+              body: {
+                UserId: buyerId,
+                Title: 'Giao dịch đã bị hủy',
+                Message: `Giao dịch của bạn đã bị staff hủy. Lý do: ${cancellationReasonText}. ${refundMessage}`,
+                Type: 'error',
+                IsRead: false
+              }
+            });
+            console.log('✅ Notification sent to buyer:', buyerId);
+          }
+        } catch (notifError) {
+          console.warn('⚠️ Could not send notification to buyer:', notifError);
+        }
+
+        showToast({
+          title: 'Thành công!',
+          description: 'Đã hủy giao dịch và cập nhật trạng thái sản phẩm.',
+          type: 'success',
+        });
+
+        // Close modal
+        setTransactionFailureModal({
+          isOpen: false,
+          product: null,
+          orderId: null,
+          reasonCode: '',
+          reasonNote: '',
+          refundOption: 'refund',
+        });
+
+        // Reload data
+        await loadStats();
+      } catch (orderError) {
+        console.error('❌ Could not update order:', orderError);
+        
+        // Check if error is 403 Forbidden (endpoint only allows admin)
+        const errorMessage = orderError.message || '';
+        if (errorMessage.includes('403') || errorMessage.includes('Forbidden') || errorMessage.includes('từ chối truy cập')) {
+          showToast({
+            title: 'Lỗi: Không có quyền',
+            description: 'Endpoint admin-reject hiện tại chỉ cho phép admin. Backend cần được cập nhật để cho phép staff (roleId = 3) cũng sử dụng endpoint này.',
+            type: 'error',
+          });
+        } else {
+          showToast({
+            title: 'Lỗi',
+            description: `Không thể lưu lý do từ chối: ${errorMessage || 'Vui lòng thử lại.'}`,
+            type: 'error',
+          });
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error marking transaction as failed:', error);
+      showToast({
+        title: 'Lỗi',
+        description: `Không thể lưu lý do từ chối: ${error.message || 'Vui lòng thử lại.'}`,
+        type: 'error',
+      });
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
@@ -603,6 +768,10 @@ export const StaffDashboard = () => {
                         const status = (order.status || order.Status || order.orderStatus || order.OrderStatus || "").toLowerCase();
                         const orderId = order.orderId || order.OrderId || order.id || order.Id;
                         const hasContract = order.contractUrl || order.ContractUrl;
+                        // Check if order is cancelled (by status or by having cancellation reason)
+                        const isCancelled = status === 'cancelled' || 
+                                          status === 'canceled' || 
+                                          !!(order.adminNotes || order.AdminNotes || order.cancellationReason || order.CancellationReason);
                         return (
                           <tr key={orderId} className="hover:bg-gray-50 transition-colors">
                             <td className="px-6 py-4 whitespace-nowrap">
@@ -640,20 +809,75 @@ export const StaffDashboard = () => {
                               {formatDateTime(order.createdDate || order.CreatedDate || order.createdAt || order.CreatedAt || order.orderDate || order.OrderDate)}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm">
-                  <button
-                                onClick={() => setUploadContractModal({ 
-                                  isOpen: true, 
-                                  order, 
-                                  selectedFile: null,
-                                  fileName: "",
-                                  filePreview: null,
-                                })}
-                                disabled={processingIds.has(orderId)}
-                                className="px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg hover:from-green-600 hover:to-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 transition-all shadow-md hover:shadow-lg"
-                              >
-                                <Upload className="h-4 w-4" />
-                                <span>{hasContract ? "Cập nhật" : "Upload"}</span>
-                  </button>
+                              <div className="flex flex-col space-y-2">
+                                {/* View Order Details Button */}
+                                <button
+                                  onClick={async () => {
+                                    setOrderDetailModal({ isOpen: true, order, orderDetails: null, loading: true });
+                                    try {
+                                      const details = await apiRequest(`/api/Order/details/${orderId}`);
+                                      setOrderDetailModal({ isOpen: true, order, orderDetails: details, loading: false });
+                                    } catch (error) {
+                                      console.error("Error loading order details:", error);
+                                      showToast({
+                                        title: "Lỗi",
+                                        description: "Không thể tải chi tiết đơn hàng",
+                                        type: "error",
+                                      });
+                                      setOrderDetailModal({ isOpen: false, order: null, orderDetails: null, loading: false });
+                                    }
+                                  }}
+                                  className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center space-x-2 transition-all shadow-md hover:shadow-lg"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                  <span>Xem chi tiết</span>
+                                </button>
+
+                                <button
+                                  onClick={() => setUploadContractModal({ 
+                                    isOpen: true, 
+                                    order, 
+                                    selectedFile: null,
+                                    fileName: "",
+                                    filePreview: null,
+                                  })}
+                                  disabled={processingIds.has(orderId) || isCancelled}
+                                  className={`w-full px-4 py-2 rounded-lg flex items-center justify-center space-x-2 transition-all shadow-md hover:shadow-lg ${
+                                    isCancelled
+                                      ? "bg-gray-400 text-white cursor-not-allowed"
+                                      : "bg-gradient-to-r from-green-500 to-green-600 text-white hover:from-green-600 hover:to-green-700"
+                                  } ${processingIds.has(orderId) ? "opacity-50 cursor-not-allowed" : ""}`}
+                                  title={isCancelled ? "Không thể upload hợp đồng vì đơn hàng đã bị hủy" : (hasContract ? "Cập nhật hợp đồng" : "Upload hợp đồng")}
+                                >
+                                  <Upload className="h-4 w-4" />
+                                  <span>{hasContract ? "Cập nhật" : "Upload"}</span>
+                                </button>
+                                
+                                {/* Staff can reject transactions that are not completed or cancelled */}
+                                {status !== 'completed' && status !== 'cancelled' && !isCancelled && (
+                                  <button
+                                    onClick={() => {
+                                      const productId = order.productId || order.ProductId;
+                                      setTransactionFailureModal({
+                                        isOpen: true,
+                                        product: {
+                                          id: productId,
+                                          productId: productId,
+                                          title: order.enrichedProductName || order.productName || order.ProductName || "N/A"
+                                        },
+                                        orderId: orderId,
+                                        reasonCode: '',
+                                        reasonNote: '',
+                                        refundOption: 'refund'
+                                      });
+                                    }}
+                                    className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center justify-center space-x-2 transition-all shadow-md hover:shadow-lg"
+                                  >
+                                    <XCircle className="h-4 w-4" />
+                                    <span>Từ chối</span>
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -860,6 +1084,380 @@ export const StaffDashboard = () => {
                   )}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transaction Failure Modal - Staff can reject transactions */}
+      {transactionFailureModal.isOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-gradient-to-r from-red-50 to-white">
+              <div className="flex items-center space-x-3">
+                <div className="p-3 bg-red-100 rounded-xl">
+                  <AlertTriangle className="h-6 w-6 text-red-600" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900">Xác nhận hủy giao dịch</h3>
+                  <p className="text-sm text-gray-600">Đơn hàng #{transactionFailureModal.orderId}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setTransactionFailureModal({ isOpen: false, product: null, orderId: null, reasonCode: '', reasonNote: '', refundOption: 'refund' })}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Product Info */}
+            {transactionFailureModal.product && (
+              <div className="p-6 border-b border-gray-200">
+                <div className="flex items-start space-x-4">
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-gray-900">
+                      {transactionFailureModal.product.title || transactionFailureModal.product.name || "N/A"}
+                    </h4>
+                    <p className="text-sm text-gray-600">
+                      ID: {transactionFailureModal.product.id || transactionFailureModal.product.productId || "N/A"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Form */}
+            <div className="p-6">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Lý do <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={transactionFailureModal.reasonCode}
+                  onChange={(e) => setTransactionFailureModal({
+                    ...transactionFailureModal,
+                    reasonCode: e.target.value,
+                    reasonNote: e.target.value !== 'OTHER' ? transactionFailureModal.reasonNote : ''
+                  })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                  required
+                >
+                  <option value="">-- Chọn lý do --</option>
+                  {transactionFailureReasons.map(reason => (
+                    <option key={reason.code} value={reason.code}>
+                      {reason.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {(transactionFailureModal.reasonCode === 'OTHER' || transactionFailureModal.reasonCode) && (
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    {transactionFailureModal.reasonCode === 'OTHER' 
+                      ? 'Mô tả chi tiết lý do' 
+                      : 'Ghi chú bổ sung (tùy chọn)'}
+                    {transactionFailureModal.reasonCode === 'OTHER' && <span className="text-red-500">*</span>}
+                  </label>
+                  <textarea
+                    value={transactionFailureModal.reasonNote}
+                    onChange={(e) => setTransactionFailureModal({
+                      ...transactionFailureModal,
+                      reasonNote: e.target.value
+                    })}
+                    placeholder={transactionFailureModal.reasonCode === 'OTHER' 
+                      ? "Nhập lý do chi tiết tại sao giao dịch không thành công..."
+                      : "Nhập ghi chú bổ sung (nếu có)..."}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
+                    rows={4}
+                    required={transactionFailureModal.reasonCode === 'OTHER'}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    {transactionFailureModal.reasonCode === 'OTHER' 
+                      ? 'Lý do này sẽ được hiển thị cho người mua và người bán'
+                      : 'Ghi chú này sẽ được lưu lại để tham khảo'}
+                  </p>
+                </div>
+              )}
+
+              {/* Refund Option */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  Xử lý hoàn tiền <span className="text-red-500">*</span>
+                </label>
+                <div className="space-y-3">
+                  <label className="flex items-center space-x-3 p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                    <input
+                      type="radio"
+                      name="refundOption"
+                      value="refund"
+                      checked={transactionFailureModal.refundOption === 'refund'}
+                      onChange={(e) => setTransactionFailureModal({
+                        ...transactionFailureModal,
+                        refundOption: e.target.value
+                      })}
+                      className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900">Hoàn tiền</div>
+                      <div className="text-sm text-gray-600">Số tiền cọc sẽ được hoàn lại cho người mua</div>
+                    </div>
+                  </label>
+                  <label className="flex items-center space-x-3 p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                    <input
+                      type="radio"
+                      name="refundOption"
+                      value="no_refund"
+                      checked={transactionFailureModal.refundOption === 'no_refund'}
+                      onChange={(e) => setTransactionFailureModal({
+                        ...transactionFailureModal,
+                        refundOption: e.target.value
+                      })}
+                      className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900">Không hoàn tiền</div>
+                      <div className="text-sm text-gray-600">Số tiền cọc sẽ không được hoàn lại</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setTransactionFailureModal({ isOpen: false, product: null, orderId: null, reasonCode: '', reasonNote: '', refundOption: 'refund' })}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    // Validate
+                    const reasonCode = transactionFailureModal.reasonCode;
+                    const reasonNote = transactionFailureModal.reasonNote;
+                    const refundOption = transactionFailureModal.refundOption;
+                    
+                    if (!reasonCode) {
+                      showToast({
+                        title: 'Lỗi',
+                        description: 'Vui lòng chọn lý do',
+                        type: 'error',
+                      });
+                      return;
+                    }
+                    
+                    if (reasonCode === 'OTHER' && !reasonNote.trim()) {
+                      showToast({
+                        title: 'Lỗi',
+                        description: 'Vui lòng nhập mô tả chi tiết lý do',
+                        type: 'error',
+                      });
+                      return;
+                    }
+
+                    if (!refundOption) {
+                      showToast({
+                        title: 'Lỗi',
+                        description: 'Vui lòng chọn phương án xử lý hoàn tiền',
+                        type: 'error',
+                      });
+                      return;
+                    }
+
+                    // Proceed with failure
+                    await handleMarkTransactionFailed({
+                      reasonCode: reasonCode,
+                      reasonNote: reasonNote,
+                      refundOption: refundOption
+                    });
+                  }}
+                  disabled={!transactionFailureModal.reasonCode || (transactionFailureModal.reasonCode === 'OTHER' && !transactionFailureModal.reasonNote.trim()) || !transactionFailureModal.refundOption}
+                  className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
+                >
+                  <AlertTriangle className="h-4 w-4" />
+                  <span>Xác nhận hủy giao dịch</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Order Detail Modal */}
+      {orderDetailModal.isOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full mx-4 my-8">
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-blue-100 rounded-lg">
+                  <Eye className="h-6 w-6 text-blue-600" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900">Chi tiết đơn hàng</h3>
+                  <p className="text-sm text-gray-600">
+                    Đơn hàng #{orderDetailModal.order?.orderId || orderDetailModal.order?.OrderId || orderDetailModal.order?.id}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setOrderDetailModal({ isOpen: false, order: null, orderDetails: null, loading: false })}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6">
+              {orderDetailModal.loading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+                </div>
+              ) : orderDetailModal.orderDetails ? (
+                <div className="space-y-6">
+                  {/* Order Info */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <h4 className="font-semibold text-gray-900 mb-3">Thông tin đơn hàng</h4>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Mã đơn:</span>
+                          <span className="font-medium">#{orderDetailModal.orderDetails.orderId}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Trạng thái:</span>
+                          <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                            (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'completed' ? 'bg-green-100 text-green-800' :
+                            (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'pending' || (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'processing' || (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'depositpaid' || (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'deposited' ? 'bg-yellow-100 text-yellow-800' :
+                            (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'cancelled' ? 'bg-red-100 text-red-800' :
+                            (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'confirmed' ? 'bg-blue-100 text-blue-800' :
+                            'bg-gray-100 text-gray-800'
+                          }`}>
+                            {getOrderStatusText(orderDetailModal.orderDetails.orderStatus)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Tiền cọc:</span>
+                          <span className="font-medium">{formatPrice(orderDetailModal.orderDetails.depositAmount)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Tổng tiền:</span>
+                          <span className="font-medium text-green-600">{formatPrice(orderDetailModal.orderDetails.totalAmount)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Ngày tạo:</span>
+                          <span className="font-medium">{formatDateTime(orderDetailModal.orderDetails.createdAt || orderDetailModal.orderDetails.CreatedAt || orderDetailModal.orderDetails.createdDate || orderDetailModal.orderDetails.CreatedDate)}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <h4 className="font-semibold text-gray-900 mb-3">Thông tin người mua</h4>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Tên:</span>
+                          <span className="font-medium">{orderDetailModal.orderDetails.buyerName || 'Chưa có'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Email:</span>
+                          <span className="font-medium">{orderDetailModal.orderDetails.buyerEmail || 'Chưa có'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Số điện thoại:</span>
+                          <span className="font-medium">{orderDetailModal.orderDetails.buyerPhone || 'Chưa có'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Seller Info */}
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <h4 className="font-semibold text-gray-900 mb-3">Thông tin người bán</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-600 block mb-1">Tên:</span>
+                        <span className="font-medium">{orderDetailModal.orderDetails.sellerName || 'Chưa có'}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600 block mb-1">Email:</span>
+                        <span className="font-medium">{orderDetailModal.orderDetails.sellerEmail || 'Chưa có'}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600 block mb-1">Số điện thoại:</span>
+                        <span className="font-medium">{orderDetailModal.orderDetails.sellerPhone || 'Chưa có'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Product Info */}
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <h4 className="font-semibold text-gray-900 mb-3">Thông tin sản phẩm</h4>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Tên sản phẩm:</span>
+                        <span className="font-medium">{orderDetailModal.orderDetails.productTitle}</span>
+                      </div>
+                      {orderDetailModal.orderDetails.productImages && orderDetailModal.orderDetails.productImages.length > 0 && (
+                        <div className="mt-3">
+                          <img
+                            src={orderDetailModal.orderDetails.productImages[0]}
+                            alt={orderDetailModal.orderDetails.productTitle}
+                            className="w-32 h-32 object-cover rounded-lg"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Contract */}
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <h4 className="font-semibold text-gray-900 mb-3">Hợp đồng</h4>
+                    {orderDetailModal.orderDetails.contractUrl ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center space-x-2">
+                          <FileText className="h-5 w-5 text-green-600" />
+                          <span className="text-sm text-gray-600">Hợp đồng đã được staff gửi lên</span>
+                        </div>
+                        <a
+                          href={orderDetailModal.orderDetails.contractUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-center"
+                        >
+                          Xem hợp đồng
+                        </a>
+                      </div>
+                    ) : (
+                      <div className="flex items-center space-x-2 text-yellow-600">
+                        <AlertTriangle className="h-5 w-5" />
+                        <span className="text-sm">Chưa có hợp đồng. Vui lòng upload hợp đồng.</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Cancellation Info (if cancelled) */}
+                  {(orderDetailModal.orderDetails.cancellationReason || orderDetailModal.orderDetails.CancellationReason || orderDetailModal.orderDetails.adminNotes || orderDetailModal.orderDetails.AdminNotes) && (
+                    <div className="bg-red-50 rounded-lg p-4 border border-red-200">
+                      <h4 className="font-semibold text-red-900 mb-3">Lý do hủy giao dịch</h4>
+                      <div className="text-sm text-red-800">
+                        {orderDetailModal.orderDetails.cancellationReason || 
+                         orderDetailModal.orderDetails.CancellationReason || 
+                         orderDetailModal.orderDetails.adminNotes || 
+                         orderDetailModal.orderDetails.AdminNotes}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center justify-center py-12">
+                  <p className="text-gray-500">Không thể tải chi tiết đơn hàng</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
