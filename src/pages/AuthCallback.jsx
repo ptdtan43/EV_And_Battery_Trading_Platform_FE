@@ -16,12 +16,26 @@ export const AuthCallback = () => {
       try {
         localStorage.setItem("evtb_auth", JSON.stringify(session));
       } catch {}
-      const roleId = session?.user?.roleId || session?.profile?.roleId;
-      const roleName = (session?.user?.roleName || session?.profile?.role || "")
+      // ✅ FIX: Handle both roleId (number) and role (string "Staff", "Admin", etc.)
+      const roleId = session?.user?.roleId || session?.profile?.roleId || session?.user?.role;
+      const roleName = (session?.user?.roleName || session?.profile?.role || session?.user?.role || "")
         .toString()
         .toLowerCase();
-      const isAdmin = roleId === 1 || roleName === "admin";
-      navigate(isAdmin ? "/admin" : "/dashboard", { replace: true });
+      const userRole = (session?.user?.role || session?.profile?.role || "")
+        .toString()
+        .toLowerCase();
+      
+      // ✅ FIX: Check role by both roleId and roleName/role (case-insensitive)
+      const isAdmin = roleId === 1 || roleId === "1" || roleName === "admin" || userRole === "admin";
+      const isStaff = roleId === 3 || roleId === "3" || roleName === "staff" || userRole === "staff";
+      
+      if (isAdmin) {
+        navigate("/admin", { replace: true });
+      } else if (isStaff) {
+        navigate("/staff", { replace: true });
+      } else {
+        navigate("/dashboard", { replace: true });
+      }
     };
 
     (async () => {

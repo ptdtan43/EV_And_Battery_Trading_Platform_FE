@@ -48,27 +48,41 @@ export const LoginForm = () => {
       console.log("User object:", session?.user);
       console.log("Profile object:", session?.profile);
 
+      // ✅ FIX: Handle both roleId (number) and role (string "Staff", "Admin", etc.)
       const rawId =
         session?.user?.roleId ??
         session?.profile?.roleId ??
         session?.user?.role;
       const rid = typeof rawId === "string" ? Number(rawId) : rawId;
-      const roleName = (session?.user?.roleName || session?.profile?.role || "")
+      const roleName = (session?.user?.roleName || session?.profile?.role || session?.user?.role || "")
         .toString()
         .toLowerCase();
-      const isAdmin = rid === 1 || roleName === "admin";
+      const userRole = (session?.user?.role || session?.profile?.role || "")
+        .toString()
+        .toLowerCase();
+      
+      // ✅ FIX: Check role by both roleId and roleName/role (case-insensitive)
+      const isAdmin = rid === 1 || roleName === "admin" || userRole === "admin";
+      const isStaff = rid === 3 || roleName === "staff" || userRole === "staff";
 
       console.log("Raw roleId:", rawId);
       console.log("Processed roleId:", rid);
       console.log("Role name:", roleName);
       console.log("Is admin:", isAdmin);
-      console.log("Will navigate to:", isAdmin ? "/admin" : "/");
+      console.log("Is staff:", isStaff);
+      console.log("Will navigate to:", isAdmin ? "/admin" : isStaff ? "/staff" : "/");
       console.log("==================");
 
       // Add a small delay to ensure state is updated before navigation
       setTimeout(() => {
         setLoading(false);
-        navigate(isAdmin ? "/admin" : "/"); // Admin goes to /admin, User goes to HomePage
+        if (isAdmin) {
+          navigate("/admin");
+        } else if (isStaff) {
+          navigate("/staff");
+        } else {
+          navigate("/"); // User goes to HomePage
+        }
       }, 200);
     } catch (err) {
       setError(getErrorMessage(err));
