@@ -34,8 +34,8 @@ import { useToast } from "../contexts/ToastContext";
 import { useAuth } from "../contexts/AuthContext";
 import { notifyPostApproved, notifyPostRejected } from "../lib/notificationApi";
 import { rejectProduct, approveProduct } from "../lib/productApi";
-import { RejectProductModal } from "../components/admin/RejectProductModal";
-import { AdminReports } from "../components/admin/AdminReports";
+import { RejectProductModal } from "../components/Staff/RejectProductModal";
+import { StaffReports } from "../components/Staff/StaffReports";
 import { updateVerificationStatus, getVerificationRequests } from "../lib/verificationApi";
 import { getUserNotifications, getUnreadCount, notifyUserVerificationCompleted } from "../lib/notificationApi";
 import { forceSendNotificationsForAllSuccessfulPayments, sendNotificationsForKnownPayments, sendNotificationsForVerifiedProducts } from "../lib/verificationNotificationService";
@@ -2420,12 +2420,12 @@ export const StaffDashboard = () => {
               handleTabChange("dashboard");
             }}
           >
-            <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-green-600 rounded-lg flex items-center justify-center">
+            <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
               <Car className="h-6 w-6 text-white" />
             </div>
             <div>
               <h1 className="text-xl font-bold text-gray-900 leading-tight">EV Market</h1>
-              <p className="text-sm text-gray-500 leading-tight">Cổng nhân viên</p>
+              <p className="text-sm text-gray-500 leading-tight">Cổng quản trị</p>
             </div>
           </div>
         </div>
@@ -2433,12 +2433,12 @@ export const StaffDashboard = () => {
         {/* User Profile Section */}
         <div className="p-6 border-b border-gray-200">
           <div className="flex items-center space-x-3">
-            <div className="w-12 h-12 bg-gradient-to-r from-green-500 to-green-600 rounded-full flex items-center justify-center">
-              <span className="text-white font-semibold text-lg">S</span>
+            <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full flex items-center justify-center">
+              <span className="text-white font-semibold text-lg">A</span>
             </div>
             <div>
-              <h3 className="font-semibold text-gray-900">Nhân viên</h3>
-              <p className="text-sm text-gray-500">Hỗ trợ quản lý</p>
+              <h3 className="font-semibold text-gray-900">Quản trị viên</h3>
+              <p className="text-sm text-gray-500">Quản trị cấp cao</p>
             </div>
           </div>
         </div>
@@ -2449,7 +2449,7 @@ export const StaffDashboard = () => {
             <div 
               className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
                 activeTab === "dashboard" 
-                  ? "bg-green-50 text-green-600" 
+                  ? "bg-blue-50 text-blue-600" 
                   : "text-gray-600 hover:bg-gray-50"
               }`}
               onClick={() => handleTabChange("dashboard")}
@@ -2460,7 +2460,7 @@ export const StaffDashboard = () => {
             <div 
               className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
                 activeTab === "vehicles" 
-                  ? "bg-green-50 text-green-600" 
+                  ? "bg-blue-50 text-blue-600" 
                   : "text-gray-600 hover:bg-gray-50"
               }`}
               onClick={() => handleTabChange("vehicles")}
@@ -2471,7 +2471,7 @@ export const StaffDashboard = () => {
             <div 
               className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
                 activeTab === "batteries" 
-                  ? "bg-green-50 text-green-600" 
+                  ? "bg-blue-50 text-blue-600" 
                   : "text-gray-600 hover:bg-gray-50"
               }`}
               onClick={() => handleTabChange("batteries")}
@@ -2481,32 +2481,19 @@ export const StaffDashboard = () => {
             </div>
             <div 
               className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
-                activeTab === "inspections" 
-                  ? "bg-green-50 text-green-600" 
-                  : "text-gray-600 hover:bg-gray-50"
-              }`}
-              onClick={() => handleTabChange("inspections")}
-            >
-              <CheckCircle className="h-5 w-5" />
-              <span>Kiểm định xe</span>
-            </div>
-            {/* Staff chỉ xem người dùng, không chỉnh sửa */}
-            <div 
-              className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
                 activeTab === "users" 
-                  ? "bg-green-50 text-green-600" 
+                  ? "bg-blue-50 text-blue-600" 
                   : "text-gray-600 hover:bg-gray-50"
               }`}
               onClick={() => handleTabChange("users")}
             >
-              <Eye className="h-5 w-5" />
-              <span>Xem người dùng</span>
-              <span className="ml-auto text-xs text-gray-400">(Chỉ xem)</span>
+              <Users className="h-5 w-5" />
+              <span>Quản lý người dùng</span>
             </div>
             <div 
               className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
                 activeTab === "transactions" 
-                  ? "bg-green-50 text-green-600" 
+                  ? "bg-blue-50 text-blue-600" 
                   : "text-gray-600 hover:bg-gray-50"
               }`}
               onClick={() => handleTabChange("transactions")}
@@ -2517,7 +2504,7 @@ export const StaffDashboard = () => {
             <div 
               className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
                 activeTab === "reports" 
-                  ? "bg-green-50 text-green-600" 
+                  ? "bg-blue-50 text-blue-600" 
                   : "text-gray-600 hover:bg-gray-50"
               }`}
               onClick={() => handleTabChange("reports")}
@@ -2525,18 +2512,16 @@ export const StaffDashboard = () => {
               <Flag className="h-5 w-5" />
               <span>Báo cáo vi phạm</span>
             </div>
-            {/* Staff chỉ xem phí, không chỉnh sửa */}
             <div 
               className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${
                 activeTab === "fees" 
-                  ? "bg-green-50 text-green-600" 
+                  ? "bg-blue-50 text-blue-600" 
                   : "text-gray-600 hover:bg-gray-50"
               }`}
               onClick={() => handleTabChange("fees")}
             >
               <Settings className="h-5 w-5" />
-              <span>Xem cấu hình phí</span>
-              <span className="ml-auto text-xs text-gray-400">(Chỉ xem)</span>
+              <span>Quản lý phí</span>
             </div>
           </div>
         </nav>
@@ -2549,24 +2534,20 @@ export const StaffDashboard = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-900 mb-2">
-                {activeTab === "dashboard" && "Bảng điều khiển nhân viên"}
+                {activeTab === "dashboard" && "Bảng điều khiển quản trị"}
                 {activeTab === "vehicles" && "Quản lý phương tiện"}
                 {activeTab === "batteries" && "Quản lý pin"}
-                {activeTab === "inspections" && "Kiểm định xe điện"}
-                {activeTab === "transactions" && "Xem giao dịch"}
+                {activeTab === "transactions" && "Quản lý giao dịch"}
                 {activeTab === "reports" && "Báo cáo vi phạm"}
-                {activeTab === "users" && "Xem người dùng"}
-                {activeTab === "fees" && "Xem cấu hình phí"}
+                {activeTab === "fees" && "Quản lý phí"}
               </h1>
               <p className="text-gray-600">
-                {activeTab === "dashboard" && "Tổng quan công việc của bạn • Cập nhật theo thời gian thực"}
-                {activeTab === "vehicles" && "Duyệt và quản lý bài đăng xe điện"}
-                {activeTab === "batteries" && "Duyệt và quản lý bài đăng pin"}
-                {activeTab === "inspections" && "Kiểm định và xác nhận xe điện đã thanh toán phí kiểm định"}
-                {activeTab === "transactions" && "Xem và theo dõi các giao dịch (chỉ xem)"}
+                {activeTab === "dashboard" && "Tổng quan hệ thống EV Market • Cập nhật theo thời gian thực"}
+                {activeTab === "vehicles" && "Quản lý bài đăng xe và phê duyệt"}
+                {activeTab === "batteries" && "Quản lý bài đăng pin và phê duyệt"}
+                {activeTab === "transactions" && "Quản lý các giao dịch giữa người bán và người mua"}
                 {activeTab === "reports" && "Xem xét và xử lý các báo cáo vi phạm từ người dùng"}
-                {activeTab === "users" && "Xem thông tin người dùng (chỉ xem, không thể chỉnh sửa)"}
-                {activeTab === "fees" && "Xem cấu hình phí hiện tại (chỉ xem, không thể chỉnh sửa)"}
+                {activeTab === "fees" && "Quản lý phí đặt cọc và phí kiểm định"}
               </p>
             </div>
             <button
@@ -2859,44 +2840,7 @@ export const StaffDashboard = () => {
                           </div>
                         </div>
 
-                        {/* Staff chỉ xem, không thể chỉnh sửa */}
-                        <div className="space-y-4">
-                          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
-                            <p className="text-sm text-yellow-800 flex items-center gap-2">
-                              <AlertCircle className="h-4 w-4" />
-                              <span>Chế độ chỉ xem - Chỉ Admin mới có thể chỉnh sửa cấu hình phí</span>
-                            </p>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="text-2xl font-bold text-gray-900">
-                                {feeType === 'DepositPercentage' ? (
-                                  `${(feeValue * 100).toFixed(1)}%`
-                                ) : (
-                                  formatPrice(feeValue)
-                                )}
-                              </p>
-                              <p className="text-sm text-gray-500 mt-1">
-                                {feeType === 'DepositPercentage'
-                                  ? `Tỷ lệ: ${feeValue} (${(feeValue * 100).toFixed(1)}%)`
-                                  : `Giá trị: ${feeValue.toLocaleString('vi-VN')} VNĐ`}
-                              </p>
-                              <div className="flex items-center mt-2">
-                                <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                                  isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                                }`}>
-                                  {isActive ? 'Đang kích hoạt' : 'Đã tắt'}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="px-4 py-2 bg-gray-100 text-gray-500 rounded-lg flex items-center gap-2 cursor-not-allowed">
-                              <Eye className="h-4 w-4" />
-                              <span>Chỉ xem</span>
-                            </div>
-                          </div>
-                        </div>
-                        {/* Ẩn phần chỉnh sửa cho Staff - không hiển thị */}
-                        {false && isEditing && (
+                        {isEditing ? (
                           <div className="space-y-4">
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -2969,11 +2913,13 @@ export const StaffDashboard = () => {
                                   : `Giá trị: ${feeValue.toLocaleString('vi-VN')} VNĐ`}
                               </p>
                             </div>
-                            {/* Staff không có nút chỉnh sửa - chỉ xem */}
-                            <div className="px-4 py-2 bg-gray-100 text-gray-500 rounded-lg flex items-center gap-2 cursor-not-allowed">
-                              <Eye className="h-4 w-4" />
-                              <span>Chỉ xem</span>
-                            </div>
+                            <button
+                              onClick={() => handleEditFee(fee)}
+                              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                            >
+                              <Settings className="h-4 w-4" />
+                              Chỉnh sửa
+                            </button>
                           </div>
                         )}
                       </div>
@@ -3040,7 +2986,7 @@ export const StaffDashboard = () => {
                     value={usersSearch}
                     onChange={(e) => setUsersSearch(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') loadUsers({ page: 1, search: e.target.value }); }}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
               </div>
@@ -3109,20 +3055,32 @@ export const StaffDashboard = () => {
                         })()}
                       </td>
                       <td className="px-4 py-3 text-sm">
-                        {/* Staff chỉ xem, không thể chỉnh sửa trạng thái */}
-                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                          (u.status || u.Status || 'active').toLowerCase() === 'active' 
-                            ? 'bg-green-100 text-green-800' 
-                            : (u.status || u.Status || 'active').toLowerCase() === 'suspended'
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : 'bg-red-100 text-red-800'
-                        }`}>
-                          {(u.status || u.Status || 'active').toLowerCase() === 'active' 
-                            ? 'Đang hoạt động' 
-                            : (u.status || u.Status || 'active').toLowerCase() === 'suspended'
-                            ? 'Đã tạm khóa'
-                            : 'Đã xóa'}
-                        </span>
+                        <select
+                          title={getReasonTextForUser(u) || undefined}
+                          defaultValue={(u.status || u.Status || 'active').toLowerCase()}
+                          onChange={(e) => {
+                            const id = u.id || u.Id;
+                            const next = e.target.value;
+                            if (next === 'suspended' || next === 'deleted') {
+                              setPendingStatusUserId(id);
+                              setPendingStatus(next);
+                              setPendingStatusReason('');
+                              setShowStatusModal(true);
+                              // revert UI select until confirmed
+                              e.target.value = (u.status || u.Status || 'active').toLowerCase();
+                            } else if (next === 'active') {
+                              // When restoring to active, clear the reason but keep status update
+                              updateUserStatus(id, next);
+                            } else {
+                              updateUserStatus(id, next);
+                            }
+                          }}
+                          className="px-2 py-1 border border-gray-300 rounded"
+                        >
+                          <option value="active">Đang hoạt động</option>
+                          <option value="suspended">Đã tạm khóa</option>
+                          <option value="deleted">Đã xóa</option>
+                        </select>
                         {(() => {
                           const txt = getReasonTextForUser(u);
                           const st = (u.status || u.Status || '').toString().toLowerCase();
@@ -4596,7 +4554,7 @@ export const StaffDashboard = () => {
 
       {/* Reports Management Tab */}
       {activeTab === "reports" && (
-        <AdminReports />
+        <StaffReports />
       )}
 
       {/* Transaction Failure Reason Modal */}

@@ -71,28 +71,13 @@ const PublicRoute = ({ children }) => {
 
   // If user is already logged in, redirect to appropriate dashboard
   if (user) {
-    // ✅ FIX: Handle both roleId (number) and role (string "Staff", "Admin", etc.)
     const roleId = user?.roleId || user?.role;
     const roleName = (user?.roleName || user?.role || "")
       .toString()
       .toLowerCase();
-    
-    // ✅ FIX: Check role by both roleId and roleName (case-insensitive)
     const isAdmin = roleId === 1 || roleId === "1" || roleName === "admin";
-    const isStaff = roleId === 3 || roleId === "3" || roleName === "staff" || 
-                    (user?.role && user.role.toString().toLowerCase() === "staff");
 
-    console.log("🔍 PublicRoute - User role check:", {
-      roleId,
-      roleName,
-      userRole: user?.role,
-      isAdmin,
-      isStaff
-    });
-
-    if (isAdmin) return <Navigate to="/admin" replace />;
-    if (isStaff) return <Navigate to="/staff" replace />;
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={isAdmin ? "/admin" : "/dashboard"} replace />;
   }
 
   return children;
@@ -124,22 +109,14 @@ const ProtectedRoute = ({ children, adminOnly = false, userOnly = false }) => {
   )
     .toString()
     .toLowerCase();
-  const userRole = (user?.role || profile?.role || "")
-    .toString()
-    .toLowerCase();
-  
-  // ✅ FIX: Check role by both roleId and roleName/role (case-insensitive)
-  const isAdmin = roleId === 1 || roleId === "1" || roleName === "admin" || userRole === "admin";
-  const isStaff = roleId === 3 || roleId === "3" || roleName === "staff" || userRole === "staff";
+  const isAdmin = roleId === 1 || roleId === "1" || roleName === "admin";
 
   console.log("=== ROLE CHECK DEBUG ===");
   console.log("User object:", user);
   console.log("Profile object:", profile);
   console.log("RoleId:", roleId);
   console.log("RoleName:", roleName);
-  console.log("UserRole:", userRole);
   console.log("IsAdmin:", isAdmin);
-  console.log("IsStaff:", isStaff);
   console.log("========================");
 
   if (adminOnly && !isAdmin) {

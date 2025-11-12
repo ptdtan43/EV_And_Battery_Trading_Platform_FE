@@ -239,11 +239,6 @@ export const AuthProvider = ({ children }) => {
     // If we have user data, normalize it
     if (normalizedUser) {
       const userData = normalizedUser;
-      // ✅ FIX: Map role string to roleId if needed
-      const roleStr = (userData.role || userData.roleName || "").toString().toLowerCase();
-      const mappedRoleId = userData.roleId || 
-        (roleStr === "staff" ? 3 : (roleStr === "admin" ? 1 : (roleStr === "user" || roleStr === "member" ? 2 : userData.role)));
-      
       const normalizedUserData = {
         ...userData,
         fullName: fixVietnameseEncoding(
@@ -253,9 +248,8 @@ export const AuthProvider = ({ children }) => {
         phone: userData.phone,
         id: userData.userId || userData.id || userData.accountId,
         userId: userData.userId || userData.id || userData.accountId,
-        roleId: mappedRoleId,
+        roleId: userData.roleId || userData.role || userData.roleId,
         roleName: userData.roleName || userData.role || userData.roleName,
-        role: userData.role || userData.roleName, // Keep original role string
       };
 
       return {
@@ -384,13 +378,6 @@ export const AuthProvider = ({ children }) => {
         return session;
       }
 
-      // ✅ FIX: Map role string to roleId if needed
-      const roleStr = (normalizedUser?.role || normalizedUser?.Role || normalizedUser?.roleName || normalizedUser?.RoleName || "").toString().toLowerCase();
-      const mappedRoleId = normalizedUser?.roleId || normalizedUser?.RoleId || 
-        (roleStr === "staff" ? 3 : (roleStr === "admin" ? 1 : (roleStr === "user" || roleStr === "member" ? 2 : 2)));
-      const mappedRoleName = normalizedUser?.roleName || normalizedUser?.RoleName || 
-        (roleStr === "staff" ? "Staff" : (roleStr === "admin" ? "Admin" : "User"));
-      
       const session = {
         token: normalizedToken,
         user: {
@@ -400,9 +387,8 @@ export const AuthProvider = ({ children }) => {
           fullName: normalizedUser?.fullName || normalizedUser?.FullName || normalizedUser?.full_name || fullName,
           phone: normalizedUser?.phone || normalizedUser?.Phone || phone,
           avatar: normalizedUser?.avatar || normalizedUser?.Avatar,
-          roleId: mappedRoleId,
-          roleName: mappedRoleName,
-          role: normalizedUser?.role || normalizedUser?.Role || normalizedUser?.roleName || normalizedUser?.RoleName || "User", // Keep original role string
+          roleId: normalizedUser?.roleId || normalizedUser?.RoleId || 2,
+          roleName: normalizedUser?.roleName || normalizedUser?.RoleName || "User",
           accountStatus: normalizedUser?.accountStatus || normalizedUser?.AccountStatus || "Active"
         },
         profile: null
@@ -478,11 +464,6 @@ export const AuthProvider = ({ children }) => {
     // If we have user data, normalize it
     if (normalizedUser) {
       const userData = normalizedUser;
-      // ✅ FIX: Map role string to roleId if needed
-      const roleStr = (userData.role || userData.roleName || "").toString().toLowerCase();
-      const mappedRoleId = userData.roleId || 
-        (roleStr === "staff" ? 3 : (roleStr === "admin" ? 1 : (roleStr === "user" || roleStr === "member" ? 2 : userData.role)));
-      
       const normalizedUserData = {
         ...userData,
         fullName: fixVietnameseEncoding(
@@ -492,9 +473,8 @@ export const AuthProvider = ({ children }) => {
         phone: userData.phone,
         id: userData.userId || userData.id || userData.accountId,
         userId: userData.userId || userData.id || userData.accountId,
-        roleId: mappedRoleId,
+        roleId: userData.roleId || userData.role || userData.roleId,
         roleName: userData.roleName || userData.role || userData.roleName,
-        role: userData.role || userData.roleName, // Keep original role string
       };
 
       session.user = normalizedUserData;
@@ -542,11 +522,6 @@ export const AuthProvider = ({ children }) => {
         console.log("Current user phone:", currentUser?.phone);
 
         if (currentUser) {
-          // ✅ FIX: Map role string to roleId if needed
-          const roleStr = (currentUser.role || currentUser.roleName || session.user?.role || "").toString().toLowerCase();
-          const mappedRoleId = currentUser.roleId || 
-            (roleStr === "staff" ? 3 : (roleStr === "admin" ? 1 : (roleStr === "user" || roleStr === "member" ? 2 : (currentUser.role || session.user?.roleId))));
-          
           const fullUserData = {
             ...session.user,
             fullName: fixVietnameseEncoding(
@@ -568,12 +543,12 @@ export const AuthProvider = ({ children }) => {
               currentUser.id ||
               currentUser.accountId ||
               session.user?.userId,
-            roleId: mappedRoleId,
+            roleId:
+              currentUser.roleId || currentUser.role || session.user?.roleId,
             roleName:
               currentUser.roleName ||
               currentUser.role ||
               session.user?.roleName,
-            role: currentUser.role || currentUser.roleName || session.user?.role, // Keep original role string
           };
 
           console.log("Updated user with full profile:", fullUserData);
