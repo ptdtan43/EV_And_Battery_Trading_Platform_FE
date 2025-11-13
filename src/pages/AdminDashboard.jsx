@@ -1676,43 +1676,64 @@ export const AdminDashboard = () => {
       const pendingListings = sortedListings.filter(l => l.status === "pending");
       const approvedListings = sortedListings.filter(l => l.status === "Active");
       const rejectedListings = sortedListings.filter(l => l.status === "rejected");
+      const soldListings = sortedListings.filter(l => l.status === "sold");
 
-      // Calculate revenue from approved products (since no payment system yet)
-      const approvedProducts = sortedListings.filter(l => l.status === "Active");
-      const totalRevenue = approvedProducts.reduce((sum, p) => sum + (parseFloat(p.price || 0)), 0);
+      // ✅ FIX: Normalize transactions array
+      const transactionsArray = Array.isArray(transactions) ? transactions : [];
       
-      // Calculate orders stats from transactions (if any)
-      const completedOrders = transactions.filter(t => t.orderStatus === "Completed" || t.orderStatus === "Paid").length;
-      const activeOrders = transactions.filter(t => t.orderStatus === "Pending" || t.orderStatus === "Active").length;
+      // ✅ FIX: Calculate orders stats with normalized status checking
+      const completedOrders = transactionsArray.filter(t => {
+        const orderStatus = String(t.status || t.orderStatus || t.Status || t.OrderStatus || "").toLowerCase();
+        return orderStatus === "completed";
+      }).length;
       
-      // Calculate revenue by date from approved products
-      const todaysRevenue = approvedProducts
-        .filter(p => {
-          const productDate = new Date(p.createdDate || 0);
-          const today = new Date();
-          return productDate.toDateString() === today.toDateString();
+      const activeOrders = transactionsArray.filter(t => {
+        const orderStatus = String(t.status || t.orderStatus || t.Status || t.OrderStatus || "").toLowerCase();
+        return orderStatus === "pending" || orderStatus === "processing" || orderStatus === "confirmed" || orderStatus === "depositpaid" || orderStatus === "deposited";
+      }).length;
+      
+      // ✅ FIX: Calculate revenue from completed orders (actual sales), not from approved products
+      const completedOrdersList = transactionsArray.filter(t => {
+        const orderStatus = String(t.status || t.orderStatus || t.Status || t.OrderStatus || "").toLowerCase();
+        return orderStatus === "completed";
+      });
+      
+      const totalRevenue = completedOrdersList.reduce((sum, o) => {
+        return sum + parseFloat(o.totalAmount || o.TotalAmount || 0);
+      }, 0);
+      
+      // ✅ FIX: Calculate revenue by date from completed orders
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const todaysRevenue = completedOrdersList
+        .filter(o => {
+          const orderDate = new Date(o.createdDate || o.CreatedDate || o.createdAt || o.CreatedAt || o.orderDate || o.OrderDate || 0);
+          orderDate.setHours(0, 0, 0, 0);
+          return orderDate.getTime() === today.getTime();
         })
-        .reduce((sum, p) => sum + (parseFloat(p.price || 0)), 0);
+        .reduce((sum, o) => sum + parseFloat(o.totalAmount || o.TotalAmount || 0), 0);
 
-      const thisYearRevenue = approvedProducts
-        .filter(p => {
-          const productDate = new Date(p.createdDate || 0);
+      const thisYearRevenue = completedOrdersList
+        .filter(o => {
+          const orderDate = new Date(o.createdDate || o.CreatedDate || o.createdAt || o.CreatedAt || o.orderDate || o.OrderDate || 0);
           const currentYear = new Date().getFullYear();
-          return productDate.getFullYear() === currentYear;
+          return orderDate.getFullYear() === currentYear;
         })
-        .reduce((sum, p) => sum + (parseFloat(p.price || 0)), 0);
+        .reduce((sum, o) => sum + parseFloat(o.totalAmount || o.TotalAmount || 0), 0);
 
-      const thisMonthRevenue = approvedProducts
-        .filter(p => {
-          const productDate = new Date(p.createdDate || 0);
+      const thisMonthRevenue = completedOrdersList
+        .filter(o => {
+          const orderDate = new Date(o.createdDate || o.CreatedDate || o.createdAt || o.CreatedAt || o.orderDate || o.OrderDate || 0);
           const currentDate = new Date();
-          return productDate.getMonth() === currentDate.getMonth() && 
-                 productDate.getFullYear() === currentDate.getFullYear();
+          return orderDate.getMonth() === currentDate.getMonth() && 
+                 orderDate.getFullYear() === currentDate.getFullYear();
         })
-        .reduce((sum, p) => sum + (parseFloat(p.price || 0)), 0);
+        .reduce((sum, o) => sum + parseFloat(o.totalAmount || o.TotalAmount || 0), 0);
 
-      const averageOrderValue = approvedProducts.length > 0 ? totalRevenue / approvedProducts.length : 0;
-      const completionRate = transactions.length > 0 ? (completedOrders / transactions.length) * 100 : 0;
+      // ✅ FIX: Calculate average from completed orders, not approved products
+      const averageOrderValue = completedOrdersList.length > 0 ? totalRevenue / completedOrdersList.length : 0;
+      const completionRate = transactionsArray.length > 0 ? (completedOrders / transactionsArray.length) * 100 : 0;
 
       setStats({
         totalUsers: users.length,
@@ -1734,8 +1755,8 @@ export const AdminDashboard = () => {
         completionRate,
         totalVehicles: vehicleListings.length,
         totalBatteries: batteryListings.length,
-        soldVehicles: vehicleListings.filter(v => v.status === "Active").length,
-        soldBatteries: batteryListings.filter(b => b.status === "Active").length,
+        soldVehicles: vehicleListings.filter(v => v.status === "sold").length,
+        soldBatteries: batteryListings.filter(b => b.status === "sold").length,
       });
 
       setAllListings(sortedListings);
@@ -2003,8 +2024,14 @@ export const AdminDashboard = () => {
           l.verificationStatus === "Requested" || l.verificationStatus === "InProgress"
         );
       } else {
+        // ✅ FIX: Map filter value to actual status value
+        // "approved" filter should match "Active" status
+        let filterStatus = statusFilter;
+        if (statusFilter === "approved") {
+          filterStatus = "Active";
+        }
         // Regular status filter
-      filtered = filtered.filter((l) => l.status === statusFilter);
+        filtered = filtered.filter((l) => l.status === filterStatus);
       }
     }
 
@@ -2836,11 +2863,14 @@ export const AdminDashboard = () => {
           <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">TỔNG GIÁ TRỊ</p>
+                  <p className="text-gray-500 text-sm font-medium">TỔNG DOANH THU</p>
                 <p className="text-3xl font-bold text-gray-900 mt-2">
                     {formatPrice(stats.totalRevenue)}
                 </p>
-                  <p className="text-xs text-gray-600 mt-1">Sản phẩm đã duyệt</p>
+                  <p className="text-xs text-gray-600 mt-1">Từ đơn hàng hoàn tất</p>
+              </div>
+                <div className="bg-green-100 p-4 rounded-xl">
+                  <TrendingUp className="h-8 w-8 text-green-600" />
               </div>
             </div>
               <div className="mt-4 space-y-1">
@@ -2853,19 +2883,19 @@ export const AdminDashboard = () => {
           <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">GIÁ TRỊ HÔM NAY</p>
+                  <p className="text-gray-500 text-sm font-medium">DOANH THU HÔM NAY</p>
                   <p className="text-3xl font-bold text-gray-900 mt-2">
                     {formatPrice(stats.todaysRevenue)}
                   </p>
-                  <p className="text-xs text-gray-600 mt-1">Đã duyệt hôm nay</p>
+                  <p className="text-xs text-gray-600 mt-1">Từ đơn hàng hoàn tất</p>
               </div>
                 <div className="bg-green-100 p-4 rounded-xl">
                   <TrendingUp className="h-8 w-8 text-green-600" />
               </div>
             </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Trung bình/Tháng: {formatPrice(stats.thisYearRevenue / 12)}</p>
-                <p className="text-xs text-gray-500">Sản phẩm đã duyệt: {stats.approvedListings}</p>
+                <p className="text-xs text-gray-500">Trung bình/Tháng: {formatPrice(stats.thisYearRevenue > 0 ? stats.thisYearRevenue / 12 : 0)}</p>
+                <p className="text-xs text-gray-500">Đơn hoàn tất: {stats.completedOrders}</p>
             </div>
           </div>
 
@@ -2889,23 +2919,23 @@ export const AdminDashboard = () => {
             </div>
           </div>
 
-            {/* Average Value/Product */}
+            {/* Average Value/Order */}
           <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
-                  <p className="text-gray-500 text-sm font-medium">GIÁ TRỊ TB/MỖI SẢN PHẨM</p>
+                  <p className="text-gray-500 text-sm font-medium">GIÁ TRỊ TB/MỖI ĐƠN</p>
                 <p className="text-3xl font-bold text-gray-900 mt-2">
                     {formatPrice(stats.averageOrderValue)}
                 </p>
-                  <p className="text-xs text-gray-600 mt-1">Mỗi sản phẩm</p>
+                  <p className="text-xs text-gray-600 mt-1">Mỗi đơn hàng hoàn tất</p>
               </div>
                 <div className="bg-blue-100 p-4 rounded-xl">
                   <Activity className="h-8 w-8 text-blue-600" />
               </div>
             </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Cao nhất: {formatPrice(stats.averageOrderValue * 1.5)}</p>
-                <p className="text-xs text-gray-500">Thấp nhất: {formatPrice(stats.averageOrderValue * 0.5)}</p>
+                <p className="text-xs text-gray-500">Tổng đơn hoàn tất: {stats.completedOrders}</p>
+                <p className="text-xs text-gray-500">Tổng sản phẩm: {stats.totalListings}</p>
           </div>
         </div>
           </div>
@@ -2949,8 +2979,8 @@ export const AdminDashboard = () => {
                 </div>
               </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Trung bình/Ngày: {formatPrice(stats.thisMonthRevenue / new Date().getDate())}</p>
-                <p className="text-xs text-gray-500">Tổng đơn hàng: {stats.totalOrders}</p>
+                <p className="text-xs text-gray-500">Trung bình/Ngày: {formatPrice(stats.thisMonthRevenue > 0 && new Date().getDate() > 0 ? stats.thisMonthRevenue / new Date().getDate() : 0)}</p>
+                <p className="text-xs text-gray-500">Đơn hoàn tất: {stats.completedOrders}</p>
             </div>
           </div>
 
@@ -4965,152 +4995,6 @@ export const AdminDashboard = () => {
                                     <Eye className="h-3.5 w-3.5" />
                                     <span>Xem chi tiết</span>
                                   </button>
-                                  
-                                  {/* Show action button for orders that can be confirmed - Admin only has confirm button, reject is handled by staff */}
-                                  {status !== 'completed' && status !== 'cancelled' && (
-                                      <button
-                                        disabled={!hasContract}
-                                        onClick={async () => {
-                                          // Prevent action if no contract
-                                          if (!hasContract) {
-                                            showToast({
-                                              title: "Không thể xác nhận",
-                                              description: "Vui lòng đợi staff gửi hợp đồng trước khi xác nhận giao dịch",
-                                              type: "warning",
-                                            });
-                                            return;
-                                          }
-                                          
-                                          if (!window.confirm('Bạn có chắc muốn xác nhận giao dịch này đã hoàn tất thành công?')) {
-                                            return;
-                                          }
-                                          try {
-                                            showToast({
-                                              title: 'Đang xử lý...',
-                                              description: 'Đang xác nhận giao dịch',
-                                              type: 'info',
-                                            });
-                                            
-                                            // LOGIC: When admin confirms order:
-                                            // 1. Update order status to "Completed"
-                                            // 2. Update product status from "Reserved" → "Sold" via admin-confirm endpoint
-                                            
-                                            // First, update order status to Completed
-                                            try {
-                                              await apiRequest(`/api/Order/${orderId}/status`, {
-                                                method: "PUT",
-                                                body: { Status: "Completed" },
-                                              });
-                                              console.log(`✅ [ADMIN CONFIRM] Order ${orderId} status updated to Completed`);
-                                            } catch (orderError) {
-                                              console.error(`❌ [ADMIN CONFIRM] Error updating order status:`, orderError);
-                                              showToast({
-                                                title: "Lỗi",
-                                                description: `Không thể cập nhật order status: ${orderError.message}`,
-                                                type: "error",
-                                              });
-                                              return; // Stop if order update fails
-                                            }
-                                            
-                                            // Backend returns ProductId (PascalCase) - check this FIRST
-                                            let productId = order.ProductId ||  // Backend GetAllOrders() returns ProductId (line 40)
-                                                          order.productId || 
-                                                          order.product?.ProductId ||
-                                                          order.product?.productId || 
-                                                          order.product?.id;
-                                            
-                                            // If still no productId, try to get from order details API
-                                            if (!productId) {
-                                              try {
-                                                console.log(`⚠️ [ADMIN CONFIRM] No productId in order object, fetching order details...`);
-                                                const orderDetails = await apiRequest(`/api/Order/details/${orderId}`);
-                                                productId = orderDetails.productId || orderDetails.ProductId;
-                                                console.log(`✅ [ADMIN CONFIRM] Got productId from order details: ${productId}`);
-                                              } catch (detailError) {
-                                                console.warn(`⚠️ [ADMIN CONFIRM] Could not fetch order details:`, detailError);
-                                              }
-                                            }
-                                            
-                                            console.log(`🔍 [ADMIN CONFIRM] Order confirmation data:`, {
-                                              orderId: orderId,
-                                              productId: productId,
-                                              orderProductId: order.productId,
-                                              orderProductIdCapital: order.ProductId
-                                            });
-                                            
-                                            // Use the dedicated admin-confirm endpoint to update product status
-                                            if (productId) {
-                                              try {
-                                                console.log(`🔄 [ADMIN CONFIRM] Calling /api/Payment/admin-confirm with ProductId: ${productId}...`);
-                                                const acceptResponse = await apiRequest(`/api/Payment/admin-confirm`, {
-                                                  method: "POST",
-                                                  body: { ProductId: productId },
-                                                });
-                                                console.log(`✅ [ADMIN CONFIRM] Admin confirm response:`, acceptResponse);
-                                                
-                                                // Verify the update was successful
-                                                if (acceptResponse?.newStatus?.toLowerCase() === "sold" || acceptResponse?.productStatus?.toLowerCase() === "sold") {
-                                                  console.log(`✅ [ADMIN CONFIRM] SUCCESS: Product ${productId} status is now "Sold"!`);
-                                                } else {
-                                                  console.warn(`⚠️ [ADMIN CONFIRM] Product status may not be updated correctly. Response:`, acceptResponse);
-                                                }
-                                              } catch (acceptError) {
-                                                console.error(`❌ [ADMIN CONFIRM] Error calling admin-confirm:`, acceptError);
-                                                showToast({
-                                                  title: "Cảnh báo",
-                                                  description: `Không thể cập nhật product status: ${acceptError.message}`,
-                                                  type: "warning",
-                                                });
-                                              }
-                                            } else {
-                                              console.error(`❌ [ADMIN CONFIRM] CRITICAL: No productId found in order ${orderId}! Cannot update product status.`);
-                                              showToast({
-                                                title: "Cảnh báo",
-                                                description: `Không tìm thấy ProductId trong order ${orderId}. Order đã được cập nhật nhưng product status chưa được cập nhật.`,
-                                                type: "warning",
-                                              });
-                                            }
-                                            
-                                            // Clear cache to force fresh data reload
-                                            try {
-                                              localStorage.removeItem('admin_cached_processed_listings');
-                                              localStorage.removeItem('admin_cached_users');
-                                              localStorage.removeItem('admin_cached_products');
-                                              localStorage.removeItem('admin_cached_timestamp');
-                                              localStorage.removeItem('admin_cached_orders');
-                                              console.log('✅ Cleared admin cache (including products cache)');
-                                            } catch (cacheError) {
-                                              console.warn('⚠️ Could not clear cache:', cacheError);
-                                            }
-                                            
-                                            showToast({
-                                              title: "Thành công",
-                                              description: "Đã xác nhận giao dịch thành công",
-                                              type: "success",
-                                            });
-                                            
-                                            // Reload admin data to reflect status changes
-                                            await loadAdminData();
-                                          } catch (error) {
-                                            console.error("Error confirming transaction:", error);
-                                            showToast({
-                                              title: "Lỗi",
-                                              description: error.message || "Không thể xác nhận giao dịch. Vui lòng thử lại.",
-                                              type: "error",
-                                            });
-                                          }
-                                        }}
-                                      className={`w-full px-3 py-1.5 rounded flex items-center justify-center space-x-1 text-xs ${
-                                          hasContract
-                                            ? "bg-green-600 text-white hover:bg-green-700 cursor-pointer"
-                                            : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                                        }`}
-                                        title={hasContract ? "Xác nhận giao dịch thành công" : "Vui lòng đợi staff gửi hợp đồng"}
-                                      >
-                                        <CheckCircle className="h-3.5 w-3.5" />
-                                        <span>Xác nhận</span>
-                                      </button>
-                                  )}
                                 </div>
                               </td>
                             </tr>
@@ -5683,137 +5567,149 @@ export const AdminDashboard = () => {
                     )}
                   </div>
 
-                  {/* Action Buttons */}
-                  {orderDetailModal.orderDetails.sellerConfirmed && 
-                   !orderDetailModal.orderDetails.adminConfirmed && (
-                    <div className="flex space-x-3 pt-4 border-t border-gray-200">
-                      <button
-                        disabled={!orderDetailModal.orderDetails.contractUrl}
-                        onClick={async () => {
-                          // Prevent action if no contract
-                          if (!orderDetailModal.orderDetails.contractUrl) {
-                            showToast({
-                              title: "Không thể xác nhận",
-                              description: "Vui lòng đợi staff gửi hợp đồng trước khi xác nhận giao dịch",
-                              type: "warning",
-                            });
-                            return;
-                          }
-                          try {
-                            showToast({
-                              title: 'Đang xử lý...',
-                              description: 'Đang xác nhận giao dịch',
-                              type: 'info',
-                            });
-                            
-                            // LOGIC: When admin confirms order:
-                            // 1. Update order status to "Completed"
-                            // 2. Update product status from "Reserved" → "Sold" via admin-confirm endpoint
-                            
-                            // First, update order status to Completed
-                            try {
-                              await apiRequest(`/api/Order/${orderDetailModal.orderDetails.orderId}/status`, {
-                                method: "PUT",
-                                body: { Status: "Completed" },
-                              });
-                              console.log(`✅ [MODAL CONFIRM] Order ${orderDetailModal.orderDetails.orderId} status updated to Completed`);
-                            } catch (orderError) {
-                              console.error(`❌ [MODAL CONFIRM] Error updating order status:`, orderError);
+                  {/* Action Buttons - Only show for orders that can be confirmed */}
+                  {(() => {
+                    const orderStatus = (orderDetailModal.orderDetails.orderStatus || '').toLowerCase();
+                    const canConfirm = orderStatus !== 'completed' && orderStatus !== 'cancelled';
+                    const hasContract = !!orderDetailModal.orderDetails.contractUrl;
+                    
+                    if (!canConfirm) return null;
+                    
+                    return (
+                      <div className="flex space-x-3 pt-4 border-t border-gray-200">
+                        <button
+                          disabled={!hasContract}
+                          onClick={async () => {
+                            // Prevent action if no contract
+                            if (!hasContract) {
                               showToast({
-                                title: "Lỗi",
-                                description: `Không thể cập nhật order status: ${orderError.message}`,
-                                type: "error",
+                                title: "Không thể xác nhận",
+                                description: "Vui lòng đợi staff gửi hợp đồng trước khi xác nhận giao dịch",
+                                type: "warning",
                               });
-                              return; // Stop if order update fails
+                              return;
                             }
                             
-                            // Try multiple sources for productId from order details
-                            let productId = orderDetailModal.orderDetails.productId || 
-                                          orderDetailModal.orderDetails.ProductId ||
-                                          orderDetailModal.orderDetails.product?.productId ||
-                                          orderDetailModal.orderDetails.product?.ProductId ||
-                                          orderDetailModal.orderDetails.product?.id;
+                            if (!window.confirm('Bạn có chắc muốn xác nhận giao dịch này đã hoàn tất thành công?')) {
+                              return;
+                            }
                             
-                            console.log(`🔍 [MODAL CONFIRM] Order confirmation data:`, {
-                              orderId: orderDetailModal.orderDetails.orderId,
-                              productId: productId,
-                              orderDetails: orderDetailModal.orderDetails
-                            });
-                            
-                            // Use the dedicated admin-confirm endpoint to update product status
-                            if (productId) {
+                            try {
+                              showToast({
+                                title: 'Đang xử lý...',
+                                description: 'Đang xác nhận giao dịch',
+                                type: 'info',
+                              });
+                              
+                              // LOGIC: When admin confirms order:
+                              // 1. Update order status to "Completed"
+                              // 2. Update product status from "Reserved" → "Sold" via admin-confirm endpoint
+                              
+                              // First, update order status to Completed
                               try {
-                                console.log(`🔄 [MODAL CONFIRM] Calling /api/Payment/admin-confirm with ProductId: ${productId}...`);
-                                const acceptResponse = await apiRequest(`/api/Payment/admin-confirm`, {
-                                  method: "POST",
-                                  body: { ProductId: productId },
+                                await apiRequest(`/api/Order/${orderDetailModal.orderDetails.orderId}/status`, {
+                                  method: "PUT",
+                                  body: { Status: "Completed" },
                                 });
-                                console.log(`✅ [MODAL CONFIRM] Admin confirm response:`, acceptResponse);
-                                
-                                // Verify the update was successful
-                                if (acceptResponse?.newStatus?.toLowerCase() === "sold" || acceptResponse?.productStatus?.toLowerCase() === "sold") {
-                                  console.log(`✅ [MODAL CONFIRM] SUCCESS: Product ${productId} status is now "Sold"!`);
-                                } else {
-                                  console.warn(`⚠️ [MODAL CONFIRM] Product status may not be updated correctly. Response:`, acceptResponse);
+                                console.log(`✅ [MODAL CONFIRM] Order ${orderDetailModal.orderDetails.orderId} status updated to Completed`);
+                              } catch (orderError) {
+                                console.error(`❌ [MODAL CONFIRM] Error updating order status:`, orderError);
+                                showToast({
+                                  title: "Lỗi",
+                                  description: `Không thể cập nhật order status: ${orderError.message}`,
+                                  type: "error",
+                                });
+                                return; // Stop if order update fails
+                              }
+                              
+                              // Try multiple sources for productId from order details
+                              let productId = orderDetailModal.orderDetails.productId || 
+                                            orderDetailModal.orderDetails.ProductId ||
+                                            orderDetailModal.orderDetails.product?.productId ||
+                                            orderDetailModal.orderDetails.product?.ProductId ||
+                                            orderDetailModal.orderDetails.product?.id;
+                              
+                              console.log(`🔍 [MODAL CONFIRM] Order confirmation data:`, {
+                                orderId: orderDetailModal.orderDetails.orderId,
+                                productId: productId,
+                                orderDetails: orderDetailModal.orderDetails
+                              });
+                              
+                              // Use the dedicated admin-confirm endpoint to update product status
+                              if (productId) {
+                                try {
+                                  console.log(`🔄 [MODAL CONFIRM] Calling /api/Payment/admin-confirm with ProductId: ${productId}...`);
+                                  const acceptResponse = await apiRequest(`/api/Payment/admin-confirm`, {
+                                    method: "POST",
+                                    body: { ProductId: productId },
+                                  });
+                                  console.log(`✅ [MODAL CONFIRM] Admin confirm response:`, acceptResponse);
+                                  
+                                  // Verify the update was successful
+                                  if (acceptResponse?.newStatus?.toLowerCase() === "sold" || acceptResponse?.productStatus?.toLowerCase() === "sold") {
+                                    console.log(`✅ [MODAL CONFIRM] SUCCESS: Product ${productId} status is now "Sold"!`);
+                                  } else {
+                                    console.warn(`⚠️ [MODAL CONFIRM] Product status may not be updated correctly. Response:`, acceptResponse);
+                                  }
+                                } catch (acceptError) {
+                                  console.error(`❌ [MODAL CONFIRM] Error calling admin-confirm:`, acceptError);
+                                  showToast({
+                                    title: "Cảnh báo",
+                                    description: `Không thể cập nhật product status: ${acceptError.message}`,
+                                    type: "warning",
+                                  });
                                 }
-                              } catch (acceptError) {
-                                console.error(`❌ [MODAL CONFIRM] Error calling admin-confirm:`, acceptError);
+                              } else {
+                                console.error(`❌ [MODAL CONFIRM] CRITICAL: No productId found in order details! Cannot update product status.`);
                                 showToast({
                                   title: "Cảnh báo",
-                                  description: `Không thể cập nhật product status: ${acceptError.message}`,
+                                  description: `Không tìm thấy ProductId trong order details. Order đã được cập nhật nhưng product status chưa được cập nhật.`,
                                   type: "warning",
                                 });
                               }
-                            } else {
-                              console.error(`❌ [MODAL CONFIRM] CRITICAL: No productId found in order details! Cannot update product status.`);
+                              
+                              // Clear cache to force fresh data reload
+                              try {
+                                localStorage.removeItem('admin_cached_processed_listings');
+                                localStorage.removeItem('admin_cached_users');
+                                localStorage.removeItem('admin_cached_products');
+                                localStorage.removeItem('admin_cached_timestamp');
+                                localStorage.removeItem('admin_cached_orders');
+                                console.log('✅ Cleared admin cache (including products cache)');
+                              } catch (cacheError) {
+                                console.warn('⚠️ Could not clear cache:', cacheError);
+                              }
+                              
                               showToast({
-                                title: "Cảnh báo",
-                                description: `Không tìm thấy ProductId trong order details. Order đã được cập nhật nhưng product status chưa được cập nhật.`,
-                                type: "warning",
+                                title: "Thành công",
+                                description: "Đã xác nhận giao dịch thành công",
+                                type: "success",
+                              });
+                              setOrderDetailModal({ isOpen: false, order: null, orderDetails: null, loading: false });
+                              // Reload admin data to reflect status changes
+                              await loadAdminData();
+                            } catch (error) {
+                              console.error("Error confirming transaction:", error);
+                              showToast({
+                                title: "Lỗi",
+                                description: error.message || "Không thể xác nhận giao dịch",
+                                type: "error",
                               });
                             }
-                            
-                            // Clear cache to force fresh data reload
-                            try {
-                              localStorage.removeItem('admin_cached_processed_listings');
-                              localStorage.removeItem('admin_cached_users');
-                              localStorage.removeItem('admin_cached_products');
-                              localStorage.removeItem('admin_cached_timestamp');
-                              localStorage.removeItem('admin_cached_orders');
-                              console.log('✅ Cleared admin cache (including products cache)');
-                            } catch (cacheError) {
-                              console.warn('⚠️ Could not clear cache:', cacheError);
-                            }
-                            
-                            showToast({
-                              title: "Thành công",
-                              description: "Đã xác nhận giao dịch thành công",
-                              type: "success",
-                            });
-                            setOrderDetailModal({ isOpen: false, order: null, orderDetails: null, loading: false });
-                            // Reload admin data to reflect status changes
-                            await loadAdminData();
-                          } catch (error) {
-                            console.error("Error confirming transaction:", error);
-                            showToast({
-                              title: "Lỗi",
-                              description: error.message || "Không thể xác nhận giao dịch",
-                              type: "error",
-                            });
-                          }
-                        }}
-                        className={`flex-1 px-4 py-2 rounded-lg transition-colors flex items-center justify-center space-x-2 ${
-                          orderDetailModal.orderDetails.contractUrl
-                            ? "bg-green-600 text-white hover:bg-green-700 cursor-pointer"
-                            : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                        }`}
-                        title={!orderDetailModal.orderDetails.contractUrl ? "Vui lòng đợi staff gửi hợp đồng" : ""}
-                      >
-                        <CheckCircle className="h-5 w-5" />
-                        <span>Xác nhận giao dịch thành công</span>
-                      </button>
-                    </div>
-                  )}
+                          }}
+                          className={`flex-1 px-4 py-2 rounded-lg transition-colors flex items-center justify-center space-x-2 ${
+                            hasContract
+                              ? "bg-green-600 text-white hover:bg-green-700 cursor-pointer"
+                              : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                          }`}
+                          title={!hasContract ? "Vui lòng đợi staff gửi hợp đồng trước khi xác nhận" : "Xác nhận giao dịch thành công"}
+                        >
+                          <CheckCircle className="h-5 w-5" />
+                          <span>Xác nhận giao dịch thành công</span>
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : (
                 <div className="text-center py-12 text-gray-500">

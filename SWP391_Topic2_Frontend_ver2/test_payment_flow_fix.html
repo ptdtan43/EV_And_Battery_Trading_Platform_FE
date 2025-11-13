@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Payment Flow Fix</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="text"], input[type="number"], select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        .step {
+            background: #e7f3ff;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .step h4 {
+            margin-top: 0;
+            color: #007bff;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .highlight {
+            background: #fff3cd;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Test Payment Flow Fix</h1>
+        
+        <div class="step">
+            <h4>🚨 Vấn đề đã phát hiện:</h4>
+            <p>VNPay callback đang trả về JSON thay vì redirect về PaymentSuccess UI</p>
+        </div>
+
+        <div class="step">
+            <h4>✅ Giải pháp đã áp dụng:</h4>
+            <ol>
+                <li><strong>Backend Callback</strong>: Sửa để redirect về frontend thay vì trả JSON</li>
+                <li><strong>VNPay ReturnUrl</strong>: Trỏ về backend callback endpoint</li>
+                <li><strong>FrontendUrl</strong>: Cập nhật để redirect đúng</li>
+            </ol>
+        </div>
+
+        <div class="step">
+            <h4>🔄 Payment Flow mới:</h4>
+            <ol>
+                <li>User thanh toán trên VNPay</li>
+                <li>VNPay gọi backend callback: <code>/api/Payment/callback</code></li>
+                <li>Backend xử lý và redirect về: <code>/payment/success</code></li>
+                <li>PaymentSuccess component hiển thị UI đẹp</li>
+                <li>Auto redirect về HomePage sau 5 giây</li>
+            </ol>
+        </div>
+
+        <div class="form-group">
+            <label for="paymentId">Payment ID:</label>
+            <input type="text" id="paymentId" value="PAY202401081030001234" placeholder="Payment ID">
+        </div>
+
+        <div class="form-group">
+            <label for="amount">Amount (VND):</label>
+            <input type="number" id="amount" value="100000" placeholder="Amount">
+        </div>
+
+        <div class="form-group">
+            <label for="transactionNo">Transaction No:</label>
+            <input type="text" id="transactionNo" value="123456789" placeholder="Transaction No">
+        </div>
+
+        <div class="form-group">
+            <label for="responseCode">Response Code:</label>
+            <select id="responseCode">
+                <option value="00">00 - Success</option>
+                <option value="07">07 - Transaction Failed</option>
+                <option value="09">09 - Transaction Not Found</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="responseMessage">Response Message:</label>
+            <input type="text" id="responseMessage" value="Success" placeholder="Response Message">
+        </div>
+
+        <button onclick="testBackendCallback()">🔧 Test Backend Callback</button>
+        <button onclick="testFrontendRedirect()">🎨 Test Frontend Redirect</button>
+        <button onclick="testFullFlow()">🚀 Test Full Flow</button>
+        <button onclick="clearResult()">🗑️ Clear</button>
+
+        <div id="result"></div>
+    </div>
+
+    <script>
+        function showResult(message, type = 'info') {
+            const resultDiv = document.getElementById('result');
+            resultDiv.textContent = message;
+            resultDiv.className = `result ${type}`;
+        }
+
+        function clearResult() {
+            document.getElementById('result').textContent = '';
+            document.getElementById('result').className = 'result';
+        }
+
+        async function testBackendCallback() {
+            const paymentId = document.getElementById('paymentId').value;
+            const amount = document.getElementById('amount').value;
+            const transactionNo = document.getElementById('transactionNo').value;
+            const responseCode = document.getElementById('responseCode').value;
+            const responseMessage = document.getElementById('responseMessage').value;
+
+            showResult('Testing backend callback endpoint...', 'info');
+
+            try {
+                // Test backend callback endpoint
+                const callbackUrl = `http://localhost:5044/api/Payment/callback?vnp_ResponseCode=${responseCode}&vnp_TxnRef=${paymentId}&vnp_Amount=${amount}00&vnp_TransactionNo=${transactionNo}&vnp_ResponseMessage=${encodeURIComponent(responseMessage)}`;
+                
+                showResult(`🔧 Backend Callback Test!\n\n` +
+                    `Callback URL:\n${callbackUrl}\n\n` +
+                    `Expected Behavior:\n` +
+                    `1. Backend processes payment data\n` +
+                    `2. Updates database with payment status\n` +
+                    `3. Redirects to frontend PaymentSuccess page\n` +
+                    `4. Frontend shows beautiful UI\n` +
+                    `5. Auto-redirects to HomePage\n\n` +
+                    `Click the link below to test:\n${callbackUrl}`, 'success');
+            } catch (error) {
+                showResult(`❌ Backend callback test failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testFrontendRedirect() {
+            const paymentId = document.getElementById('paymentId').value;
+            const amount = document.getElementById('amount').value;
+            const transactionNo = document.getElementById('transactionNo').value;
+            const responseCode = document.getElementById('responseCode').value;
+            const responseMessage = document.getElementById('responseMessage').value;
+
+            showResult('Testing frontend redirect...', 'info');
+
+            // Test frontend PaymentSuccess page directly
+            const frontendUrl = `http://localhost:5173/payment/success?vnp_ResponseCode=${responseCode}&vnp_TxnRef=${paymentId}&vnp_Amount=${amount}00&vnp_TransactionNo=${transactionNo}&vnp_ResponseMessage=${encodeURIComponent(responseMessage)}`;
+            
+            showResult(`🎨 Frontend Redirect Test!\n\n` +
+                `Frontend URL:\n${frontendUrl}\n\n` +
+                `Expected Behavior:\n` +
+                `1. PaymentSuccess component loads\n` +
+                `2. Shows ${responseCode === '00' ? 'success' : 'failure'} UI\n` +
+                `3. Displays payment details\n` +
+                `4. ${responseCode === '00' ? 'Shows countdown and auto-redirects' : 'Shows retry options'}\n` +
+                `5. Toast notification appears\n\n` +
+                `Click the link below to test:\n${frontendUrl}`, 'success');
+        }
+
+        async function testFullFlow() {
+            showResult('Testing complete payment flow...', 'info');
+
+            const paymentId = document.getElementById('paymentId').value;
+            const amount = document.getElementById('amount').value;
+            const transactionNo = document.getElementById('transactionNo').value;
+            const responseCode = document.getElementById('responseCode').value;
+            const responseMessage = document.getElementById('responseMessage').value;
+
+            showResult(`🚀 Full Payment Flow Test!\n\n` +
+                `Step 1: Backend Callback\n` +
+                `URL: http://localhost:5044/api/Payment/callback?vnp_ResponseCode=${responseCode}&vnp_TxnRef=${paymentId}&vnp_Amount=${amount}00&vnp_TransactionNo=${transactionNo}&vnp_ResponseMessage=${encodeURIComponent(responseMessage)}\n\n` +
+                `Step 2: Frontend Redirect\n` +
+                `URL: http://localhost:5173/payment/success?vnp_ResponseCode=${responseCode}&vnp_TxnRef=${paymentId}&vnp_Amount=${amount}00&vnp_TransactionNo=${transactionNo}&vnp_ResponseMessage=${encodeURIComponent(responseMessage)}\n\n` +
+                `Expected Flow:\n` +
+                `1. VNPay calls backend callback\n` +
+                `2. Backend processes and redirects to frontend\n` +
+                `3. Frontend shows PaymentSuccess UI\n` +
+                `4. ${responseCode === '00' ? 'Auto-redirects to HomePage' : 'Shows retry options'}\n\n` +
+                `Test both URLs to verify the complete flow!`, 'success');
+        }
+    </script>
+</body>
+</html>
+

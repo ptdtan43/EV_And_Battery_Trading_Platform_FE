@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Payment Success Flow</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="text"], input[type="number"], select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        .step {
+            background: #e7f3ff;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .step h4 {
+            margin-top: 0;
+            color: #007bff;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .highlight {
+            background: #fff3cd;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎉 Test Payment Success Flow</h1>
+        
+        <div class="step">
+            <h4>🎯 Mục tiêu:</h4>
+            <p>Test UI thông báo thanh toán thành công và redirect về HomePage</p>
+        </div>
+
+        <div class="step">
+            <h4>🔄 Payment Success Flow:</h4>
+            <ol>
+                <li>User thanh toán thành công trên VNPay</li>
+                <li>VNPay redirect về <code>/payment/success</code></li>
+                <li>PaymentSuccess component hiển thị UI đẹp</li>
+                <li>Tự động redirect về HomePage sau 5 giây</li>
+                <li>Hoặc user có thể click "Về trang chủ ngay"</li>
+            </ol>
+        </div>
+
+        <div class="form-group">
+            <label for="paymentId">Payment ID:</label>
+            <input type="text" id="paymentId" value="PAY202401081030001234" placeholder="Payment ID">
+        </div>
+
+        <div class="form-group">
+            <label for="amount">Amount (VND):</label>
+            <input type="number" id="amount" value="100000" placeholder="Amount">
+        </div>
+
+        <div class="form-group">
+            <label for="transactionNo">Transaction No:</label>
+            <input type="text" id="transactionNo" value="123456789" placeholder="Transaction No">
+        </div>
+
+        <div class="form-group">
+            <label for="responseCode">Response Code:</label>
+            <select id="responseCode">
+                <option value="00">00 - Success</option>
+                <option value="07">07 - Transaction Failed</option>
+                <option value="09">09 - Transaction Not Found</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="responseMessage">Response Message:</label>
+            <input type="text" id="responseMessage" value="Success" placeholder="Response Message">
+        </div>
+
+        <button onclick="testSuccessFlow()">✅ Test Success Flow</button>
+        <button onclick="testFailureFlow()">❌ Test Failure Flow</button>
+        <button onclick="testWithRealData()">🔍 Test With Real Data</button>
+        <button onclick="clearResult()">🗑️ Clear</button>
+
+        <div id="result"></div>
+    </div>
+
+    <script>
+        function showResult(message, type = 'info') {
+            const resultDiv = document.getElementById('result');
+            resultDiv.textContent = message;
+            resultDiv.className = `result ${type}`;
+        }
+
+        function clearResult() {
+            document.getElementById('result').textContent = '';
+            document.getElementById('result').className = 'result';
+        }
+
+        function testSuccessFlow() {
+            const paymentId = document.getElementById('paymentId').value;
+            const amount = document.getElementById('amount').value;
+            const transactionNo = document.getElementById('transactionNo').value;
+            const responseCode = '00';
+            const responseMessage = 'Success';
+
+            showResult('Testing Payment Success Flow...', 'info');
+
+            // Simulate VNPay redirect with success parameters
+            const successUrl = `http://localhost:5173/payment/success?vnp_ResponseCode=${responseCode}&vnp_TxnRef=${paymentId}&vnp_Amount=${amount}00&vnp_TransactionNo=${transactionNo}&vnp_ResponseMessage=${responseMessage}`;
+            
+            showResult(`✅ Payment Success Flow Test!\n\n` +
+                `Success URL:\n${successUrl}\n\n` +
+                `Parameters:\n` +
+                `- vnp_ResponseCode: ${responseCode} (Success)\n` +
+                `- vnp_TxnRef: ${paymentId}\n` +
+                `- vnp_Amount: ${amount}00 (VNPay format)\n` +
+                `- vnp_TransactionNo: ${transactionNo}\n` +
+                `- vnp_ResponseMessage: ${responseMessage}\n\n` +
+                `Expected Behavior:\n` +
+                `1. PaymentSuccess component loads\n` +
+                `2. Shows success UI with green theme\n` +
+                `3. Displays payment details\n` +
+                `4. Shows countdown (5 seconds)\n` +
+                `5. Auto-redirects to HomePage\n` +
+                `6. User can click "Về trang chủ ngay"\n\n` +
+                `Click the link below to test:\n${successUrl}`, 'success');
+        }
+
+        function testFailureFlow() {
+            const paymentId = document.getElementById('paymentId').value;
+            const amount = document.getElementById('amount').value;
+            const transactionNo = document.getElementById('transactionNo').value;
+            const responseCode = '07';
+            const responseMessage = 'Transaction Failed';
+
+            showResult('Testing Payment Failure Flow...', 'info');
+
+            // Simulate VNPay redirect with failure parameters
+            const failureUrl = `http://localhost:5173/payment/success?vnp_ResponseCode=${responseCode}&vnp_TxnRef=${paymentId}&vnp_Amount=${amount}00&vnp_TransactionNo=${transactionNo}&vnp_ResponseMessage=${responseMessage}`;
+            
+            showResult(`❌ Payment Failure Flow Test!\n\n` +
+                `Failure URL:\n${failureUrl}\n\n` +
+                `Parameters:\n` +
+                `- vnp_ResponseCode: ${responseCode} (Failed)\n` +
+                `- vnp_TxnRef: ${paymentId}\n` +
+                `- vnp_Amount: ${amount}00 (VNPay format)\n` +
+                `- vnp_TransactionNo: ${transactionNo}\n` +
+                `- vnp_ResponseMessage: ${responseMessage}\n\n` +
+                `Expected Behavior:\n` +
+                `1. PaymentSuccess component loads\n` +
+                `2. Shows failure UI with red theme\n` +
+                `3. Displays error message\n` +
+                `4. Shows payment details\n` +
+                `5. No auto-redirect\n` +
+                `6. User can click "Về trang chủ" or "Thử lại"\n\n` +
+                `Click the link below to test:\n${failureUrl}`, 'error');
+        }
+
+        function testWithRealData() {
+            showResult('Testing with real VNPay data...', 'info');
+
+            // Real VNPay success parameters
+            const realSuccessUrl = `http://localhost:5173/payment/success?vnp_ResponseCode=00&vnp_TxnRef=PAY202401081030001234&vnp_Amount=10000000&vnp_TransactionNo=14234567&vnp_ResponseMessage=Success&vnp_SecureHash=test_hash`;
+            
+            showResult(`🔍 Real VNPay Data Test!\n\n` +
+                `Real Success URL:\n${realSuccessUrl}\n\n` +
+                `Real Parameters:\n` +
+                `- vnp_ResponseCode: 00 (Success)\n` +
+                `- vnp_TxnRef: PAY202401081030001234\n` +
+                `- vnp_Amount: 10000000 (100,000 VND)\n` +
+                `- vnp_TransactionNo: 14234567\n` +
+                `- vnp_ResponseMessage: Success\n` +
+                `- vnp_SecureHash: test_hash\n\n` +
+                `This simulates a real VNPay callback with:\n` +
+                `- Amount: 100,000 VND\n` +
+                `- Payment ID: PAY202401081030001234\n` +
+                `- Transaction No: 14234567\n` +
+                `- Status: Success\n\n` +
+                `Click the link below to test:\n${realSuccessUrl}`, 'success');
+        }
+    </script>
+</body>
+</html>
+

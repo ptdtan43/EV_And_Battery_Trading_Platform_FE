@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Enhanced Payment Flow</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="email"], input[type="password"], input[type="number"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        .test-section {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .test-section h3 {
+            margin-top: 0;
+            color: #856404;
+        }
+        .step {
+            background: #e7f3ff;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .step h4 {
+            margin-top: 0;
+            color: #007bff;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .highlight {
+            background: #fff3cd;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>💳 Test Enhanced Payment Flow</h1>
+        
+        <div class="test-section">
+            <h3>📋 Enhanced Features</h3>
+            <div class="grid">
+                <div>
+                    <h4>✅ New Fields Added:</h4>
+                    <ul>
+                        <li><strong>SellerId</strong> - ID của người bán</li>
+                        <li><strong>PayoutAmount</strong> - Số tiền seller nhận (95% sau phí platform)</li>
+                        <li><strong>FinalPaymentDueDate</strong> - Ngày đến hạn thanh toán cuối (7 ngày)</li>
+                        <li><strong>CompletedDate</strong> - Ngày hoàn thành giao dịch</li>
+                    </ul>
+                </div>
+                <div>
+                    <h4>🔄 Payment Flow:</h4>
+                    <ol>
+                        <li>Login → Get JWT Token</li>
+                        <li>Create Order → Set SellerId, FinalPaymentDueDate</li>
+                        <li>Create Payment → Calculate PayoutAmount</li>
+                        <li>Payment Success → Set CompletedDate</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="email">Email:</label>
+            <input type="email" id="email" value="admin@gmail.com" placeholder="Enter email">
+        </div>
+
+        <div class="form-group">
+            <label for="password">Password:</label>
+            <input type="password" id="password" value="123456" placeholder="Enter password">
+        </div>
+
+        <div class="form-group">
+            <label for="productId">Product ID:</label>
+            <input type="number" id="productId" value="1" placeholder="Product ID">
+        </div>
+
+        <div class="form-group">
+            <label for="sellerId">Seller ID:</label>
+            <input type="number" id="sellerId" value="1" placeholder="Seller ID">
+        </div>
+
+        <div class="form-group">
+            <label for="amount">Amount (VND):</label>
+            <input type="number" id="amount" value="100000" placeholder="Amount">
+        </div>
+
+        <button onclick="testFullFlow()">🚀 Test Full Enhanced Flow</button>
+        <button onclick="testCreateOrder()">📦 Test Create Order</button>
+        <button onclick="testCreatePayment()">💳 Test Create Payment</button>
+        <button onclick="testGetPayment()">🔍 Test Get Payment</button>
+        <button onclick="clearResult()">🗑️ Clear</button>
+
+        <div id="result"></div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:5044';
+        let authToken = null;
+        let orderId = null;
+        let paymentId = null;
+        
+        function showResult(message, type = 'info') {
+            const resultDiv = document.getElementById('result');
+            resultDiv.textContent = message;
+            resultDiv.className = `result ${type}`;
+        }
+
+        function clearResult() {
+            document.getElementById('result').textContent = '';
+            document.getElementById('result').className = 'result';
+        }
+
+        async function testCreateOrder() {
+            if (!authToken) {
+                showResult('Please login first to get token', 'error');
+                return;
+            }
+
+            const productId = parseInt(document.getElementById('productId').value);
+            const sellerId = parseInt(document.getElementById('sellerId').value);
+            const amount = parseFloat(document.getElementById('amount').value);
+
+            showResult('Testing create order with enhanced fields...', 'info');
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/Order`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify({
+                        productId: productId,
+                        sellerId: sellerId,
+                        depositAmount: amount,
+                        totalAmount: amount * 2 // Assume total is 2x deposit
+                    })
+                });
+
+                const data = await response.text();
+                let parsedData;
+                
+                try {
+                    parsedData = JSON.parse(data);
+                } catch {
+                    parsedData = data;
+                }
+
+                if (response.ok) {
+                    orderId = parsedData.orderId;
+                    const finalPaymentDueDate = new Date(parsedData.finalPaymentDueDate);
+                    
+                    showResult(`✅ Order Created with Enhanced Fields!\n\n` +
+                        `Order ID: ${orderId}\n` +
+                        `Seller ID: ${parsedData.sellerId}\n` +
+                        `Final Payment Due: ${finalPaymentDueDate.toLocaleString()}\n` +
+                        `Deposit Amount: ${parsedData.depositAmount.toLocaleString()} VND\n` +
+                        `Total Amount: ${parsedData.totalAmount.toLocaleString()} VND\n\n` +
+                        `Full Response:\n${JSON.stringify(parsedData, null, 2)}`, 'success');
+                } else {
+                    showResult(`❌ Create Order Failed!\n\nStatus: ${response.status}\nResponse:\n${JSON.stringify(parsedData, null, 2)}`, 'error');
+                }
+            } catch (error) {
+                showResult(`❌ Network Error!\n\n${error.message}`, 'error');
+            }
+        }
+
+        async function testCreatePayment() {
+            if (!authToken) {
+                showResult('Please login first to get token', 'error');
+                return;
+            }
+
+            if (!orderId) {
+                showResult('Please create order first', 'error');
+                return;
+            }
+
+            const amount = parseFloat(document.getElementById('amount').value);
+
+            showResult('Testing create payment with enhanced fields...', 'info');
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/Payment`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify({
+                        orderId: orderId,
+                        amount: amount,
+                        paymentType: 'Deposit'
+                    })
+                });
+
+                const data = await response.text();
+                let parsedData;
+                
+                try {
+                    parsedData = JSON.parse(data);
+                } catch {
+                    parsedData = data;
+                }
+
+                if (response.ok) {
+                    paymentId = parsedData.paymentId;
+                    const platformFee = amount - parsedData.payoutAmount;
+                    const platformFeeRate = ((platformFee / amount) * 100).toFixed(1);
+                    
+                    showResult(`✅ Payment Created with Enhanced Fields!\n\n` +
+                        `Payment ID: ${paymentId}\n` +
+                        `Order ID: ${parsedData.orderId}\n` +
+                        `Product ID: ${parsedData.productId}\n` +
+                        `Seller ID: ${parsedData.sellerId}\n` +
+                        `Amount: ${parsedData.amount.toLocaleString()} VND\n` +
+                        `Payout Amount: ${parsedData.payoutAmount.toLocaleString()} VND\n` +
+                        `Platform Fee: ${platformFee.toLocaleString()} VND (${platformFeeRate}%)\n` +
+                        `Final Payment Due: ${new Date(parsedData.finalPaymentDueDate).toLocaleString()}\n\n` +
+                        `Full Response:\n${JSON.stringify(parsedData, null, 2)}`, 'success');
+                } else {
+                    showResult(`❌ Create Payment Failed!\n\nStatus: ${response.status}\nResponse:\n${JSON.stringify(parsedData, null, 2)}`, 'error');
+                }
+            } catch (error) {
+                showResult(`❌ Network Error!\n\n${error.message}`, 'error');
+            }
+        }
+
+        async function testGetPayment() {
+            if (!paymentId) {
+                showResult('Please create payment first', 'error');
+                return;
+            }
+
+            showResult('Testing get payment details...', 'info');
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/Payment/${paymentId}`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+
+                const data = await response.text();
+                let parsedData;
+                
+                try {
+                    parsedData = JSON.parse(data);
+                } catch {
+                    parsedData = data;
+                }
+
+                if (response.ok) {
+                    showResult(`✅ Payment Details Retrieved!\n\n` +
+                        `Payment ID: ${parsedData.paymentId}\n` +
+                        `Status: ${parsedData.paymentStatus}\n` +
+                        `Amount: ${parsedData.amount.toLocaleString()} VND\n` +
+                        `Payout Amount: ${parsedData.payoutAmount?.toLocaleString()} VND\n` +
+                        `Seller ID: ${parsedData.sellerId}\n` +
+                        `Completed Date: ${parsedData.completedDate ? new Date(parsedData.completedDate).toLocaleString() : 'Not completed'}\n\n` +
+                        `Full Response:\n${JSON.stringify(parsedData, null, 2)}`, 'success');
+                } else {
+                    showResult(`❌ Get Payment Failed!\n\nStatus: ${response.status}\nResponse:\n${JSON.stringify(parsedData, null, 2)}`, 'error');
+                }
+            } catch (error) {
+                showResult(`❌ Network Error!\n\n${error.message}`, 'error');
+            }
+        }
+
+        async function testFullFlow() {
+            showResult('🚀 Starting enhanced payment flow test...', 'info');
+            
+            try {
+                // Step 1: Login
+                showResult('Step 1: Logging in...', 'info');
+                await testLogin();
+                
+                if (!authToken) {
+                    showResult('❌ Login failed, stopping test', 'error');
+                    return;
+                }
+                
+                // Step 2: Create Order
+                showResult('Step 2: Creating order with SellerId and FinalPaymentDueDate...', 'info');
+                await testCreateOrder();
+                
+                if (!orderId) {
+                    showResult('❌ Order creation failed, stopping test', 'error');
+                    return;
+                }
+                
+                // Step 3: Create Payment
+                showResult('Step 3: Creating payment with PayoutAmount calculation...', 'info');
+                await testCreatePayment();
+                
+                if (!paymentId) {
+                    showResult('❌ Payment creation failed, stopping test', 'error');
+                    return;
+                }
+                
+                // Step 4: Get Payment Details
+                showResult('Step 4: Getting payment details...', 'info');
+                await testGetPayment();
+                
+                showResult('✅ Enhanced payment flow test completed successfully!', 'success');
+                
+            } catch (error) {
+                showResult(`❌ Enhanced flow test failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testLogin() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            if (!email || !password) {
+                showResult('Please enter both email and password', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/User/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ email, password })
+                });
+
+                const data = await response.text();
+                let parsedData;
+                
+                try {
+                    parsedData = JSON.parse(data);
+                } catch {
+                    parsedData = data;
+                }
+
+                if (response.ok) {
+                    authToken = parsedData.token;
+                    return true;
+                } else {
+                    showResult(`❌ Login Failed!\n\nStatus: ${response.status}\nResponse:\n${JSON.stringify(parsedData, null, 2)}`, 'error');
+                    return false;
+                }
+            } catch (error) {
+                showResult(`❌ Network Error!\n\n${error.message}`, 'error');
+                return false;
+            }
+        }
+    </script>
+</body>
+</html>

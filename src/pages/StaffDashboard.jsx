@@ -33,6 +33,7 @@ import { apiRequest } from "../lib/api";
 import { formatPrice, formatDate, formatDateTime, getOrderStatusText } from "../utils/formatters";
 import { useToast } from "../contexts/ToastContext";
 import { useAuth } from "../contexts/AuthContext";
+import tokenManager from "../lib/tokenManager";
 
 export const StaffDashboard = () => {
   const location = useLocation();
@@ -746,7 +747,8 @@ export const StaffDashboard = () => {
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Mã đơn</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Người mua</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Sản phẩm</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Tổng tiền</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Tiền đặt cọc</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Tiền còn lại</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Trạng thái</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Hợp đồng</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Ngày tạo</th>
@@ -756,7 +758,7 @@ export const StaffDashboard = () => {
                   <tbody className="bg-white divide-y divide-gray-200">
                     {filteredOrders.length === 0 ? (
                       <tr>
-                        <td colSpan="8" className="px-6 py-12 text-center">
+                        <td colSpan="9" className="px-6 py-12 text-center">
                           <div className="flex flex-col items-center">
                             <Package className="h-12 w-12 text-gray-400 mb-3" />
                             <p className="text-gray-500 font-medium">Không có đơn hàng nào</p>
@@ -772,6 +774,12 @@ export const StaffDashboard = () => {
                         const isCancelled = status === 'cancelled' || 
                                           status === 'canceled' || 
                                           !!(order.adminNotes || order.AdminNotes || order.cancellationReason || order.CancellationReason);
+                        
+                        // Calculate deposit and remaining amounts
+                        const totalAmount = parseFloat(order.totalAmount || order.TotalAmount || 0);
+                        const depositAmount = parseFloat(order.depositAmount || order.DepositAmount || 0);
+                        const remainingAmount = totalAmount - depositAmount;
+                        
                         return (
                           <tr key={orderId} className="hover:bg-gray-50 transition-colors">
                             <td className="px-6 py-4 whitespace-nowrap">
@@ -785,7 +793,10 @@ export const StaffDashboard = () => {
                                (order.product?.title || order.product?.Title) || "N/A"}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                              {formatPrice(order.totalAmount || order.TotalAmount || 0)}
+                              {formatPrice(depositAmount)}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
+                              {formatPrice(remainingAmount)}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
                               <span className={`px-3 py-1 text-xs font-medium rounded-full ${getStatusBadge(status)}`}>
@@ -815,13 +826,72 @@ export const StaffDashboard = () => {
                                   onClick={async () => {
                                     setOrderDetailModal({ isOpen: true, order, orderDetails: null, loading: true });
                                     try {
+                                      // Check user role from context and token
+                                      const currentUser = user;
+                                      const userRoleId = currentUser?.roleId || currentUser?.role;
+                                      
+                                      // Also decode token to check roleId in JWT
+                                      const token = tokenManager.getToken();
+                                      let tokenRoleId = null;
+                                      if (token) {
+                                        const payload = tokenManager.safeParseJwt(token);
+                                        tokenRoleId = payload?.roleId || payload?.RoleId;
+                                        console.log("🔍 [ORDER DETAILS] Token payload:", {
+                                          userId: payload?.nameid || payload?.NameIdentifier,
+                                          roleId: tokenRoleId,
+                                          role: payload?.role || payload?.Role,
+                                          allClaims: payload
+                                        });
+                                      }
+                                      
+                                      console.log("🔍 [ORDER DETAILS] User role check:", {
+                                        userId: currentUser?.id || currentUser?.userId,
+                                        contextRoleId: userRoleId,
+                                        tokenRoleId: tokenRoleId,
+                                        isStaff: userRoleId === 3 || userRoleId === "3" || tokenRoleId === 3 || tokenRoleId === "3",
+                                        isAdmin: userRoleId === 1 || userRoleId === "1" || tokenRoleId === 1 || tokenRoleId === "1"
+                                      });
+
                                       const details = await apiRequest(`/api/Order/details/${orderId}`);
                                       setOrderDetailModal({ isOpen: true, order, orderDetails: details, loading: false });
                                     } catch (error) {
-                                      console.error("Error loading order details:", error);
+                                      console.error("❌ [ORDER DETAILS] Error loading order details:", error);
+                                      
+                                      // Decode token to show role information in error
+                                      const token = tokenManager.getToken();
+                                      let tokenRoleId = null;
+                                      if (token) {
+                                        const payload = tokenManager.safeParseJwt(token);
+                                        tokenRoleId = payload?.roleId || payload?.RoleId;
+                                      }
+                                      
+                                      console.error("❌ [ORDER DETAILS] Error details:", {
+                                        message: error.message,
+                                        status: error.status,
+                                        data: error.data,
+                                        orderId: orderId,
+                                        contextRoleId: user?.roleId || user?.role,
+                                        tokenRoleId: tokenRoleId,
+                                        expectedRole: "Staff (RoleId = 3) or Admin (RoleId = 1)"
+                                      });
+                                      
+                                      let errorMessage = "Không thể tải chi tiết đơn hàng";
+                                      if (error.status === 403) {
+                                        const roleInfo = tokenRoleId 
+                                          ? `RoleId trong token: ${tokenRoleId}. Backend yêu cầu RoleId = 3 (Staff) hoặc RoleId = 1 (Admin).`
+                                          : "Vui lòng kiểm tra lại quyền truy cập của tài khoản staff trong database.";
+                                        errorMessage = `Bạn không có quyền xem chi tiết đơn hàng này. ${roleInfo}`;
+                                      } else if (error.status === 401) {
+                                        errorMessage = "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
+                                      } else if (error.status === 404) {
+                                        errorMessage = "Không tìm thấy đơn hàng này.";
+                                      } else if (error.message) {
+                                        errorMessage = error.message;
+                                      }
+                                      
                                       showToast({
                                         title: "Lỗi",
-                                        description: "Không thể tải chi tiết đơn hàng",
+                                        description: errorMessage,
                                         type: "error",
                                       });
                                       setOrderDetailModal({ isOpen: false, order: null, orderDetails: null, loading: false });

@@ -97,6 +97,7 @@ export const ProductDetail = () => {
   const [showReportModal, setShowReportModal] = useState(false);
   const [paying, setPaying] = useState(false);
   const [currentOrderId, setCurrentOrderId] = useState(null);
+  const [productOrders, setProductOrders] = useState([]);
 
   useEffect(() => {
     console.log("ProductDetail - ID from params:", id);
@@ -224,6 +225,39 @@ export const ProductDetail = () => {
       }
 
       setProduct(normalizedProduct);
+
+      // ✅ FIX: Load orders for this product to check if it's actually sold
+      try {
+        const productId = normalizedProduct.id || normalizedProduct.productId;
+        if (productId) {
+          const ordersData = await apiRequest("/api/Order");
+          const ordersArray = Array.isArray(ordersData) ? ordersData : [];
+          
+          // Filter orders for this product
+          const relatedOrders = ordersArray.filter(order => {
+            const orderProductId = order.productId || order.ProductId || order.product?.id || order.product?.productId;
+            return orderProductId == productId || orderProductId === productId;
+          });
+          
+          setProductOrders(relatedOrders);
+          console.log(`[ProductDetail] Found ${relatedOrders.length} orders for product ${productId}:`, relatedOrders);
+          
+          // ✅ FIX: If there's a completed order, update product status to "sold"
+          const hasCompletedOrder = relatedOrders.some(order => {
+            const orderStatus = (order.status || order.Status || order.orderStatus || order.OrderStatus || "").toLowerCase();
+            return orderStatus === "completed";
+          });
+          
+          if (hasCompletedOrder && normalizedProduct.status !== "sold") {
+            console.log(`[ProductDetail] Product ${productId} has completed order - updating status to "sold"`);
+            normalizedProduct.status = "sold";
+            setProduct(normalizedProduct);
+          }
+        }
+      } catch (orderError) {
+        console.warn("[ProductDetail] Could not load orders:", orderError);
+        // Continue even if order loading fails
+      }
 
       // Load seller information
       const sellerId = normalizedProduct.sellerId;
@@ -1094,8 +1128,16 @@ export const ProductDetail = () => {
                 {/* Show sold message if product is sold - check case-insensitive */}
                 {(() => {
                   const productStatus = String(product.status || "").toLowerCase();
-                  const isSold = productStatus === "sold";
-                  const isReserved = productStatus === "reserved";
+                  
+                  // ✅ FIX: Check if there's a completed order for this product
+                  const hasCompletedOrder = productOrders.some(order => {
+                    const orderStatus = (order.status || order.Status || order.orderStatus || order.OrderStatus || "").toLowerCase();
+                    return orderStatus === "completed";
+                  });
+                  
+                  // If there's a completed order, product is sold regardless of product status
+                  const isSold = productStatus === "sold" || hasCompletedOrder;
+                  const isReserved = productStatus === "reserved" && !hasCompletedOrder;
                   
                   if (isSold) {
                     return (
