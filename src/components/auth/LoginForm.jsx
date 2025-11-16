@@ -16,21 +16,36 @@ export const LoginForm = () => {
 
   const getErrorMessage = (err) => {
     if (!err) return "Đã xảy ra lỗi không xác định.";
+    
     // Network error (no response)
     if (err.status === 0 || err.message === "Failed to fetch") {
       return "Không thể kết nối máy chủ. Vui lòng kiểm tra mạng hoặc API.";
     }
-    // Backend provided message
+    
+    // Backend provided message (prioritize this)
     const backendMsg = err?.data?.message || err?.message;
-    if (err.status === 401) {
-      return backendMsg || "Email hoặc mật khẩu không đúng.";
+    
+    // ✅ Handle account status errors (suspended/deleted)
+    if (err.status === 401 && backendMsg) {
+      // Backend returns specific messages for suspended/deleted accounts
+      if (backendMsg.includes('khóa') || backendMsg.includes('suspended')) {
+        return "⚠️ Tài khoản của bạn đã bị tạm khóa. Vui lòng liên hệ quản trị viên để biết thêm chi tiết.";
+      }
+      if (backendMsg.includes('xóa') || backendMsg.includes('deleted')) {
+        return "⚠️ Tài khoản của bạn đã bị xóa và không thể đăng nhập. Vui lòng liên hệ quản trị viên.";
+      }
+      // Return backend message as-is for other 401 errors
+      return backendMsg;
     }
+    
     if (err.status === 400) {
       return backendMsg || "Thông tin đăng nhập không hợp lệ.";
     }
+    
     if (err.status >= 500) {
       return backendMsg || "Máy chủ gặp sự cố. Vui lòng thử lại sau.";
     }
+    
     return backendMsg || "Đăng nhập thất bại. Vui lòng thử lại.";
   };
 

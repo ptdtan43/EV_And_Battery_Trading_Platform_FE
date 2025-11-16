@@ -408,12 +408,23 @@ export const AdminDashboard = () => {
           id: sampleUser.id,
           email: sampleUser.email,
           status: sampleUser.status,
+          role: sampleUser.role,  // ← Check role value
+          Role: sampleUser.Role,  // ← Check Role value
           accountStatusReason: sampleUser.accountStatusReason,
           AccountStatusReason: sampleUser.AccountStatusReason,
           reason: sampleUser.reason,
           Reason: sampleUser.Reason,
           rawData: usersData[0], // Log raw data để debug
         });
+        
+        // ✨ NEW: Log all users with their roles to debug
+        console.log('🔍 All users roles:', normalizedUsers.map(u => ({
+          id: u.id,
+          email: u.email,
+          role: u.role,
+          Role: u.Role,
+          rawRole: usersData.find(raw => (raw.id ?? raw.Id) === u.id)?.role ?? usersData.find(raw => (raw.id ?? raw.Id) === u.id)?.Role
+        })));
       }
       setUsers(normalizedUsers);
       const meta = res.Meta || res.meta || {};
@@ -452,6 +463,29 @@ export const AdminDashboard = () => {
   };
 
   const updateUserStatus = async (userId, status) => {
+    // ✅ SAFEGUARD: Check if user is Staff before changing status
+    const targetUser = users.find(u => (u.id || u.Id) === userId);
+    const userRole = (targetUser?.role || targetUser?.Role || '').toString().toLowerCase();
+    
+    if ((userRole === 'staff' || userRole === 'sub_admin' || userRole === 'subadmin') && 
+        (status === 'suspended' || status === 'deleted')) {
+      const confirmed = window.confirm(
+        '⚠️ CẢNH BÁO: Bạn đang thay đổi trạng thái của tài khoản Nhân viên!\n\n' +
+        `Tài khoản: ${targetUser?.email || targetUser?.Email}\n` +
+        `Vai trò: Nhân viên\n` +
+        `Hành động: ${status === 'suspended' ? 'Tạm khóa' : 'Xóa'}\n\n` +
+        'Điều này có thể ảnh hưởng đến hoạt động quản trị hệ thống.\n' +
+        'Bạn có chắc chắn muốn tiếp tục?'
+      );
+      
+      if (!confirmed) {
+        console.log('❌ Admin cancelled status change for Staff user');
+        return; // Cancel the operation
+      }
+      
+      console.log('✅ Admin confirmed status change for Staff user');
+    }
+    
     // Optimistic update: update UI immediately
     const reasonLabel = (() => {
       const list = status === 'deleted' ? deletedReasonOptions : suspendedReasonOptions;
@@ -2840,6 +2874,7 @@ export const AdminDashboard = () => {
                 {activeTab === "dashboard" && "Bảng điều khiển quản trị"}
                 {activeTab === "vehicles" && "Quản lý phương tiện"}
                 {activeTab === "batteries" && "Quản lý pin"}
+                {activeTab === "users" && "Quản lý người dùng"}
                 {activeTab === "transactions" && "Quản lý giao dịch"}
                 {activeTab === "reports" && "Báo cáo vi phạm"}
                 {activeTab === "fees" && "Quản lý phí"}
@@ -2848,6 +2883,7 @@ export const AdminDashboard = () => {
                 {activeTab === "dashboard" && "Tổng quan hệ thống EV Market • Cập nhật theo thời gian thực"}
                 {activeTab === "vehicles" && "Quản lý bài đăng xe và phê duyệt"}
                 {activeTab === "batteries" && "Quản lý bài đăng pin và phê duyệt"}
+                {activeTab === "users" && "Quản lý tài khoản người dùng, vai trò và trạng thái"}
                 {activeTab === "transactions" && "Quản lý các giao dịch giữa người bán và người mua"}
                 {activeTab === "reports" && "Xem xét và xử lý các báo cáo vi phạm từ người dùng"}
                 {activeTab === "fees" && "Quản lý phí đặt cọc và phí kiểm định"}
@@ -3294,6 +3330,7 @@ export const AdminDashboard = () => {
                 >
                   <option value="">Tất cả vai trò</option>
                   <option value="admin">Quản trị viên</option>
+                  <option value="sub_admin">Nhân viên</option>
                   <option value="user">Người dùng</option>
                 </select>
                 <select
@@ -3343,10 +3380,35 @@ export const AdminDashboard = () => {
                       <td className="px-4 py-3 text-sm">
                         {(() => {
                           const role = (u.role || u.Role || 'user').toString().toLowerCase();
-                          // Map sub_admin to user, only show 2 roles: admin and user
-                          const normalizedRole = role === 'admin' ? 'admin' : 'user';
-                          const label = normalizedRole === 'admin' ? 'Quản trị viên' : 'Người dùng';
-                          const cls = normalizedRole === 'admin' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800';
+                          
+                          // 🔍 DEBUG: Log role value for each user
+                          if (role !== 'user' && role !== 'admin') {
+                            console.log('🔍 User role debug:', {
+                              email: u.email,
+                              rawRole: u.role,
+                              rawRoleUpper: u.Role,
+                              normalizedRole: role,
+                              isSubAdmin: role === 'sub_admin',
+                              isStaff: role === 'staff',
+                              isSubadmin: role === 'subadmin'
+                            });
+                          }
+                          
+                          // Map roles: admin, sub_admin (staff), user
+                          let normalizedRole = 'user';
+                          let label = 'Người dùng';
+                          let cls = 'bg-gray-100 text-gray-800';
+                          
+                          if (role === 'admin') {
+                            normalizedRole = 'admin';
+                            label = 'Quản trị viên';
+                            cls = 'bg-red-100 text-red-800';
+                          } else if (role === 'sub_admin' || role === 'staff' || role === 'subadmin') {
+                            normalizedRole = 'staff';
+                            label = 'Nhân viên';
+                            cls = 'bg-blue-100 text-blue-800';
+                          }
+                          
                           return <span className={`px-2 py-1 text-xs font-medium rounded-full ${cls}`}>{label}</span>;
                         })()}
                       </td>
@@ -3452,10 +3514,35 @@ export const AdminDashboard = () => {
                           <td className="px-4 py-3 text-sm">
                             {(() => {
                               const role = (u.role || u.Role || 'user').toString().toLowerCase();
-                              // Map sub_admin to user, only show 2 roles: admin and user
-                              const normalizedRole = role === 'admin' ? 'admin' : 'user';
-                              const label = normalizedRole === 'admin' ? 'Quản trị viên' : 'Người dùng';
-                              const cls = normalizedRole === 'admin' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800';
+                              
+                              // 🔍 DEBUG: Log role value for each restricted user
+                              if (role !== 'user' && role !== 'admin') {
+                                console.log('🔍 Restricted user role debug:', {
+                                  email: u.email,
+                                  rawRole: u.role,
+                                  rawRoleUpper: u.Role,
+                                  normalizedRole: role,
+                                  isSubAdmin: role === 'sub_admin',
+                                  isStaff: role === 'staff',
+                                  isSubadmin: role === 'subadmin'
+                                });
+                              }
+                              
+                              // Map roles: admin, sub_admin (staff), user
+                              let normalizedRole = 'user';
+                              let label = 'Người dùng';
+                              let cls = 'bg-gray-100 text-gray-800';
+                              
+                              if (role === 'admin') {
+                                normalizedRole = 'admin';
+                                label = 'Quản trị viên';
+                                cls = 'bg-red-100 text-red-800';
+                              } else if (role === 'sub_admin' || role === 'staff' || role === 'subadmin') {
+                                normalizedRole = 'staff';
+                                label = 'Nhân viên';
+                                cls = 'bg-blue-100 text-blue-800';
+                              }
+                              
                               return <span className={`px-2 py-1 text-xs font-medium rounded-full ${cls}`}>{label}</span>;
                             })()}
                           </td>
