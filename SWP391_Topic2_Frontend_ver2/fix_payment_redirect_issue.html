@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fix Payment Redirect Issue</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="text"], input[type="number"], select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        .step {
+            background: #e7f3ff;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .step h4 {
+            margin-top: 0;
+            color: #007bff;
+        }
+        .warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Fix Payment Redirect Issue</h1>
+        
+        <div class="step">
+            <h4>🚨 Vấn đề phát hiện:</h4>
+            <p>VNPay callback trả về JSON thay vì redirect về PaymentSuccess UI</p>
+        </div>
+
+        <div class="step">
+            <h4>✅ Giải pháp:</h4>
+            <ol>
+                <li><strong>Tạo payment test</strong>: Tạo payment với ID = "10" trong database</li>
+                <li><strong>Test callback</strong>: Test vnpay-return endpoint</li>
+                <li><strong>Verify redirect</strong>: Kiểm tra redirect về PaymentSuccess</li>
+            </ol>
+        </div>
+
+        <div class="form-group">
+            <label for="email">Email:</label>
+            <input type="text" id="email" value="admin@gmail.com" placeholder="Email">
+        </div>
+
+        <div class="form-group">
+            <label for="password">Password:</label>
+            <input type="password" id="password" value="123456" placeholder="Password">
+        </div>
+
+        <div class="form-group">
+            <label for="paymentId">Payment ID:</label>
+            <input type="text" id="paymentId" value="10" placeholder="Payment ID">
+        </div>
+
+        <div class="form-group">
+            <label for="amount">Amount (VND):</label>
+            <input type="number" id="amount" value="10000000" placeholder="Amount">
+        </div>
+
+        <div class="form-group">
+            <label for="orderId">Order ID:</label>
+            <input type="number" id="orderId" value="10" placeholder="Order ID">
+        </div>
+
+        <button onclick="login()">🔐 Login</button>
+        <button onclick="createTestPayment()">📦 Create Test Payment</button>
+        <button onclick="testCallback()">📞 Test Callback</button>
+        <button onclick="testFrontend()">🎨 Test Frontend</button>
+        <button onclick="clearResult()">🗑️ Clear</button>
+
+        <div id="result"></div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:5044';
+        let authToken = null;
+        
+        function showResult(message, type = 'info') {
+            const resultDiv = document.getElementById('result');
+            resultDiv.textContent = message;
+            resultDiv.className = `result ${type}`;
+        }
+
+        function clearResult() {
+            document.getElementById('result').textContent = '';
+            document.getElementById('result').className = 'result';
+        }
+
+        async function login() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            showResult('Logging in...', 'info');
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/User/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ email, password })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    authToken = data.token;
+                    showResult(`✅ Login successful!\n\nToken: ${authToken}`, 'success');
+                } else {
+                    const errorData = await response.text();
+                    showResult(`❌ Login failed: ${response.status}\n\n${errorData}`, 'error');
+                }
+            } catch (error) {
+                showResult(`❌ Login error: ${error.message}`, 'error');
+            }
+        }
+
+        async function createTestPayment() {
+            if (!authToken) {
+                showResult('Please login first', 'error');
+                return;
+            }
+
+            const paymentId = document.getElementById('paymentId').value;
+            const amount = parseFloat(document.getElementById('amount').value);
+            const orderId = parseInt(document.getElementById('orderId').value);
+
+            showResult('Creating test payment...', 'info');
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/Payment/create-test-payment`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify({
+                        paymentId: paymentId,
+                        orderId: orderId,
+                        productId: 1,
+                        sellerId: 1,
+                        amount: amount,
+                        paymentType: 'Deposit'
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    showResult(`✅ Test payment created successfully!\n\n` +
+                        `Payment ID: ${data.paymentId}\n` +
+                        `Order ID: ${data.orderId}\n` +
+                        `Amount: ${data.amount}\n` +
+                        `Payout Amount: ${data.payoutAmount}\n` +
+                        `Status: ${data.paymentStatus}\n\n` +
+                        `Now you can test the callback!`, 'success');
+                } else {
+                    const errorData = await response.text();
+                    showResult(`❌ Create test payment failed: ${response.status}\n\n${errorData}`, 'error');
+                }
+            } catch (error) {
+                showResult(`❌ Create test payment error: ${error.message}`, 'error');
+            }
+        }
+
+        async function testCallback() {
+            const paymentId = document.getElementById('paymentId').value;
+            const amount = document.getElementById('amount').value;
+
+            showResult('Testing callback endpoint...', 'info');
+
+            // Test với parameters thật từ VNPay
+            const callbackUrl = `http://localhost:5044/api/Payment/vnpay-return?vnp_Amount=${amount}&vnp_BankCode=NCB&vnp_BankTranNo=VNP15208564&vnp_CardType=ATM&vnp_OrderInfo=${encodeURIComponent(paymentId + ' Thanh toán deposit - ID: ' + paymentId)}&vnp_PayDate=20251018011546&vnp_ResponseCode=00&vnp_TmnCode=2WU7UITR&vnp_TransactionNo=15208564&vnp_TransactionStatus=00&vnp_TxnRef=${paymentId}&vnp_SecureHash=c19676bc57a987d27c203eb682ce26f5d2cc05bb18941ff2588ea7f525f1b33a6e48548000e41d6055404e506bc2ef0e03e9d956eb307a6938f18e34985dfc77`;
+            
+            showResult(`📞 Callback Test!\n\n` +
+                `Callback URL:\n${callbackUrl}\n\n` +
+                `Expected Behavior:\n` +
+                `1. Backend finds payment with ID: ${paymentId}\n` +
+                `2. Updates payment status to Success\n` +
+                `3. Redirects to PaymentSuccess page\n` +
+                `4. Frontend shows beautiful UI\n` +
+                `5. Auto-redirects to HomePage\n\n` +
+                `Click the link below to test:\n${callbackUrl}`, 'success');
+        }
+
+        async function testFrontend() {
+            const paymentId = document.getElementById('paymentId').value;
+            const amount = document.getElementById('amount').value;
+
+            showResult('Testing frontend directly...', 'info');
+
+            // Test frontend PaymentSuccess page directly
+            const frontendUrl = `http://localhost:5173/payment/success?vnp_ResponseCode=00&vnp_TxnRef=${paymentId}&vnp_Amount=${amount}&vnp_TransactionNo=15208564&vnp_ResponseMessage=Success`;
+            
+            showResult(`🎨 Frontend Test!\n\n` +
+                `Frontend URL:\n${frontendUrl}\n\n` +
+                `Expected Behavior:\n` +
+                `1. PaymentSuccess component loads\n` +
+                `2. Shows success UI với green theme\n` +
+                `3. Displays payment details\n` +
+                `4. Shows countdown (5 seconds)\n` +
+                `5. Auto-redirects to HomePage\n` +
+                `6. Toast notification appears\n\n` +
+                `Click the link below to test:\n${frontendUrl}`, 'success');
+        }
+    </script>
+</body>
+</html>

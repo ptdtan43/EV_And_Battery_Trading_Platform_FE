@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test VNPay Callback</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="text"], input[type="number"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        .warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+        .step {
+            background: #e7f3ff;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .step h4 {
+            margin-top: 0;
+            color: #007bff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Test VNPay Callback & Database Fix</h1>
+        
+        <div class="step">
+            <h4>🚨 Vấn đề phát hiện:</h4>
+            <ul>
+                <li><strong>ProductId</strong>: NULL trong database</li>
+                <li><strong>FinalPaymentDueDate</strong>: NULL trong database</li>
+                <li><strong>PayoutAmount</strong>: NULL trong database</li>
+                <li><strong>CompletedDate</strong>: NULL trong database</li>
+            </ul>
+        </div>
+
+        <div class="step">
+            <h4>🔍 Nguyên nhân có thể:</h4>
+            <ol>
+                <li>Database chưa có các cột mới</li>
+                <li>VNPay callback không được gọi</li>
+                <li>Backend code chưa được deploy</li>
+                <li>Callback xử lý không đúng</li>
+            </ol>
+        </div>
+
+        <div class="form-group">
+            <label for="paymentId">Payment ID (từ database):</label>
+            <input type="text" id="paymentId" placeholder="Nhập PaymentId từ database">
+        </div>
+
+        <div class="form-group">
+            <label for="orderId">Order ID (từ database):</label>
+            <input type="number" id="orderId" placeholder="Nhập OrderId từ database">
+        </div>
+
+        <button onclick="testDatabaseColumns()">🔍 Check Database Columns</button>
+        <button onclick="testPaymentCallback()">📞 Test Payment Callback</button>
+        <button onclick="testUpdatePayment()">🔄 Update Payment Manually</button>
+        <button onclick="testUpdateOrder()">🔄 Update Order Manually</button>
+        <button onclick="clearResult()">🗑️ Clear</button>
+
+        <div id="result"></div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:5044';
+        
+        function showResult(message, type = 'info') {
+            const resultDiv = document.getElementById('result');
+            resultDiv.textContent = message;
+            resultDiv.className = `result ${type}`;
+        }
+
+        function clearResult() {
+            document.getElementById('result').textContent = '';
+            document.getElementById('result').className = 'result';
+        }
+
+        async function testDatabaseColumns() {
+            showResult('Checking database columns...', 'info');
+
+            try {
+                // Test if we can access the database through API
+                const response = await fetch(`${API_BASE_URL}/api/User/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        email: 'admin@gmail.com', 
+                        password: '123456' 
+                    })
+                });
+
+                if (response.ok) {
+                    const loginData = await response.json();
+                    const token = loginData.token;
+
+                    // Try to get orders to check if new columns exist
+                    const ordersResponse = await fetch(`${API_BASE_URL}/api/Order`, {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+
+                    if (ordersResponse.ok) {
+                        const orders = await ordersResponse.json();
+                        showResult(`✅ Database connection successful!\n\n` +
+                            `Found ${orders.length} orders.\n\n` +
+                            `Sample order data:\n${JSON.stringify(orders[0] || {}, null, 2)}\n\n` +
+                            `Check if the order contains:\n` +
+                            `- sellerId: ${orders[0]?.sellerId ? '✅ Present' : '❌ Missing'}\n` +
+                            `- finalPaymentDueDate: ${orders[0]?.finalPaymentDueDate ? '✅ Present' : '❌ Missing'}\n` +
+                            `- completedDate: ${orders[0]?.completedDate ? '✅ Present' : '❌ Missing'}`, 
+                            orders[0]?.sellerId ? 'success' : 'warning');
+                    } else {
+                        showResult(`❌ Cannot access orders: ${ordersResponse.status}`, 'error');
+                    }
+                } else {
+                    showResult(`❌ Cannot login: ${response.status}`, 'error');
+                }
+            } catch (error) {
+                showResult(`❌ Database check failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testPaymentCallback() {
+            const paymentId = document.getElementById('paymentId').value;
+            
+            if (!paymentId) {
+                showResult('Please enter Payment ID', 'error');
+                return;
+            }
+
+            showResult('Testing VNPay callback simulation...', 'info');
+
+            try {
+                // Simulate VNPay callback
+                const callbackUrl = `${API_BASE_URL}/api/Payment/callback?vnp_TxnRef=${paymentId}&vnp_TransactionNo=123456789&vnp_ResponseCode=00&vnp_ResponseMessage=Success&vnp_SecureHash=test`;
+                
+                const response = await fetch(callbackUrl, {
+                    method: 'GET'
+                });
+
+                const data = await response.text();
+                let parsedData;
+                
+                try {
+                    parsedData = JSON.parse(data);
+                } catch {
+                    parsedData = data;
+                }
+
+                if (response.ok) {
+                    showResult(`✅ Callback processed successfully!\n\n` +
+                        `Response:\n${JSON.stringify(parsedData, null, 2)}`, 'success');
+                } else {
+                    showResult(`❌ Callback failed!\n\nStatus: ${response.status}\nResponse:\n${JSON.stringify(parsedData, null, 2)}`, 'error');
+                }
+            } catch (error) {
+                showResult(`❌ Callback test failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testUpdatePayment() {
+            const paymentId = document.getElementById('paymentId').value;
+            
+            if (!paymentId) {
+                showResult('Please enter Payment ID', 'error');
+                return;
+            }
+
+            showResult('Testing manual payment update...', 'info');
+
+            try {
+                // Login first
+                const loginResponse = await fetch(`${API_BASE_URL}/api/User/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        email: 'admin@gmail.com', 
+                        password: '123456' 
+                    })
+                });
+
+                if (!loginResponse.ok) {
+                    showResult('Login failed', 'error');
+                    return;
+                }
+
+                const loginData = await loginResponse.json();
+                const token = loginData.token;
+
+                // Get current payment
+                const getResponse = await fetch(`${API_BASE_URL}/api/Payment/${paymentId}`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (getResponse.ok) {
+                    const payment = await getResponse.json();
+                    
+                    showResult(`✅ Payment retrieved!\n\n` +
+                        `Current data:\n${JSON.stringify(payment, null, 2)}\n\n` +
+                        `Issues found:\n` +
+                        `- sellerId: ${payment.sellerId ? '✅ OK' : '❌ NULL'}\n` +
+                        `- payoutAmount: ${payment.payoutAmount ? '✅ OK' : '❌ NULL'}\n` +
+                        `- completedDate: ${payment.completedDate ? '✅ OK' : '❌ NULL'}\n` +
+                        `- finalPaymentDueDate: ${payment.finalPaymentDueDate ? '✅ OK' : '❌ NULL'}`, 
+                        payment.sellerId ? 'success' : 'warning');
+                } else {
+                    showResult(`❌ Cannot get payment: ${getResponse.status}`, 'error');
+                }
+            } catch (error) {
+                showResult(`❌ Update test failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testUpdateOrder() {
+            const orderId = document.getElementById('orderId').value;
+            
+            if (!orderId) {
+                showResult('Please enter Order ID', 'error');
+                return;
+            }
+
+            showResult('Testing manual order update...', 'info');
+
+            try {
+                // Login first
+                const loginResponse = await fetch(`${API_BASE_URL}/api/User/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        email: 'admin@gmail.com', 
+                        password: '123456' 
+                    })
+                });
+
+                if (!loginResponse.ok) {
+                    showResult('Login failed', 'error');
+                    return;
+                }
+
+                const loginData = await loginResponse.json();
+                const token = loginData.token;
+
+                // Get current order
+                const getResponse = await fetch(`${API_BASE_URL}/api/Order/${orderId}`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (getResponse.ok) {
+                    const order = await getResponse.json();
+                    
+                    showResult(`✅ Order retrieved!\n\n` +
+                        `Current data:\n${JSON.stringify(order, null, 2)}\n\n` +
+                        `Issues found:\n` +
+                        `- sellerId: ${order.sellerId ? '✅ OK' : '❌ NULL'}\n` +
+                        `- productId: ${order.productId ? '✅ OK' : '❌ NULL'}\n` +
+                        `- finalPaymentDueDate: ${order.finalPaymentDueDate ? '✅ OK' : '❌ NULL'}\n` +
+                        `- completedDate: ${order.completedDate ? '✅ OK' : '❌ NULL'}`, 
+                        order.sellerId ? 'success' : 'warning');
+                } else {
+                    showResult(`❌ Cannot get order: ${getResponse.status}`, 'error');
+                }
+            } catch (error) {
+                showResult(`❌ Update test failed: ${error.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>
