@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -32,19 +32,7 @@ import { Products } from "./pages/Products";
 import { Categories } from "./pages/Categories";
 import { Brands } from "./pages/Brands";
 import { Deals } from "./pages/Deals";
-// Simple Reviews component for testing
-const Reviews = () => {
-  return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">Reviews Page</h1>
-          <p className="text-gray-600">This is a simple reviews page for testing.</p>
-        </div>
-      </div>
-    </div>
-  );
-};
+import { Reviews } from "./pages/Reviews";
 import MyPurchases from "./pages/MyPurchases";
 import { Help } from "./pages/Help";
 import { FAQ } from "./pages/FAQ";
@@ -59,51 +47,18 @@ import UserDebug from "./components/UserDebug";
 import { ToastProvider } from "./contexts/ToastContext";
 import { ChatHistory } from "./pages/ChatHistory";
 
-const PublicRoute = ({ children }) => {
-  const { user, loading } = useAuth();
+const PAYMENT_STORAGE_KEY = "evtb_payment_success";
+const DEFAULT_PAYMENT_AMOUNT = "5000000";
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
+const LoadingScreen = () => (
+  <div className="min-h-screen flex items-center justify-center">
+    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" />
+  </div>
+);
 
-  // If user is already logged in, redirect to appropriate dashboard
-  if (user) {
-    const roleId = user?.roleId || user?.role;
-    const roleName = (user?.roleName || user?.role || "")
-      .toString()
-      .toLowerCase();
-    const isAdmin = roleId === 1 || roleId === "1" || roleName === "admin";
-    const isStaff = roleId === 3 || roleId === "3" || roleName === "staff";
-
-    if (isAdmin) return <Navigate to="/admin" replace />;
-    if (isStaff) return <Navigate to="/staff" replace />;
-    return <Navigate to="/dashboard" replace />;
-  }
-
-  return children;
-};
-
-const ProtectedRoute = ({ children, adminOnly = false, staffOnly = false, userOnly = false }) => {
-  const { user, profile, loading } = useAuth();
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <Navigate to="/login" />;
-  }
-
-  // Check admin and staff status using roleId or role
-  const roleId = user?.roleId || profile?.roleId || user?.role || profile?.role;
+const getRoleInfo = (user, profile) => {
+  const roleIdRaw =
+    user?.roleId ?? profile?.roleId ?? user?.role ?? profile?.role;
   const roleName = (
     user?.roleName ||
     profile?.roleName ||
@@ -113,33 +68,145 @@ const ProtectedRoute = ({ children, adminOnly = false, staffOnly = false, userOn
   )
     .toString()
     .toLowerCase();
-  const isAdmin = roleId === 1 || roleId === "1" || roleName === "admin";
-  const isStaff = roleId === 3 || roleId === "3" || roleName === "staff";
+  const roleId =
+    typeof roleIdRaw === "string" ? Number(roleIdRaw) || roleIdRaw : roleIdRaw;
 
-  console.log("=== ROLE CHECK DEBUG ===");
-  console.log("User object:", user);
-  console.log("Profile object:", profile);
-  console.log("RoleId:", roleId);
-  console.log("RoleName:", roleName);
-  console.log("IsAdmin:", isAdmin);
-  console.log("IsStaff:", isStaff);
-  console.log("========================");
+  return {
+    isAdmin: roleId === 1 || roleName === "admin",
+    isStaff: roleId === 3 || roleName === "staff",
+  };
+};
+
+const readStoredPaymentAmount = () => {
+  try {
+    const raw = localStorage.getItem(PAYMENT_STORAGE_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw);
+    return parsed?.amount;
+  } catch {
+    return undefined;
+  }
+};
+
+const redirectToPaymentSuccess = ({
+  paymentId,
+  amount,
+  transactionNo = "",
+  paymentType = "Deposit",
+}) => {
+  if (!paymentId) return;
+
+  const query = new URLSearchParams({
+    payment_success: "true",
+    payment_id: paymentId,
+    amount: amount || DEFAULT_PAYMENT_AMOUNT,
+    transaction_no: transactionNo || "",
+    payment_type: paymentType || "Deposit",
+  });
+
+  window.location.replace(`${window.location.origin}/?${query.toString()}`);
+};
+
+const shouldIgnoreMessage = (data) =>
+  !data ||
+  typeof data !== "object" ||
+  data.posdMessageId ||
+  data.type === "VIDEO_XHR_CANDIDATE" ||
+  data.from === "detector";
+
+const handlePaymentMessage = (data) => {
+  if (data.status === "success" && data.paymentId) {
+    const amount = data.amount ?? readStoredPaymentAmount();
+    redirectToPaymentSuccess({
+      paymentId: data.paymentId,
+      amount,
+      transactionNo: data.transactionNo,
+      paymentType: data.type,
+    });
+    return true;
+  }
+
+  if (data.type === "EVTB_PAYMENT_SUCCESS" && data.payload) {
+    const { paymentId, amount, transactionNo } = data.payload;
+    redirectToPaymentSuccess({ paymentId, amount, transactionNo });
+    return true;
+  }
+
+  return false;
+};
+
+const usePaymentRedirectListener = () => {
+  useEffect(() => {
+    const handleMessage = (event) => {
+      const { data } = event;
+      if (shouldIgnoreMessage(data)) {
+        return;
+      }
+
+      if (handlePaymentMessage(data)) {
+        return;
+      }
+
+      if (data.type === "EVTB_REDIRECT" && data.url) {
+        window.location.replace(data.url);
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
+};
+
+const useScrollToTop = (pathname) => {
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  }, [pathname]);
+};
+
+const PublicRoute = ({ children }) => {
+  const { user, loading, profile } = useAuth();
+
+  if (loading) {
+    return <LoadingScreen />;
+  }
+
+  if (user) {
+    const { isAdmin, isStaff } = getRoleInfo(user, profile);
+    if (isAdmin) return <Navigate to="/admin" replace />;
+    if (isStaff) return <Navigate to="/staff" replace />;
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return children;
+};
+
+const ProtectedRoute = ({
+  children,
+  adminOnly = false,
+  staffOnly = false,
+  userOnly = false,
+}) => {
+  const { user, profile, loading } = useAuth();
+  const { isAdmin, isStaff } = getRoleInfo(user, profile);
+
+  if (loading) {
+    return <LoadingScreen />;
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
 
   if (adminOnly && !isAdmin) {
-    // Redirect staff to staff dashboard, others to user dashboard
-    if (isStaff) return <Navigate to="/staff" />;
-    return <Navigate to="/dashboard" />;
+    return <Navigate to={isStaff ? "/staff" : "/dashboard"} replace />;
   }
 
   if (staffOnly && !isStaff) {
-    // Redirect admin to admin dashboard, others to user dashboard
-    if (isAdmin) return <Navigate to="/admin" />;
-    return <Navigate to="/dashboard" />;
+    return <Navigate to={isAdmin ? "/admin" : "/dashboard"} replace />;
   }
 
   if (userOnly && (isAdmin || isStaff)) {
-    if (isAdmin) return <Navigate to="/admin" />;
-    if (isStaff) return <Navigate to="/staff" />;
+    return <Navigate to={isAdmin ? "/admin" : "/staff"} replace />;
   }
 
   return children;
@@ -148,91 +215,14 @@ const ProtectedRoute = ({ children, adminOnly = false, staffOnly = false, userOn
 const AppContent = () => {
   const { loading } = useAuth();
   const location = useLocation();
-  const isAdminRoute = location.pathname.startsWith('/admin');
-  const isStaffRoute = location.pathname.startsWith('/staff');
+  const isAdminRoute = location.pathname.startsWith("/admin");
+  const isStaffRoute = location.pathname.startsWith("/staff");
 
-  // Scroll to top when route changes
-  useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-  }, [location.pathname]);
+  useScrollToTop(location.pathname);
+  usePaymentRedirectListener();
 
-  // ✅ Global message listener for payment redirect - works from ANY page
-  useEffect(() => {
-    const handleGlobalMessage = (event) => {
-      try {
-        const data = event.data || {};
-        console.log('[App] Received global message:', data);
-        
-        // Filter out messages from browser extensions
-        if (data.posdMessageId || data.type === 'VIDEO_XHR_CANDIDATE' || data.from === 'detector') {
-          return;
-        }
-        
-        // Handle payment success message
-        // ✅ Check for different message formats from backend
-        if (data.status === 'success' && data.paymentId) {
-          console.log('[App] Payment success received, redirecting to homepage');
-          const { paymentId, amount, type } = data;
-          const frontendUrl = window.location.origin;
-          
-          // ✅ Get amount from localStorage if not in message
-          let amountValue = amount;
-          if (!amountValue) {
-            try {
-              const storageData = localStorage.getItem('evtb_payment_success');
-              if (storageData) {
-                const parsed = JSON.parse(storageData);
-                amountValue = parsed.amount;
-              }
-            } catch (e) {
-              console.error('Could not read from localStorage:', e);
-            }
-          }
-          
-          // Use default amount if still not provided
-          // ✅ Make sure amount is in VNPay format (cents, string)
-          amountValue = amountValue || '5000000'; // Default 50,000 VND in cents
-          
-          console.log('[App] Using amount:', amountValue);
-          const redirectUrl = `${frontendUrl}/?payment_success=true&payment_id=${paymentId}&amount=${amountValue}&transaction_no=&payment_type=${type || 'Deposit'}`;
-          
-          console.log('[App] Redirecting to:', redirectUrl);
-          // Redirect immediately
-          window.location.replace(redirectUrl);
-        }
-        
-        // ✅ Also check for EVTB_PAYMENT_SUCCESS format (for backward compatibility)
-        if (data.type === 'EVTB_PAYMENT_SUCCESS' && data.payload) {
-          console.log('[App] Payment success received (alternative format), redirecting to homepage');
-          const { paymentId, amount, transactionNo } = data.payload;
-          const frontendUrl = window.location.origin;
-          const redirectUrl = `${frontendUrl}/?payment_success=true&payment_id=${paymentId}&amount=${amount}&transaction_no=${transactionNo}`;
-          
-          // Redirect immediately
-          window.location.replace(redirectUrl);
-        }
-        
-        // Handle redirect message
-        if (data.type === 'EVTB_REDIRECT' && data.url) {
-          console.log('[App] Global redirect message received, redirecting to:', data.url);
-          window.location.replace(data.url);
-        }
-      } catch (error) {
-        console.error('[App] Error in global message handler:', error);
-      }
-    };
-    
-    window.addEventListener('message', handleGlobalMessage);
-    return () => window.removeEventListener('message', handleGlobalMessage);
-  }, []);
-
-  // show loading spinner while checking auth
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   return (
@@ -265,7 +255,7 @@ const AppContent = () => {
           <Route
             path="/dashboard"
             element={
-              <ProtectedRoute userOnly={true}>
+              <ProtectedRoute userOnly>
                 <Dashboard />
               </ProtectedRoute>
             }
@@ -283,7 +273,7 @@ const AppContent = () => {
           <Route
             path="/create-listing"
             element={
-              <ProtectedRoute userOnly={true}>
+              <ProtectedRoute userOnly>
                 <CreateListing />
               </ProtectedRoute>
             }
@@ -292,7 +282,7 @@ const AppContent = () => {
           <Route
             path="/my-listings"
             element={
-              <ProtectedRoute userOnly={true}>
+              <ProtectedRoute userOnly>
                 <MyListings />
               </ProtectedRoute>
             }
@@ -300,7 +290,7 @@ const AppContent = () => {
           <Route
             path="/trash"
             element={
-              <ProtectedRoute userOnly={true}>
+              <ProtectedRoute userOnly>
                 <Trash />
               </ProtectedRoute>
             }
@@ -309,7 +299,7 @@ const AppContent = () => {
           <Route
             path="/listing/:id/edit"
             element={
-              <ProtectedRoute userOnly={true}>
+              <ProtectedRoute userOnly>
                 <EditListing />
               </ProtectedRoute>
             }
@@ -373,7 +363,7 @@ const AppContent = () => {
           <Route path="/brands" element={<Brands />} />
           <Route path="/deals" element={<Deals />} />
           <Route path="/reviews" element={<Reviews />} />
-          
+
           {/* Chat Routes */}
           <Route
             path="/chats"
@@ -383,7 +373,7 @@ const AppContent = () => {
               </ProtectedRoute>
             }
           />
-          
+
           <Route path="/help" element={<Help />} />
           <Route path="/faq" element={<FAQ />} />
           <Route path="/contact" element={<Contact />} />
