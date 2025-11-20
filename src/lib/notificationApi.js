@@ -141,7 +141,7 @@ export const markAsRead = async (notificationId) => {
     console.error("❌ Error marking notification as read:", error);
 
     // If 403 Forbidden, try PATCH method
-    if (error.message.includes("từ chối truy cập") || error.message.includes("Forbidden")) {
+    if (error.message.includes("từ chối truy cập") || error.message.includes("Forbidden") || error.message.includes("403")) {
       console.log("🔄 Trying PATCH method for notification:", notificationId);
       try {
         const response = await apiRequest(`/api/Notification/${notificationId}`, {
@@ -153,10 +153,20 @@ export const markAsRead = async (notificationId) => {
         return response;
       } catch (patchError) {
         console.error("❌ PATCH method also failed:", patchError);
-
-        // If both PUT and PATCH fail, simulate success for UI update
-        console.log("🔄 Simulating mark as read for UI update:", notificationId);
-        return { id: notificationId, isRead: true, simulated: true };
+        
+        // Try one more time with different endpoint format
+        console.log("🔄 Trying alternative endpoint format...");
+        try {
+          const altResponse = await apiRequest(`/api/Notification/${notificationId}/read`, {
+            method: 'POST'
+          });
+          console.log("✅ Notification marked as read with alternative endpoint:", altResponse);
+          return altResponse;
+        } catch (altError) {
+          console.error("❌ All methods failed for notification:", notificationId);
+          // Don't simulate - throw error so UI knows it failed
+          throw new Error("Không thể đánh dấu thông báo đã đọc. Vui lòng kiểm tra quyền truy cập.");
+        }
       }
     }
 
@@ -173,6 +183,19 @@ export const markAllAsRead = async (userId) => {
   console.log("🔔 Marking all notifications as read for user:", userId);
 
   try {
+    // Try to use bulk endpoint first if backend supports it
+    try {
+      console.log("🔔 Trying bulk mark-all-read endpoint...");
+      const bulkResponse = await apiRequest(`/api/Notification/user/${userId}/mark-all-read`, {
+        method: 'PUT'
+      });
+      console.log("✅ Bulk mark all as read successful:", bulkResponse);
+      return bulkResponse.count || bulkResponse.updatedCount || 0;
+    } catch (bulkError) {
+      console.log("⚠️ Bulk endpoint not available, falling back to individual updates");
+    }
+
+    // Fallback: Mark each notification individually
     const notifications = await apiRequest(`/api/Notification/user/${userId}`);
     console.log("🔔 Raw notifications:", notifications);
 
@@ -203,21 +226,24 @@ export const markAllAsRead = async (userId) => {
     });
 
     const results = await Promise.all(promises);
-    const successCount = results.filter(r => r !== null).length;
+    
+    // Filter out simulated results (those that didn't actually save to backend)
+    const actualSuccesses = results.filter(r => r !== null && !r.simulated);
+    const successCount = actualSuccesses.length;
 
     console.log("✅ Successfully marked", successCount, "out of", validNotifications.length, "notifications as read");
 
-    // If no notifications were marked as read due to API issues, simulate success for UI
+    // Don't simulate success - return actual count
     if (successCount === 0 && validNotifications.length > 0) {
-      console.log("🔄 Simulating mark all as read for UI update");
-      return validNotifications.length;
+      console.error("❌ Failed to mark any notifications as read on backend");
+      throw new Error("Không thể đánh dấu thông báo đã đọc. Vui lòng thử lại sau.");
     }
 
     // Return success count for UI update
     return successCount;
   } catch (error) {
     console.error("❌ Error marking all notifications as read:", error);
-    return 0;
+    throw error; // Throw error instead of returning 0 so UI can show error message
   }
 };
 

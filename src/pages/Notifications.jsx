@@ -6,7 +6,6 @@ import {
   Trash2,
   Eye,
   EyeOff,
-  Filter,
   Search,
   RefreshCw,
   Clock,
@@ -81,7 +80,10 @@ export const Notifications = () => {
     try {
       await markAsRead(notificationId);
       setNotifications((prev) =>
-        prev.map((n) => (n.id === notificationId ? { ...n, isRead: true } : n))
+        prev.map((n) => {
+          const nId = n.notificationId || n.id;
+          return nId === notificationId ? { ...n, isRead: true } : n;
+        })
       );
 
       // Dispatch event to update notification bell
@@ -94,31 +96,54 @@ export const Notifications = () => {
       });
     } catch (error) {
       console.error("Error marking as read:", error);
+      showToast({
+        title: "Lỗi",
+        description: error.message || "Không thể đánh dấu thông báo đã đọc",
+        type: "error",
+      });
     }
   };
 
   const handleMarkAllAsRead = async () => {
     try {
-      await markAllAsRead(user.id || user.userId || user.accountId);
-      setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+      const successCount = await markAllAsRead(user.id || user.userId || user.accountId);
+      
+      // Only update UI if backend actually saved the changes
+      if (successCount > 0) {
+        setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
 
-      // Dispatch event to update notification bell
-      window.dispatchEvent(new CustomEvent("allNotificationsRead"));
+        // Dispatch event to update notification bell
+        window.dispatchEvent(new CustomEvent("allNotificationsRead"));
 
-      showToast({
-        title: "Đã đánh dấu tất cả đã đọc",
-        description: "Tất cả thông báo đã được đánh dấu là đã đọc",
-        type: "success",
-      });
+        showToast({
+          title: "Đã đánh dấu tất cả đã đọc",
+          description: `${successCount} thông báo đã được đánh dấu là đã đọc`,
+          type: "success",
+        });
+      } else {
+        showToast({
+          title: "Không có thông báo nào được cập nhật",
+          description: "Có thể tất cả thông báo đã được đọc rồi",
+          type: "info",
+        });
+      }
     } catch (error) {
       console.error("Error marking all as read:", error);
+      showToast({
+        title: "Lỗi",
+        description: error.message || "Không thể đánh dấu tất cả thông báo đã đọc",
+        type: "error",
+      });
     }
   };
 
   const handleDelete = async (notificationId) => {
     try {
       await deleteNotification(notificationId);
-      setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+      setNotifications((prev) => prev.filter((n) => {
+        const nId = n.notificationId || n.id;
+        return nId !== notificationId;
+      }));
 
       // Dispatch event to update notification bell
       window.dispatchEvent(new CustomEvent("notificationDeleted"));
@@ -431,7 +456,7 @@ export const Notifications = () => {
                       <div className="flex items-center space-x-2 ml-4">
                         {!notification.isRead && (
                           <button
-                            onClick={() => handleMarkAsRead(notification.id)}
+                            onClick={() => handleMarkAsRead(notification.notificationId || notification.id)}
                             className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all duration-200 hover:scale-110"
                             title="Đánh dấu đã đọc"
                           >
@@ -439,7 +464,7 @@ export const Notifications = () => {
                           </button>
                         )}
                         <button
-                          onClick={() => handleDelete(notification.id)}
+                          onClick={() => handleDelete(notification.notificationId || notification.id)}
                           className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all duration-200 hover:scale-110"
                           title="Xóa thông báo"
                         >

@@ -103,19 +103,19 @@ export const Footer = () => {
 
               {/* Social Media */}
               <div className="flex space-x-4">
-                <a href="#" className="bg-gray-800 hover:bg-blue-600 p-3 rounded-full transition-all duration-300 hover:scale-110">
+                <a href="https://facebook.com/evmarket" target="_blank" rel="noopener noreferrer" className="bg-gray-800 hover:bg-blue-600 p-3 rounded-full transition-all duration-300 hover:scale-110" aria-label="Facebook">
                   <Facebook className="h-5 w-5" />
                 </a>
-                <a href="#" className="bg-gray-800 hover:bg-blue-400 p-3 rounded-full transition-all duration-300 hover:scale-110">
+                <a href="https://twitter.com/evmarket" target="_blank" rel="noopener noreferrer" className="bg-gray-800 hover:bg-blue-400 p-3 rounded-full transition-all duration-300 hover:scale-110" aria-label="Twitter">
                   <Twitter className="h-5 w-5" />
                 </a>
-                <a href="#" className="bg-gray-800 hover:bg-pink-600 p-3 rounded-full transition-all duration-300 hover:scale-110">
+                <a href="https://instagram.com/evmarket" target="_blank" rel="noopener noreferrer" className="bg-gray-800 hover:bg-pink-600 p-3 rounded-full transition-all duration-300 hover:scale-110" aria-label="Instagram">
                   <Instagram className="h-5 w-5" />
                 </a>
-                <a href="#" className="bg-gray-800 hover:bg-red-600 p-3 rounded-full transition-all duration-300 hover:scale-110">
+                <a href="https://youtube.com/@evmarket" target="_blank" rel="noopener noreferrer" className="bg-gray-800 hover:bg-red-600 p-3 rounded-full transition-all duration-300 hover:scale-110" aria-label="Youtube">
                   <Youtube className="h-5 w-5" />
                 </a>
-                <a href="#" className="bg-gray-800 hover:bg-blue-700 p-3 rounded-full transition-all duration-300 hover:scale-110">
+                <a href="https://linkedin.com/company/evmarket" target="_blank" rel="noopener noreferrer" className="bg-gray-800 hover:bg-blue-700 p-3 rounded-full transition-all duration-300 hover:scale-110" aria-label="Linkedin">
                   <Linkedin className="h-5 w-5" />
                 </a>
               </div>

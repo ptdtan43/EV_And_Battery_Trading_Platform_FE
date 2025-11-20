@@ -532,7 +532,7 @@ export const StaffDashboard = () => {
         if (errorMessage.includes('403') || errorMessage.includes('Forbidden') || errorMessage.includes('từ chối truy cập')) {
           showToast({
             title: 'Lỗi: Không có quyền',
-            description: 'Endpoint admin-reject hiện tại chỉ cho phép admin. Backend cần được cập nhật để cho phép staff (roleId = 3) cũng sử dụng endpoint này.',
+            description: 'Đây là thao tác của Admin, xin vui lòng liên hệ lại với Admin để xử lý.',
             type: 'error',
           });
         } else {

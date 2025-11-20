@@ -27,7 +27,8 @@ import {
   HelpCircle,
   ArrowRight,
   Star,
-  ThumbsUp
+  ThumbsUp,
+  Eye
 } from 'lucide-react';
 
 export const Help = () => {

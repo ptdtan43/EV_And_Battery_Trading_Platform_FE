@@ -39,6 +39,9 @@ import { FAQ } from "./pages/FAQ";
 import { Contact } from "./pages/Contact";
 import { Shipping } from "./pages/Shipping";
 import { Returns } from "./pages/Returns";
+import Terms from "./pages/Terms";
+import Privacy from "./pages/Privacy";
+import Cookies from "./pages/Cookies";
 import PaymentResult from "./pages/PaymentResult";
 import PaymentSuccess from "./pages/PaymentSuccess";
 import PaymentExample from "./pages/PaymentExample";
@@ -379,6 +382,9 @@ const AppContent = () => {
           <Route path="/contact" element={<Contact />} />
           <Route path="/shipping" element={<Shipping />} />
           <Route path="/returns" element={<Returns />} />
+          <Route path="/terms" element={<Terms />} />
+          <Route path="/privacy" element={<Privacy />} />
+          <Route path="/cookies" element={<Cookies />} />
           <Route path="/payment/result" element={<PaymentResult />} />
           <Route path="/payment/success" element={<PaymentSuccess />} />
           <Route path="/payment/example" element={<PaymentExample />} />

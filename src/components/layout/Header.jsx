@@ -6,6 +6,7 @@ import {
   LogOut,
   LayoutDashboard,
   ShoppingBag,
+  PlusCircle,
 } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 import { NotificationBell } from "../common/NotificationBell";
@@ -40,6 +41,7 @@ export const Header = () => {
   const handleProfileClick = () => handleLinkClick("/profile");
   const handleLoginClick = () => handleLinkClick("/login");
   const handleRegisterClick = () => handleLinkClick("/register");
+  const handleCreateListingClick = () => handleLinkClick("/create-listing");
 
   const containerClass = isAdmin
     ? "px-4 sm:px-6 lg:px-8" // flush-left for admin
@@ -89,6 +91,17 @@ export const Header = () => {
                 {!isAdmin && <NotificationBell />}
 
                 {!isAdmin && <ChatBell />}
+
+                {!isAdmin && (
+                  <Link
+                    to="/create-listing"
+                    className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                    onClick={handleCreateListingClick}
+                  >
+                    <PlusCircle className="h-5 w-5" />
+                    <span className="hidden sm:inline">Đăng tin</span>
+                  </Link>
+                )}
 
                 <div className="relative group">
                   <button className={`flex items-center space-x-2 p-2 hover:bg-gray-100 rounded-lg transition-colors ${isAdmin ? 'ml-2' : ''}`}>
