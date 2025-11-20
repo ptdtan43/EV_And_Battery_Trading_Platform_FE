@@ -844,11 +844,8 @@ export const ProductDetail = () => {
                   className={`h-5 w-5 ${isFavorite ? "fill-current" : ""}`}
                 />
               </button>
-              <button 
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-600"
-                title="Chia sẻ"
-              >
-                <Share2 className="h-5 w-5" />
+              <button>
+               
               </button>
               {user && (
                 <button 
@@ -992,31 +989,62 @@ export const ProductDetail = () => {
 
                   {/* Rejection Message */}
                   {product.verificationStatus === "Rejected" && (
-                    <div className="mb-4 p-4 bg-red-50 border-2 border-red-300 rounded-lg shadow-sm">
-                      <div className="flex items-start">
-                        <AlertTriangle className="h-6 w-6 text-red-600 mt-0.5 mr-3 flex-shrink-0" />
-                        <div className="flex-1">
-                          <p className="text-base font-semibold text-red-900 mb-2">
-                            ⚠️ Bạn đã bị admin từ chối kiểm định
-                          </p>
-                          {(product.verificationNotes || product.rejectionReason) && (
-                            <div className="mb-3 p-3 bg-white rounded border border-red-200">
-                              <p className="text-sm font-medium text-red-900 mb-1">
-                                📋 Lý do từ chối:
-                              </p>
-                              <p className="text-sm text-red-800 whitespace-pre-wrap">
-                                {product.verificationNotes || product.rejectionReason}
+                    <div className="mb-4 overflow-hidden rounded-xl border-l-4 border-red-500 bg-gradient-to-r from-red-50 to-white shadow-md">
+                      <div className="p-5">
+                        <div className="flex items-start gap-4">
+                          <div className="flex-shrink-0 w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                            <AlertTriangle className="h-5 w-5 text-red-600" />
+                          </div>
+                          <div className="flex-1 space-y-3">
+                            <div>
+                              <h3 className="text-lg font-bold text-red-900 mb-1">
+                                Bài đăng bị từ chối kiểm duyệt
+                              </h3>
+                              <p className="text-sm text-red-700">
+                                Bài đăng của bạn đã được admin xem xét nhưng chưa đạt yêu cầu để hiển thị công khai
                               </p>
                             </div>
-                          )}
-                          <div className="bg-blue-50 border border-blue-200 rounded p-3 mt-3">
-                            <p className="text-sm font-medium text-blue-900 mb-1">
-                              💡 Hướng dẫn:
-                            </p>
-                            <ul className="text-sm text-blue-800 list-disc list-inside space-y-1">
-                              <li>Bạn có thể <strong>cập nhật lại bài viết</strong> để gửi yêu cầu kiểm duyệt lại miễn phí</li>
-                              <li>Hoặc nhấn nút <strong>"Yêu cầu lại kiểm định (Miễn phí)"</strong> bên dưới để gửi yêu cầu ngay</li>
-                            </ul>
+                            
+                            {(product.verificationNotes || product.rejectionReason) && (
+                              <div className="bg-white rounded-lg border border-red-200 p-4 shadow-sm">
+                                <div className="flex items-start gap-2">
+                                  <span className="text-lg">📋</span>
+                                  <div className="flex-1">
+                                    <p className="text-sm font-semibold text-gray-900 mb-1">
+                                      Lý do từ chối:
+                                    </p>
+                                    <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                                      {product.verificationNotes || product.rejectionReason}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                            
+                            <div className="bg-blue-50 rounded-lg border border-blue-200 p-4">
+                              <div className="flex items-start gap-2">
+                                <span className="text-lg">💡</span>
+                                <div className="flex-1">
+                                  <p className="text-sm font-semibold text-blue-900 mb-2">
+                                    Bạn có thể làm gì tiếp theo?
+                                  </p>
+                                  <ul className="space-y-2 text-sm text-blue-800">
+                                    <li className="flex items-start gap-2">
+                                      <span className="text-blue-600 mt-0.5">•</span>
+                                      <span>Xem lại lý do từ chối và <strong>chỉnh sửa bài đăng</strong> cho phù hợp với quy định</span>
+                                    </li>
+                                    <li className="flex items-start gap-2">
+                                      <span className="text-blue-600 mt-0.5">•</span>
+                                      <span>Cập nhật thông tin chính xác, hình ảnh rõ ràng và mô tả chi tiết hơn</span>
+                                    </li>
+                                    <li className="flex items-start gap-2">
+                                      <span className="text-blue-600 mt-0.5">•</span>
+                                      <span>Sau khi chỉnh sửa, bài đăng sẽ được gửi lại để admin xem xét</span>
+                                    </li>
+                                  </ul>
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -1159,7 +1187,7 @@ export const ProductDetail = () => {
                           <span className="font-semibold text-lg">Sản phẩm đang trong quá trình thanh toán</span>
                         </div>
                         <p className="text-sm">
-                          Sản phẩm này đã được khách hàng đặt cọc thành công và đang chờ seller xác nhận.
+                          Sản phẩm này đã được khách hàng đặt cọc thành công và đang chờ nhân viên xác nhận. Sau khi có lịch hẹn với người bán, hãy liên hệ nhân viên qua SĐT 0373111370 để xác nhận lịch hẹn với hệ thống.
                         </p>
                       </div>
                     );

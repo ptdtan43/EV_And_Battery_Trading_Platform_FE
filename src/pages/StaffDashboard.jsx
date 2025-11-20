@@ -899,25 +899,28 @@ export const StaffDashboard = () => {
                                   <span>Xem chi tiết</span>
                                 </button>
 
-                                <button
-                                  onClick={() => setUploadContractModal({ 
-                                    isOpen: true, 
-                                    order, 
-                                    selectedFile: null,
-                                    fileName: "",
-                                    filePreview: null,
-                                  })}
-                                  disabled={processingIds.has(orderId) || isCancelled}
-                                  className={`w-full px-4 py-2 rounded-lg flex items-center justify-center space-x-2 transition-all shadow-md hover:shadow-lg ${
-                                    isCancelled
-                                      ? "bg-gray-400 text-white cursor-not-allowed"
-                                      : "bg-gradient-to-r from-green-500 to-green-600 text-white hover:from-green-600 hover:to-green-700"
-                                  } ${processingIds.has(orderId) ? "opacity-50 cursor-not-allowed" : ""}`}
-                                  title={isCancelled ? "Không thể upload hợp đồng vì đơn hàng đã bị hủy" : (hasContract ? "Cập nhật hợp đồng" : "Upload hợp đồng")}
-                                >
-                                  <Upload className="h-4 w-4" />
-                                  <span>{hasContract ? "Cập nhật" : "Upload"}</span>
-                                </button>
+                                {/* Hide upload/update button when order is completed */}
+                                {status !== 'completed' && (
+                                  <button
+                                    onClick={() => setUploadContractModal({ 
+                                      isOpen: true, 
+                                      order, 
+                                      selectedFile: null,
+                                      fileName: "",
+                                      filePreview: null,
+                                    })}
+                                    disabled={processingIds.has(orderId) || isCancelled}
+                                    className={`w-full px-4 py-2 rounded-lg flex items-center justify-center space-x-2 transition-all shadow-md hover:shadow-lg ${
+                                      isCancelled
+                                        ? "bg-gray-400 text-white cursor-not-allowed"
+                                        : "bg-gradient-to-r from-green-500 to-green-600 text-white hover:from-green-600 hover:to-green-700"
+                                    } ${processingIds.has(orderId) ? "opacity-50 cursor-not-allowed" : ""}`}
+                                    title={isCancelled ? "Không thể upload hợp đồng vì đơn hàng đã bị hủy" : (hasContract ? "Cập nhật hợp đồng" : "Upload hợp đồng")}
+                                  >
+                                    <Upload className="h-4 w-4" />
+                                    <span>{hasContract ? "Cập nhật" : "Upload"}</span>
+                                  </button>
+                                )}
                                 
                                 {/* Staff can reject transactions that are not completed or cancelled */}
                                 {status !== 'completed' && status !== 'cancelled' && !isCancelled && (

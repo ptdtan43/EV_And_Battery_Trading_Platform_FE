@@ -174,7 +174,8 @@ export const VerificationButton = ({
           color: 'bg-red-100 text-red-800 border-red-200',
           buttonText: 'Yêu cầu lại kiểm định (Miễn phí)',
           buttonColor: 'bg-green-500 hover:bg-green-600',
-          disabled: false
+          disabled: true, // Disable button for rejected products
+          hideButton: true // Hide button completely for rejected products
         };
       default:
         // Format fee dynamically
@@ -208,7 +209,7 @@ export const VerificationButton = ({
       </div>
 
       {/* Action Button */}
-      {isOwner && (
+      {isOwner && !statusInfo.hideButton && (
         <button
           onClick={handleRequestVerification}
           disabled={loading || disabled || statusInfo.disabled}

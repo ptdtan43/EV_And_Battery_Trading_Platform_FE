@@ -19,6 +19,13 @@ export default defineConfig({
   },
   server: {
     port: 5174, // Match current frontend port
+    host: true, // Listen on all addresses
+    hmr: {
+      overlay: true, // Show errors on screen
+    },
+    watch: {
+      usePolling: true, // Better file watching on some systems
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:5044', // ✅ Local backend

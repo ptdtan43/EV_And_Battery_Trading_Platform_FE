@@ -317,16 +317,6 @@ export const AdminReports = () => {
                     Xem SP
                   </button>
                   
-                  {report.status === REPORT_STATUS.PENDING && (
-                    <button
-                      onClick={() => handleUpdateStatus(report.reportId, REPORT_STATUS.REVIEWED)}
-                      className="px-4 py-2 bg-yellow-600 text-white rounded text-sm font-medium hover:bg-yellow-700 transition-colors flex items-center"
-                    >
-                      <Eye className="h-4 w-4 mr-1.5" />
-                      Đã xem
-                    </button>
-                  )}
-                  
                   {report.status !== REPORT_STATUS.RESOLVED && (
                     <button
                       onClick={() => handleOpenResolveModal(report)}
@@ -334,16 +324,6 @@ export const AdminReports = () => {
                     >
                       <CheckCircle className="h-4 w-4 mr-1.5" />
                       Giải quyết
-                    </button>
-                  )}
-                  
-                  {report.status !== REPORT_STATUS.REJECTED && (
-                    <button
-                      onClick={() => handleUpdateStatus(report.reportId, REPORT_STATUS.REJECTED)}
-                      className="px-4 py-2 bg-gray-600 text-white rounded text-sm font-medium hover:bg-gray-700 transition-colors flex items-center"
-                    >
-                      <XCircle className="h-4 w-4 mr-1.5" />
-                      Từ chối
                     </button>
                   )}
                   

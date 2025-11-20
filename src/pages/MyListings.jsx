@@ -837,50 +837,7 @@ export const MyListings = () => {
                         </span>
                       </div>
 
-                      {/* Show cancellation reason button if product has cancelled order and status is Active/Approved */}
-                      {(() => {
-                        const listingId = getListingId(listing);
-                        const listingStatus = getStatus(listing);
-                        const cancellationReason = getCancellationReasonForProduct(listingId);
-                        
-                        // Debug log for approved/active products
-                        if (listingStatus === "approved" || listingStatus === "active") {
-                          console.log(`🔍 Product ${listingId} (${listing.title}):`, {
-                            status: listingStatus,
-                            hasCancellationReason: !!cancellationReason,
-                            cancellationReason: cancellationReason,
-                            sellerOrdersCount: sellerOrders.length
-                          });
-                        }
-                        
-                        // Show if product is approved/active AND has cancellation reason
-                        if ((listingStatus === "approved" || listingStatus === "active") && cancellationReason) {
-                          return (
-                            <div className="mt-3">
-                              <button
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  setSelectedCancellationReason({
-                                    reason: cancellationReason,
-                                    productId: listingId,
-                                    productTitle: listing.title
-                                  });
-                                  setShowCancellationModal(true);
-                                }}
-                                className="w-full flex items-center justify-center space-x-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 transition-colors"
-                                title="Xem lý do hủy giao dịch"
-                              >
-                                <AlertTriangle className="h-4 w-4 text-orange-600" />
-                                <span className="text-xs font-medium text-orange-900">
-                                  Lý do hủy giao dịch
-                                </span>
-                              </button>
-                            </div>
-                          );
-                        }
-                        return null;
-                      })()}
+
 
                       <div className="mylistings-card-actions">
                         <Link
@@ -1070,59 +1027,7 @@ export const MyListings = () => {
         rejectedBy={selectedRejection?.rejectedBy}
       />
 
-      {/* Cancellation Reason Modal */}
-      {showCancellationModal && selectedCancellationReason && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black bg-opacity-40" onClick={() => setShowCancellationModal(false)}></div>
-          <div className="relative bg-white rounded-xl shadow-xl max-w-md w-full p-6 z-10">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                <XCircle className="h-5 w-5 text-red-600" />
-                Lý do hủy giao dịch
-              </h3>
-              <button
-                onClick={() => setShowCancellationModal(false)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-              <div className="flex items-start space-x-2">
-                <AlertTriangle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
-                <div className="flex-1">
-                  <h4 className="font-semibold text-red-900 mb-2">Giao dịch đã bị hủy bởi Admin</h4>
-                  <p className="text-sm text-red-800 mb-1">
-                    <span className="font-medium">Sản phẩm:</span> {selectedCancellationReason.productTitle}
-                  </p>
-                  <p className="text-sm text-red-800 mb-1">
-                    <span className="font-medium">Lý do:</span>
-                  </p>
-                  <p className="text-sm text-red-700 mb-3 whitespace-pre-wrap">
-                    {selectedCancellationReason.reason}
-                  </p>
-                </div>
-              </div>
-            </div>
 
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
-              <p className="text-xs text-blue-800">
-                <strong>Lưu ý:</strong> Sản phẩm của bạn đã được trả về trang chủ và có thể bán lại. Vui lòng kiểm tra và cập nhật thông tin sản phẩm nếu cần.
-              </p>
-            </div>
-
-            <div className="flex justify-end">
-              <button
-                onClick={() => setShowCancellationModal(false)}
-                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
-              >
-                Đóng
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

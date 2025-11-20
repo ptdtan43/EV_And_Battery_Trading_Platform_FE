@@ -1745,38 +1745,96 @@ export const AdminDashboard = () => {
         return orderStatus === "completed";
       });
 
-      const totalRevenue = completedOrdersList.reduce((sum, o) => {
-        return sum + parseFloat(o.totalAmount || o.TotalAmount || 0);
+      // ✅ Fetch all verification payments once
+      let allVerificationPayments = [];
+      try {
+        const payments = await apiRequest('/api/Payment');
+        allVerificationPayments = payments.filter(p => 
+          (p.paymentType || p.PaymentType || '').toLowerCase() === 'verification' &&
+          (p.status || p.Status || '').toLowerCase() === 'completed'
+        );
+      } catch (error) {
+        console.error('Failed to fetch verification payments:', error);
+      }
+
+      // ✅ Calculate total revenue from deposits
+      const depositRevenue = completedOrdersList.reduce((sum, o) => {
+        return sum + parseFloat(o.depositAmount || o.DepositAmount || 0);
       }, 0);
+
+      // ✅ Calculate total revenue from verification
+      const verificationRevenue = allVerificationPayments.reduce((sum, p) => {
+        return sum + parseFloat(p.amount || p.Amount || 0);
+      }, 0);
+
+      // ✅ Total revenue = deposit + verification
+      const totalRevenue = depositRevenue + verificationRevenue;
 
       // ✅ FIX: Calculate revenue by date from completed orders
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      const todaysRevenue = completedOrdersList
+      // ✅ Today's revenue from deposits
+      const todaysDepositRevenue = completedOrdersList
         .filter(o => {
           const orderDate = new Date(o.createdDate || o.CreatedDate || o.createdAt || o.CreatedAt || o.orderDate || o.OrderDate || 0);
           orderDate.setHours(0, 0, 0, 0);
           return orderDate.getTime() === today.getTime();
         })
-        .reduce((sum, o) => sum + parseFloat(o.totalAmount || o.TotalAmount || 0), 0);
+        .reduce((sum, o) => sum + parseFloat(o.depositAmount || o.DepositAmount || 0), 0);
 
-      const thisYearRevenue = completedOrdersList
+      // ✅ Today's revenue from verification (reuse fetched data)
+      const todaysVerificationRevenue = allVerificationPayments
+        .filter(p => {
+          const paymentDate = new Date(p.createdDate || p.CreatedDate || p.paymentDate || p.PaymentDate || 0);
+          paymentDate.setHours(0, 0, 0, 0);
+          return paymentDate.getTime() === today.getTime();
+        })
+        .reduce((sum, p) => sum + parseFloat(p.amount || p.Amount || 0), 0);
+
+      const todaysRevenue = todaysDepositRevenue + todaysVerificationRevenue;
+
+      // ✅ This year's revenue from deposits
+      const thisYearDepositRevenue = completedOrdersList
         .filter(o => {
           const orderDate = new Date(o.createdDate || o.CreatedDate || o.createdAt || o.CreatedAt || o.orderDate || o.OrderDate || 0);
           const currentYear = new Date().getFullYear();
           return orderDate.getFullYear() === currentYear;
         })
-        .reduce((sum, o) => sum + parseFloat(o.totalAmount || o.TotalAmount || 0), 0);
+        .reduce((sum, o) => sum + parseFloat(o.depositAmount || o.DepositAmount || 0), 0);
 
-      const thisMonthRevenue = completedOrdersList
+      // ✅ This year's revenue from verification (reuse fetched data)
+      const thisYearVerificationRevenue = allVerificationPayments
+        .filter(p => {
+          const paymentDate = new Date(p.createdDate || p.CreatedDate || p.paymentDate || p.PaymentDate || 0);
+          const currentYear = new Date().getFullYear();
+          return paymentDate.getFullYear() === currentYear;
+        })
+        .reduce((sum, p) => sum + parseFloat(p.amount || p.Amount || 0), 0);
+
+      const thisYearRevenue = thisYearDepositRevenue + thisYearVerificationRevenue;
+
+      // ✅ This month's revenue from deposits
+      const thisMonthDepositRevenue = completedOrdersList
         .filter(o => {
           const orderDate = new Date(o.createdDate || o.CreatedDate || o.createdAt || o.CreatedAt || o.orderDate || o.OrderDate || 0);
           const currentDate = new Date();
           return orderDate.getMonth() === currentDate.getMonth() &&
             orderDate.getFullYear() === currentDate.getFullYear();
         })
-        .reduce((sum, o) => sum + parseFloat(o.totalAmount || o.TotalAmount || 0), 0);
+        .reduce((sum, o) => sum + parseFloat(o.depositAmount || o.DepositAmount || 0), 0);
+
+      // ✅ This month's revenue from verification (reuse fetched data)
+      const thisMonthVerificationRevenue = allVerificationPayments
+        .filter(p => {
+          const paymentDate = new Date(p.createdDate || p.CreatedDate || p.paymentDate || p.PaymentDate || 0);
+          const currentDate = new Date();
+          return paymentDate.getMonth() === currentDate.getMonth() &&
+                 paymentDate.getFullYear() === currentDate.getFullYear();
+        })
+        .reduce((sum, p) => sum + parseFloat(p.amount || p.Amount || 0), 0);
+
+      const thisMonthRevenue = thisMonthDepositRevenue + thisMonthVerificationRevenue;
 
       // ✅ FIX: Calculate average from completed orders, not approved products
       const averageOrderValue = completedOrdersList.length > 0 ? totalRevenue / completedOrdersList.length : 0;
@@ -3905,8 +3963,20 @@ export const AdminDashboard = () => {
                       <td className="px-6 py-4 whitespace-nowrap">
                         {getProductTypeBadge(listing.productType)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {formatPrice(listing.price)}
+                      <td className="px-6 py-4 text-sm text-gray-900">
+                        <div className="space-y-1">
+                          <div className="font-medium">{formatPrice(listing.price)}</div>
+                          <div className="text-xs text-blue-600">
+                            Cọc: {formatPrice(listing.price * (() => {
+                              // Get active deposit percentage from fee settings
+                              const depositFee = feeSettings.find(f => 
+                                (f.feeType || f.FeeType) === 'DepositPercentage' && 
+                                (f.isActive !== undefined ? f.isActive : f.IsActive)
+                              );
+                              return depositFee ? (depositFee.feeValue || depositFee.FeeValue || 0.01) : 0.01;
+                            })())}
+                          </div>
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">{listing.sellerName || "Không rõ"}</div>
@@ -5028,7 +5098,8 @@ export const AdminDashboard = () => {
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Mã đơn</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Người mua</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sản phẩm</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tổng tiền</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tiền đặt cọc</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tiền còn lại</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Trạng thái</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hợp đồng</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ngày tạo</th>
@@ -5065,8 +5136,11 @@ export const AdminDashboard = () => {
                                     return order.productName || order.ProductName || "N/A";
                                   })()}
                                 </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                  {formatPrice(order.totalAmount || order.TotalAmount || 0)}
+                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                  {formatPrice(order.depositAmount || order.DepositAmount || 0)}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                  {formatPrice((order.totalAmount || order.TotalAmount || 0) - (order.depositAmount || order.DepositAmount || 0))}
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap">
                                   <span className={`px-2 py-1 text-xs font-medium rounded-full ${status === 'completed' ? 'bg-green-100 text-green-800' :
