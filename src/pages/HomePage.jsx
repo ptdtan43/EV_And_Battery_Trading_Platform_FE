@@ -1588,7 +1588,7 @@ export const HomePage = () => {
               </div>
               <h3 className="benefit-title">Hỗ trợ 24/7</h3>
               <p className="text-gray-600">
-                Đội ngũ hỗ trợ sẵn sàng giải ��áp mọi thắc mắc
+                Đội ngũ hỗ trợ sẵn sàng giải đáp mọi thắc mắc
               </p>
             </div>
           </div>

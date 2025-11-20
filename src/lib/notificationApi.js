@@ -129,38 +129,21 @@ export const markAsRead = async (notificationId) => {
   }
 
   try {
-    // Try PUT method first
-    const response = await apiRequest(`/api/Notification/${notificationId}`, {
-      method: 'PUT',
-      body: { isRead: true }
+    // Use the correct endpoint for users: PUT /api/Notification/{id}/read
+    const response = await apiRequest(`/api/Notification/${notificationId}/read`, {
+      method: 'PUT'
     });
 
     console.log("✅ Notification marked as read:", response);
-    return response;
+    return { id: notificationId, isRead: true, ...response };
   } catch (error) {
     console.error("❌ Error marking notification as read:", error);
-
-    // If 403 Forbidden, try PATCH method
-    if (error.message.includes("từ chối truy cập") || error.message.includes("Forbidden")) {
-      console.log("🔄 Trying PATCH method for notification:", notificationId);
-      try {
-        const response = await apiRequest(`/api/Notification/${notificationId}`, {
-          method: 'PATCH',
-          body: { isRead: true }
-        });
-
-        console.log("✅ Notification marked as read with PATCH:", response);
-        return response;
-      } catch (patchError) {
-        console.error("❌ PATCH method also failed:", patchError);
-
-        // If both PUT and PATCH fail, simulate success for UI update
-        console.log("🔄 Simulating mark as read for UI update:", notificationId);
-        return { id: notificationId, isRead: true, simulated: true };
-      }
-    }
-
-    throw error;
+    console.error("❌ Error details:", {
+      message: error.message,
+      notificationId: notificationId,
+      stack: error.stack
+    });
+    throw new Error(error.message || "Không thể đánh dấu thông báo đã đọc. Vui lòng thử lại.");
   }
 };
 
@@ -173,51 +156,32 @@ export const markAllAsRead = async (userId) => {
   console.log("🔔 Marking all notifications as read for user:", userId);
 
   try {
-    const notifications = await apiRequest(`/api/Notification/user/${userId}`);
-    console.log("🔔 Raw notifications:", notifications);
-
-    const unreadNotifications = notifications.filter(n => !n.isRead);
-    console.log("🔔 Unread notifications:", unreadNotifications);
-
-    // Mark each unread notification as read
-    const validNotifications = unreadNotifications.filter(notification => {
-      const id = notification.notificationId || notification.id;
-      console.log("🔔 Notification ID check:", { id, notification });
-      return id;
+    // Use the new bulk endpoint: PUT /api/Notification/mark-all-read
+    const response = await apiRequest('/api/Notification/mark-all-read', {
+      method: 'PUT'
     });
 
-    console.log("🔔 Valid notifications to mark as read:", validNotifications);
-
-    if (validNotifications.length === 0) {
-      console.log("🔔 No valid notifications to mark as read");
-      return 0;
+    console.log("✅ Bulk mark all as read successful:", response);
+    console.log("✅ Response type:", typeof response);
+    console.log("✅ Response keys:", Object.keys(response || {}));
+    
+    // Handle different response formats
+    if (typeof response === 'object' && response !== null) {
+      // Backend returns { message: "...", count: X }
+      const count = response.count ?? response.Count ?? 0;
+      console.log("✅ Extracted count:", count);
+      return count;
     }
-
-    const promises = validNotifications.map(notification => {
-      const id = notification.notificationId || notification.id;
-      console.log("🔔 Marking notification as read:", id);
-      return markAsRead(id).catch(error => {
-        console.error("❌ Failed to mark notification as read:", id, error);
-        return null; // Continue with other notifications
-      });
-    });
-
-    const results = await Promise.all(promises);
-    const successCount = results.filter(r => r !== null).length;
-
-    console.log("✅ Successfully marked", successCount, "out of", validNotifications.length, "notifications as read");
-
-    // If no notifications were marked as read due to API issues, simulate success for UI
-    if (successCount === 0 && validNotifications.length > 0) {
-      console.log("🔄 Simulating mark all as read for UI update");
-      return validNotifications.length;
-    }
-
-    // Return success count for UI update
-    return successCount;
+    
+    return 0;
   } catch (error) {
     console.error("❌ Error marking all notifications as read:", error);
-    return 0;
+    console.error("❌ Error details:", {
+      message: error.message,
+      stack: error.stack,
+      response: error.response
+    });
+    throw new Error(error.message || "Không thể đánh dấu tất cả thông báo đã đọc. Vui lòng thử lại.");
   }
 };
 
@@ -229,16 +193,40 @@ export const markAllAsRead = async (userId) => {
 export const deleteNotification = async (notificationId) => {
   console.log("🔔 Deleting notification:", notificationId);
 
+  if (!notificationId) {
+    console.error("❌ Notification ID is undefined or null");
+    throw new Error("Notification ID is required");
+  }
+
   try {
-    await apiRequest(`/api/Notification/${notificationId}`, {
+    // Backend returns 204 No Content on success
+    const response = await apiRequest(`/api/Notification/${notificationId}`, {
       method: 'DELETE'
     });
 
-    console.log("✅ Notification deleted successfully");
+    console.log("✅ Notification deleted successfully:", response);
+    // 204 No Content means success, response might be null/undefined
     return true;
   } catch (error) {
     console.error("❌ Error deleting notification:", error);
-    return false;
+    console.error("❌ Error details:", {
+      message: error.message,
+      status: error.status,
+      notificationId: notificationId,
+      data: error.data
+    });
+    
+    // Provide specific error messages based on status
+    let errorMessage = "Không thể xóa thông báo. Vui lòng thử lại.";
+    if (error.status === 403) {
+      errorMessage = "Bạn không có quyền xóa thông báo này.";
+    } else if (error.status === 404) {
+      errorMessage = "Thông báo không tồn tại.";
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+    
+    throw new Error(errorMessage);
   }
 };
 
