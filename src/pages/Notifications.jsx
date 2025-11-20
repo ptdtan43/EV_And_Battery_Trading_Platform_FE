@@ -140,6 +140,8 @@ export const Notifications = () => {
   const handleDelete = async (notificationId) => {
     try {
       await deleteNotification(notificationId);
+      
+      // Remove from UI
       setNotifications((prev) => prev.filter((n) => {
         const nId = n.notificationId || n.id;
         return nId !== notificationId;
@@ -155,6 +157,11 @@ export const Notifications = () => {
       });
     } catch (error) {
       console.error("Error deleting notification:", error);
+      showToast({
+        title: "Lỗi",
+        description: error.message || "Không thể xóa thông báo",
+        type: "error",
+      });
     }
   };
 
