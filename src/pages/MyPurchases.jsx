@@ -1598,9 +1598,48 @@ const MyPurchases = () => {
                 </div>
               </div>
 
+              {/* Refund Information */}
+              {(() => {
+                // Check if reason contains refund information
+                const reason = selectedCancellationReason.reason || '';
+                const hasRefundInfo = reason.includes('hoàn') || reason.includes('refund') || reason.includes('Refund');
+                const noRefundInfo = reason.includes('không hoàn') || reason.includes('no refund') || reason.includes('No Refund');
+                
+                if (hasRefundInfo && !noRefundInfo) {
+                  return (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4">
+                      <div className="flex items-start space-x-2">
+                        <CheckCircle className="h-5 w-5 text-green-600 mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className="text-sm font-medium text-green-900 mb-1">Thông tin hoàn tiền</p>
+                          <p className="text-xs text-green-800">
+                            Đơn hàng này sẽ được hoàn tiền. Số tiền cọc sẽ được chuyển về tài khoản của bạn trong vòng 3-5 ngày làm việc.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                } else if (noRefundInfo) {
+                  return (
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-4">
+                      <div className="flex items-start space-x-2">
+                        <AlertCircle className="h-5 w-5 text-orange-600 mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className="text-sm font-medium text-orange-900 mb-1">Thông tin hoàn tiền</p>
+                          <p className="text-xs text-orange-800">
+                            Đơn hàng này không được hoàn tiền theo điều khoản hủy giao dịch.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
                 <p className="text-xs text-blue-800">
-                  <strong>Lưu ý:</strong> Đơn hàng này đã bị admin hủy. Sản phẩm đã được trả về trang chủ.
+                  <strong>Lưu ý:</strong> Đơn hàng này đã bị hủy. Sản phẩm đã được trả về trang chủ.
                 </p>
               </div>
 

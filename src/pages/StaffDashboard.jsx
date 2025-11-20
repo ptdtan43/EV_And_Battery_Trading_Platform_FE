@@ -143,7 +143,7 @@ export const StaffDashboard = () => {
       ).length;
       const activeOrders = ordersArray.filter(o => {
         const status = (o.status || o.Status || "").toLowerCase();
-        return status === "pending" || status === "processing" || status === "confirmed";
+        return status === "pending" || status === "deposited";
       }).length;
 
       const totalRevenue = ordersArray
@@ -390,15 +390,9 @@ export const StaffDashboard = () => {
     const statusLower = (status || "").toLowerCase();
     const badges = {
       pending: "bg-yellow-100 text-yellow-800",
-      approved: "bg-green-100 text-green-800",
-      rejected: "bg-red-100 text-red-800",
+      deposited: "bg-purple-100 text-purple-800",
       completed: "bg-green-100 text-green-800",
       cancelled: "bg-red-100 text-red-800",
-      processing: "bg-blue-100 text-blue-800",
-      confirmed: "bg-blue-100 text-blue-800",
-      depositpaid: "bg-purple-100 text-purple-800",
-      active: "bg-green-100 text-green-800",
-      suspended: "bg-red-100 text-red-800",
     };
     return badges[statusLower] || "bg-gray-100 text-gray-800";
   };
@@ -407,15 +401,9 @@ export const StaffDashboard = () => {
     const statusLower = (status || "").toLowerCase();
     const statusMap = {
       pending: "Đang chờ",
-      approved: "Đã duyệt",
-      rejected: "Đã từ chối",
+      deposited: "Đã đặt cọc",
       completed: "Hoàn tất",
       cancelled: "Đã hủy",
-      processing: "Đang xử lý",
-      confirmed: "Đã xác nhận",
-      depositpaid: "Đã thanh toán cọc",
-      active: "Hoạt động",
-      suspended: "Tạm khóa",
     };
     return statusMap[statusLower] || status;
   };
@@ -465,8 +453,8 @@ export const StaffDashboard = () => {
       try {
         const refundOption = failureReason.refundOption || 'refund';
         
-        // Use admin-reject endpoint (same as admin uses)
-        const response = await apiRequest(`/api/Order/${orderId}/admin-reject`, {
+        // Use staff-reject endpoint (allows both Staff and Admin)
+        const response = await apiRequest(`/api/Order/${orderId}/staff-reject`, {
           method: 'POST',
           body: {
             Reason: cancellationReasonText,
@@ -474,9 +462,13 @@ export const StaffDashboard = () => {
           }
         });
         
-        console.log('✅ Staff rejection - Cancellation reason saved to Order:', cancellationReasonText);
-        console.log('✅ Staff rejection - Refund option:', refundOption);
-        console.log('✅ Staff rejection - Response:', response);
+        console.log('✅ Staff rejection successful:', {
+          orderId: response.orderId,
+          status: response.status,
+          reason: cancellationReasonText,
+          refundOption: refundOption,
+          refundAmount: response.refundAmount
+        });
         
         // Send notification to buyer
         try {
@@ -532,9 +524,15 @@ export const StaffDashboard = () => {
         if (errorMessage.includes('403') || errorMessage.includes('Forbidden') || errorMessage.includes('từ chối truy cập')) {
           showToast({
             title: 'Lỗi: Không có quyền',
-            description: 'Đây là thao tác của Admin, xin vui lòng liên hệ lại với Admin để xử lý.',
+            description: '⚠️ Backend cần cập nhật: Endpoint /api/Order/{id}/admin-reject hiện chỉ cho Admin. Cần thêm endpoint /api/Order/{id}/staff-reject hoặc cập nhật policy để cho phép Staff (roleId = 3) sử dụng.',
             type: 'error',
+            duration: 10000, // Show longer for important message
           });
+          
+          console.error('🔧 BACKEND FIX NEEDED:');
+          console.error('1. Create new endpoint: POST /api/Order/{id}/staff-reject');
+          console.error('2. Or update admin-reject endpoint to allow Staff role');
+          console.error('3. Staff should be able to reject orders with status: Pending, Deposited');
         } else {
           showToast({
             title: 'Lỗi',
@@ -729,9 +727,7 @@ export const StaffDashboard = () => {
                 >
                   <option value="all">Tất cả trạng thái</option>
                   <option value="pending">Đang chờ</option>
-                  <option value="processing">Đang xử lý</option>
-                  <option value="confirmed">Đã xác nhận</option>
-                  <option value="depositpaid">Đã thanh toán cọc</option>
+                  <option value="deposited">Đã đặt cọc</option>
                   <option value="completed">Hoàn tất</option>
                   <option value="cancelled">Đã hủy</option>
                 </select>
@@ -927,6 +923,27 @@ export const StaffDashboard = () => {
                                 {status !== 'completed' && status !== 'cancelled' && !isCancelled && (
                                   <button
                                     onClick={() => {
+                                      console.log('🔍 [REJECT] Order object:', order);
+                                      console.log('🔍 [REJECT] Order keys:', Object.keys(order));
+                                      console.log('🔍 [REJECT] OrderId extracted:', orderId);
+                                      console.log('🔍 [REJECT] All possible IDs:', {
+                                        orderId: order.orderId,
+                                        OrderId: order.OrderId,
+                                        id: order.id,
+                                        Id: order.Id,
+                                        order_id: order.order_id,
+                                        ORDER_ID: order.ORDER_ID
+                                      });
+                                      
+                                      if (!orderId || orderId === 0) {
+                                        showToast({
+                                          title: 'Lỗi',
+                                          description: `Không tìm thấy ID đơn hàng. Order keys: ${Object.keys(order).join(', ')}`,
+                                          type: 'error',
+                                        });
+                                        return;
+                                      }
+                                      
                                       const productId = order.productId || order.ProductId;
                                       setTransactionFailureModal({
                                         isOpen: true,
@@ -1403,9 +1420,9 @@ export const StaffDashboard = () => {
                           <span className="text-gray-600">Trạng thái:</span>
                           <span className={`px-2 py-1 text-xs font-medium rounded-full ${
                             (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'completed' ? 'bg-green-100 text-green-800' :
-                            (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'pending' || (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'processing' || (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'depositpaid' || (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'deposited' ? 'bg-yellow-100 text-yellow-800' :
+                            (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                            (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'deposited' ? 'bg-purple-100 text-purple-800' :
                             (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'cancelled' ? 'bg-red-100 text-red-800' :
-                            (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'confirmed' ? 'bg-blue-100 text-blue-800' :
                             'bg-gray-100 text-gray-800'
                           }`}>
                             {getOrderStatusText(orderDetailModal.orderDetails.orderStatus)}
