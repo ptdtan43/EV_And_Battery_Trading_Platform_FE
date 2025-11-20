@@ -214,9 +214,6 @@ export const SellerProfile = () => {
                 <h2 className="text-xl font-bold text-gray-900">
                   {seller.fullName || seller.name || "Người bán"}
                 </h2>
-                <p className="text-gray-600">
-                  {seller.email}
-                </p>
               </div>
               {(() => {
                 if (!isAdmin || !adminUserDetail) return null;
@@ -236,14 +233,6 @@ export const SellerProfile = () => {
               {/* Contact Info */}
               <div className="space-y-3 mb-6">
                 <div className="flex items-center text-gray-600">
-                  <Phone className="h-5 w-5 mr-3 text-blue-600" />
-                  <span>{seller.phone || "Chưa cập nhật"}</span>
-                </div>
-                <div className="flex items-center text-gray-600">
-                  <Mail className="h-5 w-5 mr-3 text-blue-600" />
-                  <span>{seller.email}</span>
-                </div>
-                <div className="flex items-center text-gray-600">
                   <MapPin className="h-5 w-5 mr-3 text-blue-600" />
                   <span>Hà Nội, Việt Nam</span>
                 </div>
@@ -254,30 +243,16 @@ export const SellerProfile = () => {
               </div>
 
               {/* Stats */}
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                <div className="text-center p-3 bg-blue-50 rounded-lg">
-                  <div className="text-2xl font-bold text-blue-600">
+              <div className="mb-6">
+                <div className="text-center p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl border border-blue-200">
+                  <div className="text-3xl font-bold text-blue-600 mb-1">
                     {products.length}
                   </div>
-                  <div className="text-sm text-gray-600">Sản phẩm</div>
-                </div>
-                <div className="text-center p-3 bg-green-50 rounded-lg">
-                  <div className="text-2xl font-bold text-green-600">4.8</div>
-                  <div className="text-sm text-gray-600">Đánh giá</div>
+                  <div className="text-sm font-medium text-blue-800">Sản phẩm đang bán</div>
                 </div>
               </div>
 
-              {/* Action Buttons */}
-              <div className="space-y-3">
-                <button className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center">
-                  <MessageCircle className="h-5 w-5 mr-2" />
-                  Liên hệ
-                </button>
-                <button className="w-full border border-gray-300 text-gray-700 py-3 px-4 rounded-lg font-medium hover:bg-gray-50 transition-colors flex items-center justify-center">
-                  <Heart className="h-5 w-5 mr-2" />
-                  Theo dõi
-                </button>
-              </div>
+
             </div>
           </div>
 

@@ -1586,8 +1586,21 @@ const MyPurchases = () => {
                     <p className="text-sm text-red-800 mb-1">
                       <span className="font-medium">Lý do:</span>
                     </p>
-                    <p className="text-sm text-red-700 mb-3 whitespace-pre-wrap">
-                      {selectedCancellationReason.reason}
+                    <p className="text-sm text-red-700 whitespace-pre-wrap">
+                      {(() => {
+                        // Remove "Thông tin hoàn tiền" section and checkmark icon from reason
+                        let reason = selectedCancellationReason.reason || '';
+                        // Split by newlines and filter out lines containing refund info
+                        const lines = reason.split('\n');
+                        const filteredLines = lines.filter(line => {
+                          const lowerLine = line.toLowerCase();
+                          // Remove lines containing refund information or checkmark with refund
+                          return !lowerLine.includes('thông tin hoàn tiền') && 
+                                 !lowerLine.includes('hoàn tiền') &&
+                                 !(line.includes('✓') || line.includes('✔'));
+                        });
+                        return filteredLines.join('\n').trim();
+                      })()}
                     </p>
                     {selectedCancellationReason.cancelledDate && (
                       <p className="text-xs text-red-600">
@@ -1613,7 +1626,7 @@ const MyPurchases = () => {
                         <div>
                           <p className="text-sm font-medium text-green-900 mb-1">Thông tin hoàn tiền</p>
                           <p className="text-xs text-green-800">
-                            Đơn hàng này sẽ được hoàn tiền. Số tiền cọc sẽ được chuyển về tài khoản của bạn trong vòng 3-5 ngày làm việc.
+                            Đơn hàng này sẽ được hoàn tiền. Số tiền cọc sẽ được chuyển về tài khoản của người mua trong vòng 3-5 ngày làm việc.
                           </p>
                         </div>
                       </div>

@@ -29,10 +29,10 @@ export const LoginForm = () => {
     if (err.status === 401 && backendMsg) {
       // Backend returns specific messages for suspended/deleted accounts
       if (backendMsg.includes('khóa') || backendMsg.includes('suspended')) {
-        return "⚠️ Tài khoản của bạn đã bị tạm khóa. Vui lòng liên hệ quản trị viên để biết thêm chi tiết.";
+        return "Tài khoản của bạn đã bị tạm khóa. Vui lòng liên hệ quản trị viên qua gmail Evmarker@gmail.com để biết thêm chi tiết.";
       }
       if (backendMsg.includes('xóa') || backendMsg.includes('deleted')) {
-        return "⚠️ Tài khoản của bạn đã bị xóa và không thể đăng nhập. Vui lòng liên hệ quản trị viên.";
+        return "Tài khoản của bạn đã bị tạm khóa. Vui lòng liên hệ quản trị viên qua gmail Evmarker@gmail.com để biết thêm chi tiết.";
       }
       // Return backend message as-is for other 401 errors
       return backendMsg;

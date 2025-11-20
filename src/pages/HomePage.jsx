@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Search, Zap, Shield, TrendingUp, CheckCircle, Filter } from "lucide-react";
 import { apiRequest } from "../lib/api";
@@ -16,6 +16,7 @@ export const HomePage = () => {
   const { user } = useAuth();
   const { show: showToast } = useToast();
   const location = useLocation();
+  const paymentToastShown = useRef(false); // Track if payment toast was already shown
   const [showPaymentBanner, setShowPaymentBanner] = useState(false);
   const [paymentBannerInfo, setPaymentBannerInfo] = useState({ amount: null, type: 'Deposit' });
   const [showRefundBanner, setShowRefundBanner] = useState(false);
@@ -61,6 +62,12 @@ export const HomePage = () => {
   // Load from localStorage on mount with size limit
   const [sellerCache, setSellerCache] = useState(() => {
     try {
+      // ✅ CLEAR OLD CACHE - Force refresh seller names
+      console.log('🔄 Clearing old seller cache to refresh names');
+      localStorage.removeItem('sellerNameCache');
+      return {};
+      
+      /* OLD CODE - Commented out to force refresh
       const cached = localStorage.getItem('sellerNameCache');
       if (cached) {
         const parsedCache = JSON.parse(cached);
@@ -74,6 +81,7 @@ export const HomePage = () => {
         return parsedCache;
       }
       return {};
+      */
     } catch (error) {
       console.warn('Failed to load seller cache from localStorage:', error);
       // ✅ If error, clear the corrupt cache
@@ -137,13 +145,14 @@ export const HomePage = () => {
           
           // Check if it's recent (within last 10 seconds) and not processed
           const isRecent = (Date.now() - paymentData.timestamp) < 10000;
-          if (isRecent && !paymentData.processed) {
+          if (isRecent && !paymentData.processed && !paymentToastShown.current) {
             console.log('[HomePage] Found payment success in localStorage:', paymentData);
             
             const formattedAmount = paymentData.amount ? (parseInt(paymentData.amount) / 100).toLocaleString('vi-VN') : 'N/A';
             const isVerification = (paymentData.paymentType || '').toLowerCase() === 'verification';
             
-            // Show toast
+            // Show toast only once
+            paymentToastShown.current = true;
             showToast({
               type: 'success',
               title: isVerification ? '✅ Thanh toán kiểm định thành công!' : '🎉 Thanh toán đặt cọc thành công!',
@@ -240,13 +249,14 @@ export const HomePage = () => {
           return;
         }
         
-        if (data.type === 'EVTB_PAYMENT_SUCCESS' && data.payload) {
+        if (data.type === 'EVTB_PAYMENT_SUCCESS' && data.payload && !paymentToastShown.current) {
           console.log('[HomePage] Payment success message received:', data.payload);
           const { paymentId, amount, paymentType } = data.payload;
           const formattedAmount = amount ? (parseInt(amount) / 100).toLocaleString('vi-VN') : 'N/A';
           const isVerification = (paymentType || '').toLowerCase() === 'verification';
           
           console.log('[HomePage] Showing success toast...');
+          paymentToastShown.current = true;
           showToast({
             type: 'success',
             title: isVerification ? '✅ Thanh toán kiểm định thành công!' : '🎉 Thanh toán đặt cọc thành công!',
@@ -336,21 +346,24 @@ export const HomePage = () => {
         // Silently fail - don't show error to user
       }
       
-      // ✅ Show specific notification based on payment type
-      if (finalPaymentType === 'Verification') {
-        showToast({
-          type: 'success',
-          title: '✅ Thanh toán kiểm định thành công!',
-          message: `Yêu cầu kiểm định đã được thanh toán (${formattedAmount} VND). Admin sẽ xác nhận trong thời gian sớm nhất.`,
-          duration: 10000
-        });
-      } else {
-        showToast({
-          type: 'success',
-          title: '🎉 Thanh toán đặt cọc thành công!',
-          message: `Bạn đã đặt cọc thành công (${formattedAmount} VND). Vui lòng liên hệ người bán để hoàn tất giao dịch.`,
-          duration: 10000
-        });
+      // ✅ Show specific notification based on payment type (only once)
+      if (!paymentToastShown.current) {
+        paymentToastShown.current = true;
+        if (finalPaymentType === 'Verification') {
+          showToast({
+            type: 'success',
+            title: '✅ Thanh toán kiểm định thành công!',
+            message: `Yêu cầu kiểm định đã được thanh toán (${formattedAmount} VND). Admin sẽ xác nhận trong thời gian sớm nhất.`,
+            duration: 10000
+          });
+        } else {
+          showToast({
+            type: 'success',
+            title: '🎉 Thanh toán đặt cọc thành công!',
+            message: `Bạn đã đặt cọc thành công (${formattedAmount} VND). Vui lòng liên hệ người bán để hoàn tất giao dịch.`,
+            duration: 10000
+          });
+        }
       }
 
       // ✅ Also show a persistent banner at top of HomePage
@@ -488,12 +501,14 @@ export const HomePage = () => {
                     setTimeout(() => reject(new Error('Timeout')), 8000) // Increased timeout to 8 seconds
                   );
                   const sellerData = await Promise.race([sellerPromise, timeoutPromise]);
+                  console.log(`👤 Fetched seller data for ID ${sellerId}:`, sellerData);
                   sellerName = sellerData?.fullName || 
                              sellerData?.full_name || 
                              sellerData?.name || 
                              sellerData?.userName || 
                              sellerData?.user_name ||
                              sellerData?.UserName;
+                  console.log(`👤 Extracted seller name for ID ${sellerId}:`, sellerName);
                   
                   // ✅ SAVE TO CACHE for future use
                   if (sellerName) {

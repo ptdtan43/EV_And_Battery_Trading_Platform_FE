@@ -1332,7 +1332,7 @@ export const EditListing = () => {
                     value={formData.condition}
                     onChange={handleChange}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Ví dụ: Xe mới 99%, Xuất sắc, Tốt..."
+                    placeholder="Ví dụ: 99%, 95%, 90%..."
                   />
                 </div>
 
