@@ -434,6 +434,7 @@ export const StaffDashboard = () => {
       // Build failure reason text from ReasonCode + ReasonNote
       const reasonCode = failureReason.reasonCode || '';
       const reasonNote = failureReason.reasonNote || '';
+      const refundOption = failureReason.refundOption || 'refund';
       const reasonOption = transactionFailureReasons.find(r => r.code === reasonCode);
       let cancellationReasonText = '';
       
@@ -448,10 +449,16 @@ export const StaffDashboard = () => {
         cancellationReasonText = 'Không xác định';
       }
 
+      // Add refund information to cancellation reason
+      if (refundOption === 'refund') {
+        cancellationReasonText += '\n\nThông tin hoàn tiền: Đơn hàng này sẽ được hoàn tiền.';
+      } else {
+        cancellationReasonText += '\n\nThông tin hoàn tiền: Đơn hàng này không được hoàn tiền theo điều khoản hủy giao dịch.';
+      }
+     
       // Call API to save cancellation reason to Order using admin-reject endpoint
       // Note: This endpoint may only allow admin. If staff gets 403, backend needs to be updated
       try {
-        const refundOption = failureReason.refundOption || 'refund';
         
         // Use staff-reject endpoint (allows both Staff and Admin)
         const response = await apiRequest(`/api/Order/${orderId}/staff-reject`, {
@@ -523,10 +530,9 @@ export const StaffDashboard = () => {
         const errorMessage = orderError.message || '';
         if (errorMessage.includes('403') || errorMessage.includes('Forbidden') || errorMessage.includes('từ chối truy cập')) {
           showToast({
-            title: 'Lỗi: Không có quyền',
-            description: '⚠️ Backend cần cập nhật: Endpoint /api/Order/{id}/admin-reject hiện chỉ cho Admin. Cần thêm endpoint /api/Order/{id}/staff-reject hoặc cập nhật policy để cho phép Staff (roleId = 3) sử dụng.',
+            title: 'Lỗi',
+            description: 'Vì đơn hàng đang trong quá trình "đang xử lí", chỉ có Admin mới có quyền thao tác với đơn hàng.',
             type: 'error',
-            duration: 10000, // Show longer for important message
           });
           
           console.error('🔧 BACKEND FIX NEEDED:');
@@ -536,7 +542,7 @@ export const StaffDashboard = () => {
         } else {
           showToast({
             title: 'Lỗi',
-            description: `Không thể lưu lý do từ chối: ${errorMessage || 'Vui lòng thử lại.'}`,
+            description: 'Vì đơn hàng đang trong quá trình "đang xử lí", chỉ có Admin mới có quyền thao tác với đơn hàng.',
             type: 'error',
           });
         }
