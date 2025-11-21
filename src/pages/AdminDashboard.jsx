@@ -450,7 +450,16 @@ export const AdminDashboard = () => {
           rawRole: usersData.find(raw => (raw.id ?? raw.Id) === u.id)?.role ?? usersData.find(raw => (raw.id ?? raw.Id) === u.id)?.Role
         })));
       }
-      setUsers(normalizedUsers);
+      
+      // ✅ Filter out Admin users (role = 1 or 'Admin') to prevent self-management
+      const nonAdminUsers = normalizedUsers.filter(u => {
+        const userRole = (u.role ?? u.Role ?? '').toString().toLowerCase();
+        return userRole !== '1' && userRole !== 'admin';
+      });
+      
+      console.log(`✅ Filtered out ${normalizedUsers.length - nonAdminUsers.length} Admin users from management list`);
+      
+      setUsers(nonAdminUsers);
       const meta = res.Meta || res.meta || {};
       setUsersPage(meta.Page || meta.page || page);
       setUsersPageSize(meta.PageSize || meta.pageSize || pageSize);
