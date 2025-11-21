@@ -486,7 +486,7 @@ export const StaffDashboard = () => {
           if (buyerId) {
             const order = orders.find(o => (o.orderId || o.OrderId || o.id) == orderId);
             const refundMessage = refundOption === 'refund' 
-              ? `Số tiền cọc ${formatPrice(response.refundAmount || order?.depositAmount || order?.totalAmount || 0)} sẽ được hoàn lại vào tài khoản của bạn trong vòng 3-5 ngày làm việc.`
+              ? `Số tiền cọc ${formatPrice(response.refundAmount || order?.depositAmount || order?.totalAmount || 0)} sẽ được hoàn lại vào tài khoản của người mua trong vòng 3-5 ngày làm việc.`
               : 'Số tiền cọc sẽ không được hoàn lại do điều khoản hủy giao dịch.';
             
             await apiRequest('/api/Notification', {
@@ -1537,17 +1537,24 @@ export const StaffDashboard = () => {
                   </div>
 
                   {/* Cancellation Info (if cancelled) */}
-                  {(orderDetailModal.orderDetails.cancellationReason || orderDetailModal.orderDetails.CancellationReason || orderDetailModal.orderDetails.adminNotes || orderDetailModal.orderDetails.AdminNotes) && (
-                    <div className="bg-red-50 rounded-lg p-4 border border-red-200">
-                      <h4 className="font-semibold text-red-900 mb-3">Lý do hủy giao dịch</h4>
-                      <div className="text-sm text-red-800">
-                        {orderDetailModal.orderDetails.cancellationReason || 
-                         orderDetailModal.orderDetails.CancellationReason || 
-                         orderDetailModal.orderDetails.adminNotes || 
-                         orderDetailModal.orderDetails.AdminNotes}
+                  {(orderDetailModal.orderDetails.cancellationReason || orderDetailModal.orderDetails.CancellationReason || orderDetailModal.orderDetails.adminNotes || orderDetailModal.orderDetails.AdminNotes) && (() => {
+                    // ✅ Clean cancellationReason: Remove emoji icons only
+                    let cleanReason = orderDetailModal.orderDetails.cancellationReason || 
+                                     orderDetailModal.orderDetails.CancellationReason || 
+                                     orderDetailModal.orderDetails.adminNotes || 
+                                     orderDetailModal.orderDetails.AdminNotes || '';
+                    
+                    cleanReason = cleanReason.replace(/[✅⚠️]/g, '').trim();
+                    
+                    return (
+                      <div className="bg-red-50 rounded-lg p-4 border border-red-200">
+                        <h4 className="font-semibold text-red-900 mb-3">Lý do hủy giao dịch</h4>
+                        <div className="text-sm text-red-800 whitespace-pre-line">
+                          {cleanReason}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               ) : (
                 <div className="flex items-center justify-center py-12">
