@@ -94,6 +94,18 @@ export const AdminDashboard = () => {
   const [dateFilter, setDateFilter] = useState("all");
   const [transactionStatusFilter, setTransactionStatusFilter] = useState("all"); // Filter for transaction status: all, pending, completed, rejected
   const [loading, setLoading] = useState(true);
+  
+  // Pagination state for listings (vehicles/batteries/dashboard)
+  const [listingsPage, setListingsPage] = useState(1);
+  const [listingsPerPage] = useState(10);
+  
+  // Pagination state for transactions
+  const [transactionsPage, setTransactionsPage] = useState(1);
+  const [transactionsPerPage] = useState(10);
+  
+  // Pagination state for cancelled orders
+  const [cancelledOrdersPage, setCancelledOrdersPage] = useState(1);
+  const [cancelledOrdersPerPage] = useState(9); // 9 cards (3x3 grid)
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [expandedDetails, setExpandedDetails] = useState(false);
   const [expandedDetailsDuplicateWarning, setExpandedDetailsDuplicateWarning] = useState({
@@ -1308,6 +1320,8 @@ export const AdminDashboard = () => {
     });
 
     setFilteredOrders(filtered);
+    // Reset to page 1 when filter changes
+    setTransactionsPage(1);
   }, [orders, transactionStatusFilter]);
 
   useEffect(() => {
@@ -2279,6 +2293,8 @@ export const AdminDashboard = () => {
     });
 
     setFilteredListings(filtered);
+    // Reset to page 1 when filter changes
+    setListingsPage(1);
   };
 
   const handleApprove = async (productId) => {
@@ -4023,7 +4039,13 @@ export const AdminDashboard = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredListings.map((listing) => (
+                  {(() => {
+                    // Pagination logic for listings
+                    const startIndex = (listingsPage - 1) * listingsPerPage;
+                    const endIndex = startIndex + listingsPerPage;
+                    const paginatedListings = filteredListings.slice(startIndex, endIndex);
+                    
+                    return paginatedListings.map((listing) => (
                     <tr key={listing.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
@@ -4128,9 +4150,75 @@ export const AdminDashboard = () => {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    ));
+                  })()}
                 </tbody>
               </table>
+              
+              {/* Pagination Controls for Listings */}
+              {filteredListings.length > 0 && (() => {
+                const totalPages = Math.ceil(filteredListings.length / listingsPerPage);
+                
+                if (totalPages <= 1) return null;
+                
+                return (
+                  <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between bg-gray-50">
+                    <div className="text-sm text-gray-700">
+                      Hiển thị <span className="font-medium">{Math.min((listingsPage - 1) * listingsPerPage + 1, filteredListings.length)}</span> đến{' '}
+                      <span className="font-medium">{Math.min(listingsPage * listingsPerPage, filteredListings.length)}</span> trong tổng số{' '}
+                      <span className="font-medium">{filteredListings.length}</span> sản phẩm
+                    </div>
+                    
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => setListingsPage(prev => Math.max(1, prev - 1))}
+                        disabled={listingsPage === 1}
+                        className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Trước
+                      </button>
+                      
+                      <div className="flex items-center space-x-1">
+                        {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                          if (
+                            page === 1 ||
+                            page === totalPages ||
+                            (page >= listingsPage - 1 && page <= listingsPage + 1)
+                          ) {
+                            return (
+                              <button
+                                key={page}
+                                onClick={() => setListingsPage(page)}
+                                className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                                  listingsPage === page
+                                    ? 'bg-blue-600 text-white'
+                                    : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
+                                }`}
+                              >
+                                {page}
+                              </button>
+                            );
+                          } else if (
+                            page === listingsPage - 2 ||
+                            page === listingsPage + 2
+                          ) {
+                            return <span key={page} className="px-2 text-gray-500">...</span>;
+                          }
+                          return null;
+                        })}
+                      </div>
+                      
+                      <button
+                        onClick={() => setListingsPage(prev => Math.min(totalPages, prev + 1))}
+                        disabled={listingsPage === totalPages}
+                        className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Sau
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
@@ -5213,7 +5301,13 @@ export const AdminDashboard = () => {
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
-                          {filteredOrders.map((order) => {
+                          {(() => {
+                            // Pagination logic for transactions
+                            const startIndex = (transactionsPage - 1) * transactionsPerPage;
+                            const endIndex = startIndex + transactionsPerPage;
+                            const paginatedOrders = filteredOrders.slice(startIndex, endIndex);
+                            
+                            return paginatedOrders.map((order) => {
                             const status = (order.status || order.orderStatus || order.Status || order.OrderStatus || "").toLowerCase();
                             const orderId = order.orderId || order.OrderId || order.id || order.Id;
                             const hasContract = order.contractUrl || order.ContractUrl;
@@ -5323,10 +5417,76 @@ export const AdminDashboard = () => {
                                 </td>
                               </tr>
                             );
-                          })}
+                            });
+                          })()}
                         </tbody>
                       </table>
                     </div>
+                    
+                    {/* Pagination Controls for Transactions */}
+                    {filteredOrders.length > 0 && (() => {
+                      const totalPages = Math.ceil(filteredOrders.length / transactionsPerPage);
+                      
+                      if (totalPages <= 1) return null;
+                      
+                      return (
+                        <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between bg-gray-50">
+                          <div className="text-sm text-gray-700">
+                            Hiển thị <span className="font-medium">{Math.min((transactionsPage - 1) * transactionsPerPage + 1, filteredOrders.length)}</span> đến{' '}
+                            <span className="font-medium">{Math.min(transactionsPage * transactionsPerPage, filteredOrders.length)}</span> trong tổng số{' '}
+                            <span className="font-medium">{filteredOrders.length}</span> đơn hàng
+                          </div>
+                          
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={() => setTransactionsPage(prev => Math.max(1, prev - 1))}
+                              disabled={transactionsPage === 1}
+                              className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              Trước
+                            </button>
+                            
+                            <div className="flex items-center space-x-1">
+                              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                                if (
+                                  page === 1 ||
+                                  page === totalPages ||
+                                  (page >= transactionsPage - 1 && page <= transactionsPage + 1)
+                                ) {
+                                  return (
+                                    <button
+                                      key={page}
+                                      onClick={() => setTransactionsPage(page)}
+                                      className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                                        transactionsPage === page
+                                          ? 'bg-blue-600 text-white'
+                                          : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
+                                      }`}
+                                    >
+                                      {page}
+                                    </button>
+                                  );
+                                } else if (
+                                  page === transactionsPage - 2 ||
+                                  page === transactionsPage + 2
+                                ) {
+                                  return <span key={page} className="px-2 text-gray-500">...</span>;
+                                }
+                                return null;
+                              })}
+                            </div>
+                            
+                            <button
+                              onClick={() => setTransactionsPage(prev => Math.min(totalPages, prev + 1))}
+                              disabled={transactionsPage === totalPages}
+                              className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              Sau
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 ) : (
                   <div className="text-center py-8">
@@ -5370,9 +5530,16 @@ export const AdminDashboard = () => {
                   );
                 }
 
+                // Pagination logic for cancelled orders
+                const totalPages = Math.ceil(cancelledOrders.length / cancelledOrdersPerPage);
+                const startIndex = (cancelledOrdersPage - 1) * cancelledOrdersPerPage;
+                const endIndex = startIndex + cancelledOrdersPerPage;
+                const paginatedCancelledOrders = cancelledOrders.slice(startIndex, endIndex);
+
                 return (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {cancelledOrders.map((order) => {
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {paginatedCancelledOrders.map((order) => {
                       // Find the product for this order
                       const productId = order.productId || order.ProductId || order.product?.productId || order.product?.id;
                       const product = allListings.find(p => (p.id || p.productId) == productId);
@@ -5530,7 +5697,67 @@ export const AdminDashboard = () => {
                         </div>
                       );
                     })}
-                  </div>
+                    </div>
+                    
+                    {/* Pagination Controls for Cancelled Orders */}
+                    {totalPages > 1 && (
+                      <div className="mt-6 flex items-center justify-between">
+                        <div className="text-sm text-gray-700">
+                          Hiển thị <span className="font-medium">{startIndex + 1}</span> đến{' '}
+                          <span className="font-medium">{Math.min(endIndex, cancelledOrders.length)}</span> trong tổng số{' '}
+                          <span className="font-medium">{cancelledOrders.length}</span> đơn hàng bị từ chối
+                        </div>
+                        
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={() => setCancelledOrdersPage(prev => Math.max(1, prev - 1))}
+                            disabled={cancelledOrdersPage === 1}
+                            className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          >
+                            Trước
+                          </button>
+                          
+                          <div className="flex items-center space-x-1">
+                            {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                              if (
+                                page === 1 ||
+                                page === totalPages ||
+                                (page >= cancelledOrdersPage - 1 && page <= cancelledOrdersPage + 1)
+                              ) {
+                                return (
+                                  <button
+                                    key={page}
+                                    onClick={() => setCancelledOrdersPage(page)}
+                                    className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                                      cancelledOrdersPage === page
+                                        ? 'bg-red-600 text-white'
+                                        : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
+                                    }`}
+                                  >
+                                    {page}
+                                  </button>
+                                );
+                              } else if (
+                                page === cancelledOrdersPage - 2 ||
+                                page === cancelledOrdersPage + 2
+                              ) {
+                                return <span key={page} className="px-2 text-gray-500">...</span>;
+                              }
+                              return null;
+                            })}
+                          </div>
+                          
+                          <button
+                            onClick={() => setCancelledOrdersPage(prev => Math.min(totalPages, prev + 1))}
+                            disabled={cancelledOrdersPage === totalPages}
+                            className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          >
+                            Sau
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 );
               })()}
             </div>
