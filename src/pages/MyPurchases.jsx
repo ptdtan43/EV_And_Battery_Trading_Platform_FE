@@ -453,15 +453,42 @@ const MyPurchases = () => {
         return isValid;
       });
       
-      console.log(`✅ Valid sales count: ${validSales.length}`);
+      console.log(`✅ Valid sales count (before deduplication): ${validSales.length}`);
+      
+      // ✅ DEDUPLICATION: Remove duplicate sales by productId + buyerId
+      // Keep the most recent order for each product + buyer combination
+      const salesByProductBuyer = new Map();
+      
+      validSales.forEach(sale => {
+        const productId = sale.productId;
+        const buyerName = sale.buyerName;
+        const key = `${productId}_${buyerName}`;
+        
+        if (!salesByProductBuyer.has(key)) {
+          salesByProductBuyer.set(key, sale);
+        } else {
+          // Keep the newer one
+          const existing = salesByProductBuyer.get(key);
+          const existingDate = new Date(existing.createdDate || 0);
+          const currentDate = new Date(sale.createdDate || 0);
+          
+          if (currentDate > existingDate) {
+            salesByProductBuyer.set(key, sale);
+            console.log(`🔄 Replaced duplicate sale for product ${productId}: order ${existing.orderId} → ${sale.orderId}`);
+          }
+        }
+      });
+      
+      const uniqueSales = Array.from(salesByProductBuyer.values());
+      console.log(`✅ Valid sales count (after deduplication): ${uniqueSales.length} (removed ${validSales.length - uniqueSales.length} duplicates)`);
       
       // ✅ FIX: Ensure we set sales even if empty (to show "Chưa có đơn bán" message)
-      if (validSales.length === 0) {
+      if (uniqueSales.length === 0) {
         console.warn(`⚠️ No valid sales found. Total orders from API: ${sellerOrders.length}`);
       }
       
-      setSales(validSales);
-      console.log(`✅ Set sales state with ${validSales.length} items`);
+      setSales(uniqueSales);
+      console.log(`✅ Set sales state with ${uniqueSales.length} items`);
     } catch (error) {
       console.error('Error loading sales:', error);
       
