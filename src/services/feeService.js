@@ -126,14 +126,7 @@ class FeeService {
    * @returns {Promise<number>} Deposit amount in VND
    */
   async calculateDepositAmount(price, productType = 'Vehicle') {
-    const type = (productType || '').toLowerCase();
-    
-    // Fixed lower deposit for batteries
-    if (type === 'battery') {
-      return 500000; // 500,000 VND for battery deposits
-    }
-
-    // For vehicles, use percentage from settings (use public endpoint for regular users)
+    // ✅ Use percentage from settings for ALL product types (Vehicle, Battery, etc.)
     const depositPercentage = await this.getDepositPercentage(false);
     let depositAmount = Math.round(price * depositPercentage);
     

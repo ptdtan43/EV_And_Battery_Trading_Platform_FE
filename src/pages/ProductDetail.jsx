@@ -544,14 +544,8 @@ export const ProductDetail = () => {
     if (!product) return 0;
     
     const price = product?.price || 0;
-    const type = (product?.productType || '').toLowerCase();
     
-    // Fixed lower deposit for batteries to match market expectations
-    if (type === 'battery') {
-      return 500000; // 500,000 VND for battery deposits
-    }
-    
-    // For vehicles, use percentage from API settings
+    // ✅ Use percentage from API settings for ALL product types (Vehicle, Battery, etc.)
     try {
       const amount = await feeService.calculateDepositAmount(price, product.productType);
       return amount;
@@ -1651,9 +1645,7 @@ export const ProductDetail = () => {
                     </span>
                   </div>
                   <p className="text-xs text-blue-600">
-                    {(product?.productType || '').toLowerCase() === 'battery'
-                      ? "Sản phẩm là pin - cọc cố định 500.000đ để giữ hàng và hẹn gặp tại kho"
-                      : `Sản phẩm - cọc ${formatPrice(depositAmount)} để gặp mặt trực tiếp`}
+                    Sản phẩm - cọc {formatPrice(depositAmount)} để gặp mặt trực tiếp
                   </p>
                 </div>
               </div>
