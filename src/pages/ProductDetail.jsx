@@ -831,30 +831,35 @@ export const ProductDetail = () => {
             </div>
 
             <div className="flex items-center space-x-2">
-              <button
-                onClick={handleFavorite}
-                className={`p-2 rounded-lg transition-colors ${
-                  isFavorite
-                    ? "bg-red-50 text-red-600"
-                    : "hover:bg-gray-100 text-gray-600"
-                }`}
-                title="Yêu thích"
-              >
-                <Heart
-                  className={`h-5 w-5 ${isFavorite ? "fill-current" : ""}`}
-                />
-              </button>
-              <button>
-               
-              </button>
-              {user && (
-                <button 
-                  onClick={() => setShowReportModal(true)}
-                  className="p-2 hover:bg-red-50 rounded-lg transition-colors text-gray-600 hover:text-red-600"
-                  title="Báo cáo vi phạm"
-                >
-                  <Flag className="h-5 w-5" />
-                </button>
+              {/* Hide favorite and report buttons for sold products */}
+              {product?.status?.toLowerCase() !== 'sold' && product?.status?.toLowerCase() !== 'completed' && (
+                <>
+                  <button
+                    onClick={handleFavorite}
+                    className={`p-2 rounded-lg transition-colors ${
+                      isFavorite
+                        ? "bg-red-50 text-red-600"
+                        : "hover:bg-gray-100 text-gray-600"
+                    }`}
+                    title="Yêu thích"
+                  >
+                    <Heart
+                      className={`h-5 w-5 ${isFavorite ? "fill-current" : ""}`}
+                    />
+                  </button>
+                  <button>
+                   
+                  </button>
+                  {user && (
+                    <button 
+                      onClick={() => setShowReportModal(true)}
+                      className="p-2 hover:bg-red-50 rounded-lg transition-colors text-gray-600 hover:text-red-600"
+                      title="Báo cáo vi phạm"
+                    >
+                      <Flag className="h-5 w-5" />
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>
