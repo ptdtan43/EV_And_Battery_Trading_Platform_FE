@@ -55,6 +55,7 @@ export const StaffDashboard = () => {
     pendingOrders: 0,
     completedOrders: 0,
     activeOrders: 0,
+    cancelledOrders: 0,
     totalRevenue: 0,
     todaysRevenue: 0,
     thisMonthRevenue: 0,
@@ -70,6 +71,10 @@ export const StaffDashboard = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [orderStatusFilter, setOrderStatusFilter] = useState("all");
   const [processingIds, setProcessingIds] = useState(new Set());
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(10); // 10 orders per page
   
   const [uploadContractModal, setUploadContractModal] = useState({
     isOpen: false,
@@ -145,6 +150,10 @@ export const StaffDashboard = () => {
         const status = (o.status || o.Status || "").toLowerCase();
         return status === "pending" || status === "deposited";
       }).length;
+      const cancelledOrders = ordersArray.filter(o => {
+        const status = (o.status || o.Status || "").toLowerCase();
+        return status === "cancelled" || status === "canceled" || status === "failed";
+      }).length;
 
       const totalRevenue = ordersArray
         .filter(o => (o.status || o.Status || "").toLowerCase() === "completed")
@@ -188,6 +197,7 @@ export const StaffDashboard = () => {
         pendingOrders,
         completedOrders,
         activeOrders,
+        cancelledOrders,
         totalRevenue,
         todaysRevenue,
         thisMonthRevenue,
@@ -284,6 +294,8 @@ export const StaffDashboard = () => {
     }
 
     setFilteredOrders(filtered);
+    // Reset to page 1 when filter changes
+    setCurrentPage(1);
   }, [orders, orderStatusFilter, searchTerm]);
 
   const handleTabChange = (tab) => {
@@ -695,15 +707,15 @@ export const StaffDashboard = () => {
               </div>
             </div>
 
-            {/* Total Revenue */}
+            {/* Cancelled Orders */}
             <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-shadow">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-gray-600 text-sm font-medium mb-1">Tổng doanh thu</p>
-                  <p className="text-2xl font-bold text-purple-600">{formatPrice(stats.totalRevenue)}</p>
+                  <p className="text-gray-600 text-sm font-medium mb-1">Đơn hủy</p>
+                  <p className="text-2xl font-bold text-red-600">{stats.cancelledOrders || 0}</p>
                 </div>
-                <div className="w-14 h-14 bg-purple-100 rounded-xl flex items-center justify-center">
-                  <DollarSign className="h-7 w-7 text-purple-600" />
+                <div className="w-14 h-14 bg-red-100 rounded-xl flex items-center justify-center">
+                  <XCircle className="h-7 w-7 text-red-600" />
                 </div>
               </div>
             </div>
@@ -758,17 +770,27 @@ export const StaffDashboard = () => {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredOrders.length === 0 ? (
-                      <tr>
-                        <td colSpan="9" className="px-6 py-12 text-center">
-                          <div className="flex flex-col items-center">
-                            <Package className="h-12 w-12 text-gray-400 mb-3" />
-                            <p className="text-gray-500 font-medium">Không có đơn hàng nào</p>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredOrders.map((order) => {
+                    {(() => {
+                      // Pagination logic
+                      const totalPages = Math.ceil(filteredOrders.length / itemsPerPage);
+                      const startIndex = (currentPage - 1) * itemsPerPage;
+                      const endIndex = startIndex + itemsPerPage;
+                      const paginatedOrders = filteredOrders.slice(startIndex, endIndex);
+                      
+                      if (paginatedOrders.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan="9" className="px-6 py-12 text-center">
+                              <div className="flex flex-col items-center">
+                                <Package className="h-12 w-12 text-gray-400 mb-3" />
+                                <p className="text-gray-500 font-medium">Không có đơn hàng nào</p>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      }
+                      
+                      return paginatedOrders.map((order) => {
                         const status = (order.status || order.Status || order.orderStatus || order.OrderStatus || "").toLowerCase();
                         const orderId = order.orderId || order.OrderId || order.id || order.Id;
                         const hasContract = order.contractUrl || order.ContractUrl;
@@ -977,11 +999,77 @@ export const StaffDashboard = () => {
                             </td>
                           </tr>
                         );
-                      })
-                    )}
+                      });
+                    })()}
                   </tbody>
                 </table>
               </div>
+              
+              {/* Pagination Controls */}
+              {filteredOrders.length > 0 && (() => {
+                const totalPages = Math.ceil(filteredOrders.length / itemsPerPage);
+                
+                if (totalPages <= 1) return null;
+                
+                return (
+                  <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between bg-gray-50">
+                    <div className="text-sm text-gray-700">
+                      Hiển thị <span className="font-medium">{Math.min((currentPage - 1) * itemsPerPage + 1, filteredOrders.length)}</span> đến{' '}
+                      <span className="font-medium">{Math.min(currentPage * itemsPerPage, filteredOrders.length)}</span> trong tổng số{' '}
+                      <span className="font-medium">{filteredOrders.length}</span> đơn hàng
+                    </div>
+                    
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                        disabled={currentPage === 1}
+                        className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Trước
+                      </button>
+                      
+                      <div className="flex items-center space-x-1">
+                        {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                          // Show first page, last page, current page, and pages around current
+                          if (
+                            page === 1 ||
+                            page === totalPages ||
+                            (page >= currentPage - 1 && page <= currentPage + 1)
+                          ) {
+                            return (
+                              <button
+                                key={page}
+                                onClick={() => setCurrentPage(page)}
+                                className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                                  currentPage === page
+                                    ? 'bg-green-600 text-white'
+                                    : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
+                                }`}
+                              >
+                                {page}
+                              </button>
+                            );
+                          } else if (
+                            page === currentPage - 2 ||
+                            page === currentPage + 2
+                          ) {
+                            return <span key={page} className="px-2 text-gray-500">...</span>;
+                          }
+                          return null;
+                        })}
+                      </div>
+                      
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                        disabled={currentPage === totalPages}
+                        className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Sau
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
