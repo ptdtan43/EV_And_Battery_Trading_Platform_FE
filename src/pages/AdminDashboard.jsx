@@ -1745,22 +1745,59 @@ export const AdminDashboard = () => {
         return orderStatus === "completed";
       });
 
-      // ✅ Fetch all verification payments once
+      // ✅ Fetch all verification payments once and deduplicate
       let allVerificationPayments = [];
       try {
         const payments = await apiRequest('/api/Payment');
-        allVerificationPayments = payments.filter(p => 
-          (p.paymentType || p.PaymentType || '').toLowerCase() === 'verification' &&
-          (p.status || p.Status || '').toLowerCase() === 'completed'
-        );
+        console.log('🔍 [REVENUE DEBUG] Total payments from API:', payments?.length || 0);
+        console.log('🔍 [REVENUE DEBUG] Sample payment:', payments?.[0]);
+        
+        // ✅ FIX: Backend uses "Success" not "Completed" for payment status
+        const verificationPayments = payments.filter(p => {
+          const paymentType = (p.paymentType || p.PaymentType || '').toLowerCase();
+          const status = (p.status || p.Status || '').toLowerCase();
+          return paymentType === 'verification' && status === 'success';
+        });
+        console.log('🔍 [REVENUE DEBUG] Verification payments (success):', verificationPayments.length);
+        console.log('🔍 [REVENUE DEBUG] Sample verification payment:', verificationPayments?.[0]);
+
+        // ✅ Deduplicate verification payments by paymentId
+        const seenPaymentIds = new Set();
+        allVerificationPayments = verificationPayments.filter(p => {
+          const paymentId = p.paymentId || p.PaymentId || p.id || p.Id;
+          if (paymentId && !seenPaymentIds.has(paymentId)) {
+            seenPaymentIds.add(paymentId);
+            return true;
+          }
+          return !paymentId; // Keep payments without ID (shouldn't happen)
+        });
+
+        if (verificationPayments.length !== allVerificationPayments.length) {
+          console.log(`Deduplicated verification payments: ${verificationPayments.length} → ${allVerificationPayments.length}`);
+        }
+        
+        console.log('🔍 [REVENUE DEBUG] Final verification payments count:', allVerificationPayments.length);
       } catch (error) {
-        console.error('Failed to fetch verification payments:', error);
+        console.error('[REVENUE DEBUG] Failed to fetch verification payments:', error);
       }
 
       // ✅ Calculate total revenue from deposits
+      console.log('🔍 [DEPOSIT DEBUG] Completed orders list:', completedOrdersList.length);
+      console.log('🔍 [DEPOSIT DEBUG] Sample completed order:', completedOrdersList[0]);
+      
       const depositRevenue = completedOrdersList.reduce((sum, o) => {
-        return sum + parseFloat(o.depositAmount || o.DepositAmount || 0);
+        const deposit = parseFloat(o.depositAmount || o.DepositAmount || 0);
+        if (deposit > 0) {
+          console.log('[DEPOSIT DEBUG] Order has deposit:', {
+            orderId: o.orderId || o.OrderId,
+            depositAmount: deposit,
+            status: o.status || o.Status
+          });
+        }
+        return sum + deposit;
       }, 0);
+      
+      console.log('[DEPOSIT DEBUG] Total deposit revenue:', depositRevenue);
 
       // ✅ Calculate total revenue from verification
       const verificationRevenue = allVerificationPayments.reduce((sum, p) => {
@@ -1769,6 +1806,14 @@ export const AdminDashboard = () => {
 
       // ✅ Total revenue = deposit + verification
       const totalRevenue = depositRevenue + verificationRevenue;
+
+      console.log('💰 [REVENUE DEBUG] Revenue breakdown:', {
+        depositRevenue: depositRevenue.toLocaleString('vi-VN'),
+        verificationRevenue: verificationRevenue.toLocaleString('vi-VN'),
+        totalRevenue: totalRevenue.toLocaleString('vi-VN'),
+        completedOrders: completedOrdersList.length,
+        verificationPayments: allVerificationPayments.length
+      });
 
       // ✅ FIX: Calculate revenue by date from completed orders
       const today = new Date();
@@ -1836,7 +1881,9 @@ export const AdminDashboard = () => {
 
       const thisMonthRevenue = thisMonthDepositRevenue + thisMonthVerificationRevenue;
 
-      // ✅ FIX: Calculate average from completed orders, not approved products
+      // ✅ FIX: Calculate average deposit value from completed orders only (exclude verification fees for more accurate per-order average)
+      const averageDepositValue = completedOrdersList.length > 0 ? depositRevenue / completedOrdersList.length : 0;
+      // ✅ Total average includes both deposit and verification
       const averageOrderValue = completedOrdersList.length > 0 ? totalRevenue / completedOrdersList.length : 0;
       const completionRate = transactionsArray.length > 0 ? (completedOrders / transactionsArray.length) * 100 : 0;
 
@@ -3023,11 +3070,11 @@ export const AdminDashboard = () => {
             <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-gray-500 text-sm font-medium">GIÁ TRỊ TB/MỖI ĐƠN</p>
+                  <p className="text-gray-500 text-sm font-medium">GIÁ TRỊ TB/ĐƠN HÀNG</p>
                   <p className="text-3xl font-bold text-gray-900 mt-2">
                     {formatPrice(stats.averageOrderValue)}
                   </p>
-                  <p className="text-xs text-gray-600 mt-1">Mỗi đơn hàng hoàn tất</p>
+                  <p className="text-xs text-gray-600 mt-1">Bao gồm cọc + phí kiểm định</p>
                 </div>
                 <div className="bg-blue-100 p-4 rounded-xl">
                   <Activity className="h-8 w-8 text-blue-600" />
