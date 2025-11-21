@@ -126,7 +126,7 @@ export const SellerProducts = () => {
           if (images.length === 0) {
             try {
               console.log(
-                `🔍 No images found, trying API for product ${
+                ` No images found, trying API for product ${
                   product.id || product.productId || product.Id
                 }`
               );

@@ -80,6 +80,8 @@ export const getOrderStatusText = (status) => {
     completed: 'Hoàn tất',
     cancelled: 'Đã hủy',
     canceled: 'Đã hủy',
+    rejected: 'Đã từ chối',
+    failed: 'Thất bại',
     active: 'Hoạt động',
     reserved: 'Đã thanh toán cọc',
     sold: 'Đã bán',

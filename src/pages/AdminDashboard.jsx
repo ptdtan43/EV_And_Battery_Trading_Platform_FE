@@ -1294,7 +1294,7 @@ export const AdminDashboard = () => {
         } else if (transactionStatusFilter === "completed") {
           return status === 'completed';
         } else if (transactionStatusFilter === "rejected") {
-          return status === 'cancelled' || status === 'failed' || status === 'canceled';
+          return status === 'cancelled' || status === 'failed' || status === 'canceled' || status === 'rejected';
         }
         return true;
       });
@@ -3083,7 +3083,7 @@ export const AdminDashboard = () => {
             <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-gray-500 text-sm font-medium">DOANH THU HÔM NAY</p>
+                  <p className="text-gray-500 text-sm font-medium">DOANH THU ĐƠN HÀNG HOÀN TẤT HÔM NAY</p>
                   <p className="text-3xl font-bold text-gray-900 mt-2">
                     {formatPrice(stats.todaysRevenue)}
                   </p>
@@ -3168,7 +3168,7 @@ export const AdminDashboard = () => {
             <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-gray-500 text-sm font-medium">THÁNG NÀY</p>
+                  <p className="text-gray-500 text-sm font-medium">DOANH THU ĐƠN HÀNG HOÀN TẤT THÁNG NÀY</p>
                   <p className="text-3xl font-bold text-gray-900 mt-2">
                     {formatPrice(stats.thisMonthRevenue)}
                   </p>
@@ -5172,7 +5172,7 @@ export const AdminDashboard = () => {
                       <p className="text-2xl font-bold text-red-600">
                         {orders.filter(order => {
                           const status = (order.status || order.orderStatus || order.Status || order.OrderStatus || '').toLowerCase();
-                          return status === 'cancelled' || status === 'failed' || status === 'canceled';
+                          return status === 'cancelled' || status === 'failed' || status === 'canceled' || status === 'rejected';
                         }).length}
                       </p>
                     </div>
@@ -5251,7 +5251,7 @@ export const AdminDashboard = () => {
                                 <td className="px-6 py-4 whitespace-nowrap">
                                   <span className={`px-2 py-1 text-xs font-medium rounded-full ${status === 'completed' ? 'bg-green-100 text-green-800' :
                                       status === 'pending' || status === 'processing' || status === 'depositpaid' || status === 'deposited' ? 'bg-yellow-100 text-yellow-800' :
-                                        status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                                        status === 'cancelled' || status === 'canceled' || status === 'rejected' || status === 'failed' ? 'bg-red-100 text-red-800' :
                                           status === 'confirmed' ? 'bg-blue-100 text-blue-800' :
                                             'bg-gray-100 text-gray-800'
                                     }`}>
@@ -5815,7 +5815,7 @@ export const AdminDashboard = () => {
                             <span className="text-gray-600">Trạng thái:</span>
                             <span className={`px-2 py-1 text-xs font-medium rounded-full ${(orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'completed' ? 'bg-green-100 text-green-800' :
                                 (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'pending' || (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'processing' || (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'depositpaid' || (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'deposited' ? 'bg-yellow-100 text-yellow-800' :
-                                  (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'cancelled' ? 'bg-red-100 text-red-800' :
+                                  (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'cancelled' || (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'canceled' || (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'rejected' || (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'failed' ? 'bg-red-100 text-red-800' :
                                     (orderDetailModal.orderDetails.orderStatus || '').toLowerCase() === 'confirmed' ? 'bg-blue-100 text-blue-800' :
                                       'bg-gray-100 text-gray-800'
                               }`}>
