@@ -1147,7 +1147,7 @@ export const AdminDashboard = () => {
             const buyerId = response.buyerId || order?.userId;
             if (buyerId) {
               const refundMessage = refundOption === 'refund'
-                ? `Số tiền cọc ${formatPrice(response.refundAmount || order?.depositAmount || 0)} sẽ được hoàn lại vào tài khoản của bạn trong vòng 3-5 ngày làm việc.`
+                ? `Số tiền cọc ${formatPrice(response.refundAmount || order?.depositAmount || 0)} sẽ được hoàn lại vào tài khoản của người mua trong vòng 3-5 ngày làm việc.`
                 : 'Số tiền cọc sẽ không được hoàn lại do điều khoản hủy giao dịch.';
 
               await apiRequest('/api/Notification', {
@@ -1446,6 +1446,22 @@ export const AdminDashboard = () => {
       try {
         transactions = await apiRequest("/api/Order");
         console.log("✅ Orders loaded:", transactions);
+        
+        // ✅ DEBUG: Log sample order to check field names
+        if (transactions && transactions.length > 0) {
+          console.log("🔍 Sample order from API:", transactions[0]);
+          console.log("🔍 Sample order keys:", Object.keys(transactions[0]));
+          
+          // Check for cancelled orders
+          const cancelledSample = transactions.find(o => {
+            const status = (o.status || o.Status || '').toLowerCase();
+            return status === 'cancelled' || status === 'failed' || status === 'canceled';
+          });
+          if (cancelledSample) {
+            console.log("🔍 Sample CANCELLED order:", cancelledSample);
+            console.log("🔍 Cancelled order keys:", Object.keys(cancelledSample));
+          }
+        }
       } catch (error) {
         console.warn("⚠️ Failed to load orders:", error.message);
         // Try to get cached orders data
@@ -1968,11 +1984,20 @@ export const AdminDashboard = () => {
       };
 
       const ordersByProductBuyer = new Map();
+      const cancelledOrders = []; // ✅ Keep cancelled orders separately
+
       for (const order of ordersByOrderId) {
         const productId = order.productId || order.ProductId || order.product?.productId || order.product?.id;
         const buyerId = order.buyerId || order.BuyerId || order.userId || order.UserId;
         const status = (order.status || order.orderStatus || order.Status || order.OrderStatus || '').toLowerCase();
         const priority = orderPriority[status] || 0;
+
+        // ✅ If order is cancelled/failed, add to separate array and skip deduplication
+        if (status === 'cancelled' || status === 'failed' || status === 'canceled') {
+          cancelledOrders.push(order);
+          console.log(`✅ Keeping cancelled order ${order.orderId || order.OrderId} (status: ${status})`);
+          continue;
+        }
 
         // Create unique key from productId + buyerId
         const key = `${productId}_${buyerId}`;
@@ -2011,8 +2036,10 @@ export const AdminDashboard = () => {
         }
       }
 
-      const uniqueOrders = Array.from(ordersByProductBuyer.values());
+      // ✅ Combine active orders with cancelled orders
+      const uniqueOrders = [...Array.from(ordersByProductBuyer.values()), ...cancelledOrders];
       console.log(`✅ Deduplicated orders: ${ordersArray.length} → ${uniqueOrders.length} (removed ${ordersArray.length - uniqueOrders.length} duplicates)`);
+      console.log(`✅ Cancelled orders kept: ${cancelledOrders.length}`);
       setOrders(uniqueOrders); // Store unique orders in state
       console.log("DEBUG: allListings set to:", sortedListings.length, "items. Content:", sortedListings.map(l => ({ id: l.id, verificationStatus: l.verificationStatus, productType: l.productType })));
 
@@ -4319,22 +4346,28 @@ export const AdminDashboard = () => {
                             )}
 
                             {/* Show cancellation reason if viewing from cancelled orders */}
-                            {cancelledOrderContext && cancelledOrderContext.cancellationReason && (
-                              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mt-4">
-                                <div className="flex items-start space-x-2">
-                                  <AlertTriangle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
-                                  <div className="flex-1">
-                                    <p className="text-sm text-red-800 font-medium mb-1">Lý do hủy giao dịch:</p>
-                                    <p className="text-sm text-red-700">{cancelledOrderContext.cancellationReason}</p>
-                                    {cancelledOrderContext.CancelledDate && (
-                                      <p className="text-xs text-red-600 mt-2">
-                                        Ngày hủy: {formatDate(cancelledOrderContext.CancelledDate)}
-                                      </p>
-                                    )}
+                            {cancelledOrderContext && cancelledOrderContext.cancellationReason && (() => {
+                              // ✅ Clean cancellationReason: Remove emoji icons only
+                              let cleanReason = cancelledOrderContext.cancellationReason;
+                              cleanReason = cleanReason.replace(/[✅⚠️]/g, '').trim();
+                              
+                              return (
+                                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mt-4">
+                                  <div className="flex items-start space-x-2">
+                                    <AlertTriangle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
+                                    <div className="flex-1">
+                                      <p className="text-sm text-red-800 font-medium mb-1">Lý do hủy giao dịch:</p>
+                                      <p className="text-sm text-red-700 whitespace-pre-line">{cleanReason}</p>
+                                      {cancelledOrderContext.CancelledDate && (
+                                        <p className="text-xs text-red-600 mt-2">
+                                          Ngày hủy: {formatDate(cancelledOrderContext.CancelledDate)}
+                                        </p>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            )}
+                              );
+                            })()}
                           </div>
                         </div>
                       </div>
@@ -5312,13 +5345,21 @@ export const AdminDashboard = () => {
             <div className="bg-white rounded-xl shadow-sm p-6 mt-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Quản lý giao dịch (Đã bị từ chối)</h3>
               {(() => {
+                // Debug: Log all orders to see what we have
+                console.log('🔍 [ADMIN] Total orders:', orders.length);
+                console.log('🔍 [ADMIN] All orders statuses:', orders.map(o => ({
+                  id: o.orderId || o.OrderId || o.id,
+                  status: o.status || o.orderStatus || o.Status || o.OrderStatus,
+                  statusLower: (o.status || o.orderStatus || o.Status || o.OrderStatus || '').toLowerCase()
+                })));
+
                 const cancelledOrders = orders.filter(order => {
                   const status = (order.status || order.orderStatus || order.Status || order.OrderStatus || '').toLowerCase();
-                  const hasCancellationReason = order.cancellationReason || order.adminNotes;
-                  const hasRefundOption = order.refundOption;
-                  // Include orders that are cancelled/failed/rejected AND have either cancellation reason or refund option
-                  return (status === 'cancelled' || status === 'failed' || status === 'canceled' || status === 'rejected') && (hasCancellationReason || hasRefundOption);
+                  // ✅ Show ALL cancelled/failed orders, regardless of whether they have cancellation reason or refund option
+                  return status === 'cancelled' || status === 'failed' || status === 'canceled';
                 });
+
+                console.log('🔍 [ADMIN] Cancelled orders found:', cancelledOrders.length);
 
                 if (cancelledOrders.length === 0) {
                   return (
@@ -5336,12 +5377,36 @@ export const AdminDashboard = () => {
                       const productId = order.productId || order.ProductId || order.product?.productId || order.product?.id;
                       const product = allListings.find(p => (p.id || p.productId) == productId);
 
+                      // ✅ Parse refund option from CancellationReason if not available as separate field
+                      let cancellationReason = order.cancellationReason || order.CancellationReason || '';
+                      let refundOption = order.refundOption || order.RefundOption;
+                      
+                      // If refundOption not available, parse from CancellationReason
+                      if (!refundOption && cancellationReason) {
+                        if (cancellationReason.includes('không được hoàn tiền') || 
+                            cancellationReason.includes('không hoàn tiền') ||
+                            cancellationReason.toLowerCase().includes('no refund')) {
+                          refundOption = 'no_refund';
+                        } else if (cancellationReason.includes('hoàn tiền') || 
+                                   cancellationReason.includes('hoàn lại') ||
+                                   cancellationReason.toLowerCase().includes('refund')) {
+                          refundOption = 'refund';
+                        }
+                      }
+
+                      // ✅ Clean cancellationReason: Remove emoji icons (✅⚠️) only
+                      if (cancellationReason) {
+                        // Remove emoji icons
+                        cancellationReason = cancellationReason.replace(/[✅⚠️]/g, '').trim();
+                      }
+
                       // Debug: Log order object to see available fields
                       console.log('🔍 Cancelled order:', {
                         orderId: order.orderId || order.OrderId || order.id,
                         status: order.status || order.orderStatus,
-                        cancellationReason: order.cancellationReason,
-                        refundOption: order.refundOption,
+                        cancellationReason: cancellationReason,
+                        refundOption: refundOption,
+                        parsedFromReason: !order.refundOption && !order.RefundOption,
                         adminNotes: order.adminNotes,
                         allKeys: Object.keys(order)
                       });
@@ -5413,26 +5478,26 @@ export const AdminDashboard = () => {
                                 })()}
                               </div>
                               {/* Cancellation Reason and Refund Status */}
-                              {(order.cancellationReason || order.refundOption) && (
+                              {(cancellationReason || refundOption) && (
                                 <div className="mt-3 p-3 bg-red-100 border border-red-200 rounded-lg">
                                   <div className="flex items-start space-x-2">
                                     <AlertTriangle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
                                     <div className="flex-1">
-                                      {order.cancellationReason && (
+                                      {cancellationReason && (
                                         <>
                                           <p className="text-xs font-medium text-red-900 mb-1">Lý do từ chối:</p>
-                                          <p className="text-xs text-red-800 mb-2">{order.cancellationReason}</p>
+                                          <p className="text-xs text-red-800 mb-2 whitespace-pre-line">{cancellationReason}</p>
                                         </>
                                       )}
                                       {/* Refund Status - Always show if available */}
-                                      {order.refundOption && (
-                                        <div className={order.cancellationReason ? "mt-2 pt-2 border-t border-red-300" : ""}>
+                                      {refundOption && (
+                                        <div className={cancellationReason ? "mt-2 pt-2 border-t border-red-300" : ""}>
                                           <p className="text-xs font-medium text-red-900 mb-1">Trạng thái hoàn tiền:</p>
-                                          <div className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${order.refundOption === 'refund'
+                                          <div className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${refundOption === 'refund'
                                               ? 'bg-green-100 text-green-800 border border-green-300'
                                               : 'bg-gray-100 text-gray-800 border border-gray-300'
                                             }`}>
-                                            {order.refundOption === 'refund' ? (
+                                            {refundOption === 'refund' ? (
                                               <>
                                                 <CheckCircle className="h-3 w-3 mr-1" />
                                                 Hoàn tiền
