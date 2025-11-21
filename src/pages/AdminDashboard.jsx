@@ -61,6 +61,9 @@ export const AdminDashboard = () => {
     approvedListings: 0,
     rejectedListings: 0,
     totalRevenue: 0,
+    depositRevenue: 0,
+    verificationRevenue: 0,
+    cancelledNoRefundRevenue: 0,
     vehicleListings: 0,
     batteryListings: 0,
     activeListings: 0,
@@ -78,6 +81,8 @@ export const AdminDashboard = () => {
     soldVehicles: 0,
     soldBatteries: 0,
   });
+  
+  const [cancelledNoRefundOrders, setCancelledNoRefundOrders] = useState([]);
 
   const [allListings, setAllListings] = useState([]);
   const [filteredListings, setFilteredListings] = useState([]);
@@ -1745,75 +1750,90 @@ export const AdminDashboard = () => {
         return orderStatus === "completed";
       });
 
-      // ✅ Fetch all verification payments once and deduplicate
-      let allVerificationPayments = [];
+      // ✅ NEW: Fetch revenue statistics from new API endpoint
+      let totalRevenue = 0;
+      let depositRevenue = 0;
+      let verificationRevenue = 0;
+      let cancelledNoRefundRevenue = 0;
+      let cancelledNoRefundOrders = [];
+      let allVerificationPayments = []; // Keep for date-based calculations
+      
       try {
-        const payments = await apiRequest('/api/Payment');
-        console.log('🔍 [REVENUE DEBUG] Total payments from API:', payments?.length || 0);
-        console.log('🔍 [REVENUE DEBUG] Sample payment:', payments?.[0]);
+        const revenueStats = await apiRequest('/api/Order/revenue-statistics');
+        console.log('💰 [REVENUE API] Revenue statistics:', revenueStats);
         
-        // ✅ FIX: Backend uses "Success" not "Completed" for payment status
-        const verificationPayments = payments.filter(p => {
-          const paymentType = (p.paymentType || p.PaymentType || '').toLowerCase();
-          const status = (p.status || p.Status || '').toLowerCase();
-          return paymentType === 'verification' && status === 'success';
-        });
-        console.log('🔍 [REVENUE DEBUG] Verification payments (success):', verificationPayments.length);
-        console.log('🔍 [REVENUE DEBUG] Sample verification payment:', verificationPayments?.[0]);
-
-        // ✅ Deduplicate verification payments by paymentId
-        const seenPaymentIds = new Set();
-        allVerificationPayments = verificationPayments.filter(p => {
-          const paymentId = p.paymentId || p.PaymentId || p.id || p.Id;
-          if (paymentId && !seenPaymentIds.has(paymentId)) {
-            seenPaymentIds.add(paymentId);
-            return true;
-          }
-          return !paymentId; // Keep payments without ID (shouldn't happen)
-        });
-
-        if (verificationPayments.length !== allVerificationPayments.length) {
-          console.log(`Deduplicated verification payments: ${verificationPayments.length} → ${allVerificationPayments.length}`);
-        }
+        totalRevenue = revenueStats.totalRevenue || 0;
+        depositRevenue = revenueStats.completedOrdersRevenue || 0;
+        verificationRevenue = revenueStats.verificationRevenue || 0;
+        cancelledNoRefundRevenue = revenueStats.cancelledNoRefundRevenue || 0;
+        cancelledNoRefundOrders = revenueStats.cancelledNoRefundOrders || [];
         
-        console.log('🔍 [REVENUE DEBUG] Final verification payments count:', allVerificationPayments.length);
-      } catch (error) {
-        console.error('[REVENUE DEBUG] Failed to fetch verification payments:', error);
-      }
-
-      // ✅ Calculate total revenue from deposits
-      console.log('🔍 [DEPOSIT DEBUG] Completed orders list:', completedOrdersList.length);
-      console.log('🔍 [DEPOSIT DEBUG] Sample completed order:', completedOrdersList[0]);
-      
-      const depositRevenue = completedOrdersList.reduce((sum, o) => {
-        const deposit = parseFloat(o.depositAmount || o.DepositAmount || 0);
-        if (deposit > 0) {
-          console.log('[DEPOSIT DEBUG] Order has deposit:', {
-            orderId: o.orderId || o.OrderId,
-            depositAmount: deposit,
-            status: o.status || o.Status
+        console.log('💰 [REVENUE DEBUG] Revenue breakdown:', {
+          totalRevenue: totalRevenue.toLocaleString('vi-VN'),
+          depositRevenue: depositRevenue.toLocaleString('vi-VN'),
+          verificationRevenue: verificationRevenue.toLocaleString('vi-VN'),
+          cancelledNoRefundRevenue: cancelledNoRefundRevenue.toLocaleString('vi-VN'),
+          completedOrdersCount: revenueStats.completedOrdersCount,
+          verificationPaymentsCount: revenueStats.verificationPaymentsCount,
+          cancelledNoRefundCount: revenueStats.cancelledNoRefundCount
+        });
+        
+        // Still fetch verification payments for date-based calculations
+        try {
+          const payments = await apiRequest('/api/Payment');
+          const verificationPayments = payments.filter(p => {
+            const paymentType = (p.paymentType || p.PaymentType || '').toLowerCase();
+            const status = (p.status || p.Status || '').toLowerCase();
+            return paymentType === 'verification' && status === 'success';
           });
+          
+          const seenPaymentIds = new Set();
+          allVerificationPayments = verificationPayments.filter(p => {
+            const paymentId = p.paymentId || p.PaymentId || p.id || p.Id;
+            if (paymentId && !seenPaymentIds.has(paymentId)) {
+              seenPaymentIds.add(paymentId);
+              return true;
+            }
+            return !paymentId;
+          });
+        } catch (paymentError) {
+          console.error('[REVENUE API] Failed to fetch payments for date calculations:', paymentError);
         }
-        return sum + deposit;
-      }, 0);
-      
-      console.log('[DEPOSIT DEBUG] Total deposit revenue:', depositRevenue);
-
-      // ✅ Calculate total revenue from verification
-      const verificationRevenue = allVerificationPayments.reduce((sum, p) => {
-        return sum + parseFloat(p.amount || p.Amount || 0);
-      }, 0);
-
-      // ✅ Total revenue = deposit + verification
-      const totalRevenue = depositRevenue + verificationRevenue;
-
-      console.log('💰 [REVENUE DEBUG] Revenue breakdown:', {
-        depositRevenue: depositRevenue.toLocaleString('vi-VN'),
-        verificationRevenue: verificationRevenue.toLocaleString('vi-VN'),
-        totalRevenue: totalRevenue.toLocaleString('vi-VN'),
-        completedOrders: completedOrdersList.length,
-        verificationPayments: allVerificationPayments.length
-      });
+      } catch (error) {
+        console.error('[REVENUE API] Failed to fetch revenue statistics, using fallback:', error);
+        
+        // Fallback to old calculation
+        depositRevenue = completedOrdersList.reduce((sum, o) => {
+          return sum + parseFloat(o.depositAmount || o.DepositAmount || 0);
+        }, 0);
+        
+        try {
+          const payments = await apiRequest('/api/Payment');
+          const verificationPayments = payments.filter(p => {
+            const paymentType = (p.paymentType || p.PaymentType || '').toLowerCase();
+            const status = (p.status || p.Status || '').toLowerCase();
+            return paymentType === 'verification' && status === 'success';
+          });
+          
+          const seenPaymentIds = new Set();
+          allVerificationPayments = verificationPayments.filter(p => {
+            const paymentId = p.paymentId || p.PaymentId || p.id || p.Id;
+            if (paymentId && !seenPaymentIds.has(paymentId)) {
+              seenPaymentIds.add(paymentId);
+              return true;
+            }
+            return !paymentId;
+          });
+          
+          verificationRevenue = allVerificationPayments.reduce((sum, p) => {
+            return sum + parseFloat(p.amount || p.Amount || 0);
+          }, 0);
+        } catch (paymentError) {
+          console.error('[REVENUE API] Failed to fetch payments:', paymentError);
+        }
+        
+        totalRevenue = depositRevenue + verificationRevenue;
+      }
 
       // ✅ FIX: Calculate revenue by date from completed orders
       const today = new Date();
@@ -1894,6 +1914,9 @@ export const AdminDashboard = () => {
         approvedListings: approvedListings.length,
         rejectedListings: rejectedListings.length,
         totalRevenue,
+        depositRevenue,
+        verificationRevenue,
+        cancelledNoRefundRevenue,
         vehicleListings: vehicleListings.length,
         batteryListings: batteryListings.length,
         activeListings: approvedListings.length,
@@ -1910,6 +1933,8 @@ export const AdminDashboard = () => {
         soldVehicles: vehicleListings.filter(v => v.status === "sold").length,
         soldBatteries: batteryListings.filter(b => b.status === "sold").length,
       });
+      
+      setCancelledNoRefundOrders(cancelledNoRefundOrders);
 
       setAllListings(sortedListings);
 
@@ -3014,15 +3039,16 @@ export const AdminDashboard = () => {
                   <p className="text-3xl font-bold text-gray-900 mt-2">
                     {formatPrice(stats.totalRevenue)}
                   </p>
-                  <p className="text-xs text-gray-600 mt-1">Từ đơn hàng hoàn tất</p>
+                  <p className="text-xs text-gray-600 mt-1">Bao gồm 3 nguồn doanh thu</p>
                 </div>
                 <div className="bg-green-100 p-4 rounded-xl">
                   <TrendingUp className="h-8 w-8 text-green-600" />
                 </div>
               </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Năm nay: {formatPrice(stats.thisYearRevenue)}</p>
-                <p className="text-xs text-gray-500">Tháng này: {formatPrice(stats.thisMonthRevenue)}</p>
+                <p className="text-xs text-green-600">✅ Đơn hoàn thành: {formatPrice(stats.depositRevenue)}</p>
+                <p className="text-xs text-blue-600">🔍 Phí kiểm định: {formatPrice(stats.verificationRevenue)}</p>
+                <p className="text-xs text-orange-600">⚠️ Đơn hủy (không hoàn): {formatPrice(stats.cancelledNoRefundRevenue)}</p>
               </div>
             </div>
 

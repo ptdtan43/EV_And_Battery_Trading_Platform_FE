@@ -21,6 +21,7 @@ export const Header = () => {
     try {
       await signOut();
       navigate("/");
+      window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
     } catch (error) {
       console.error("Error signing out:", error);
     }

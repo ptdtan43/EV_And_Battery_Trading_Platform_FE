@@ -1553,7 +1553,6 @@ export const CreateListing = () => {
                     <option value="">Chọn loại pin</option>
                     <option value="CarBattery">Pin ô tô</option>
                     <option value="MotorcycleBattery">Pin xe máy</option>
-                    <option value="BikeBattery">Pin xe đạp điện</option>
                   </select>
                 </div>
 
