@@ -3098,9 +3098,9 @@ export const AdminDashboard = () => {
                 </div>
               </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-green-600">✅ Đơn hoàn thành: {formatPrice(stats.depositRevenue)}</p>
-                <p className="text-xs text-blue-600">🔍 Phí kiểm định: {formatPrice(stats.verificationRevenue)}</p>
-                <p className="text-xs text-orange-600">⚠️ Đơn hủy (không hoàn): {formatPrice(stats.cancelledNoRefundRevenue)}</p>
+                <p className="text-xs text-green-600">Đơn hoàn thành: {formatPrice(stats.depositRevenue)}</p>
+                <p className="text-xs text-blue-600">Phí kiểm định: {formatPrice(stats.verificationRevenue)}</p>
+                <p className="text-xs text-orange-600">Đơn hủy (không hoàn): {formatPrice(stats.cancelledNoRefundRevenue)}</p>
               </div>
             </div>
 
@@ -3119,7 +3119,7 @@ export const AdminDashboard = () => {
                 </div>
               </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Trung bình/Tháng: {formatPrice(stats.thisYearRevenue > 0 ? stats.thisYearRevenue / 12 : 0)}</p>
+                {/* <p className="text-xs text-gray-500">Trung bình/Tháng: {formatPrice(stats.thisYearRevenue > 0 ? stats.thisYearRevenue / 12 : 0)}</p> */}
                 <p className="text-xs text-gray-500">Đơn hoàn tất: {stats.completedOrders}</p>
               </div>
             </div>
@@ -3204,7 +3204,7 @@ export const AdminDashboard = () => {
                 </div>
               </div>
               <div className="mt-4 space-y-1">
-                <p className="text-xs text-gray-500">Trung bình/Ngày: {formatPrice(stats.thisMonthRevenue > 0 && new Date().getDate() > 0 ? stats.thisMonthRevenue / new Date().getDate() : 0)}</p>
+                {/* <p className="text-xs text-gray-500">Trung bình/Ngày: {formatPrice(stats.thisMonthRevenue > 0 && new Date().getDate() > 0 ? stats.thisMonthRevenue / new Date().getDate() : 0)}</p> */}
                 <p className="text-xs text-gray-500">Đơn hoàn tất: {stats.completedOrders}</p>
               </div>
             </div>
@@ -3952,10 +3952,11 @@ export const AdminDashboard = () => {
             </div>
           </div>
         )}
-        {/* Filters and Search - Hide on reports, users, transactions, and fees tabs */}
-        {activeTab !== "reports" && activeTab !== "users" && activeTab !== "transactions" && activeTab !== "fees" && (
+        {/* Filters and Search - Hide on reports, users, transactions, fees, vehicles, and batteries tabs */}
+        {activeTab !== "reports" && activeTab !== "users" && activeTab !== "transactions" && activeTab !== "fees" && activeTab !== "vehicles" && activeTab !== "batteries" && (
           <div className="bg-white rounded-2xl shadow-lg p-6 mb-8 border border-gray-100">
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0 lg:space-x-6">
+              {/* Search bar */}
               <div className="flex-1">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />

@@ -1,23 +1,23 @@
 {
   "format": 1,
   "restore": {
-    "D:\\Term 5\\SWP301\\SWP391_Topic2_Frontend_ver2\\SimpleRatingApi\\SimpleRatingApi.csproj": {}
+    "D:\\FA25_SWP391\\Topic2_Main\\SWP391_Topic2_Frontend_ver2\\SimpleRatingApi\\SimpleRatingApi.csproj": {}
   },
   "projects": {
-    "D:\\Term 5\\SWP301\\SWP391_Topic2_Frontend_ver2\\SimpleRatingApi\\SimpleRatingApi.csproj": {
+    "D:\\FA25_SWP391\\Topic2_Main\\SWP391_Topic2_Frontend_ver2\\SimpleRatingApi\\SimpleRatingApi.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "D:\\Term 5\\SWP301\\SWP391_Topic2_Frontend_ver2\\SimpleRatingApi\\SimpleRatingApi.csproj",
+        "projectUniqueName": "D:\\FA25_SWP391\\Topic2_Main\\SWP391_Topic2_Frontend_ver2\\SimpleRatingApi\\SimpleRatingApi.csproj",
         "projectName": "SimpleRatingApi",
-        "projectPath": "D:\\Term 5\\SWP301\\SWP391_Topic2_Frontend_ver2\\SimpleRatingApi\\SimpleRatingApi.csproj",
-        "packagesPath": "C:\\Users\\Anh Duy\\.nuget\\packages\\",
-        "outputPath": "D:\\Term 5\\SWP301\\SWP391_Topic2_Frontend_ver2\\SimpleRatingApi\\obj\\",
+        "projectPath": "D:\\FA25_SWP391\\Topic2_Main\\SWP391_Topic2_Frontend_ver2\\SimpleRatingApi\\SimpleRatingApi.csproj",
+        "packagesPath": "C:\\Users\\Acer\\.nuget\\packages\\",
+        "outputPath": "D:\\FA25_SWP391\\Topic2_Main\\SWP391_Topic2_Frontend_ver2\\SimpleRatingApi\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
         ],
         "configFilePaths": [
-          "C:\\Users\\Anh Duy\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Users\\Acer\\AppData\\Roaming\\NuGet\\NuGet.Config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
         ],
@@ -25,7 +25,6 @@
           "net9.0"
         ],
         "sources": {
-          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
           "https://api.nuget.org/v3/index.json": {}
         },
         "frameworks": {
@@ -74,7 +73,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.305/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.307/PortableRuntimeIdentifierGraph.json"
         }
       }
     }
