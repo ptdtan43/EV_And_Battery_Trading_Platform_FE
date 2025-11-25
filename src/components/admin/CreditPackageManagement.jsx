@@ -76,49 +76,43 @@ export const CreditPackageManagement = () => {
 
   const handleUpdate = async (feeId) => {
     try {
-      // Validate
-      if (!formData.packageName || !formData.price || !formData.credits) {
+      console.log('🔄 Starting update for feeId:', feeId);
+      console.log('📝 Form data:', formData);
+      
+      // Validate - CHỈ CHECK TÊN GÓI (credits và price không thể sửa)
+      if (!formData.packageName || formData.packageName.trim() === '') {
+        console.log('❌ Validation failed: Missing package name');
         showToast({
           title: 'Thiếu thông tin',
-          description: 'Vui lòng điền đầy đủ thông tin bắt buộc',
+          description: 'Vui lòng nhập tên gói',
           type: 'warning'
         });
         return;
       }
 
-      if (parseFloat(formData.price) <= 0) {
-        showToast({
-          title: 'Giá không hợp lệ',
-          description: 'Giá gói phải lớn hơn 0',
-          type: 'warning'
-        });
-        return;
-      }
-
-      if (parseInt(formData.credits) <= 0) {
-        showToast({
-          title: 'Số lượt không hợp lệ',
-          description: 'Số lượt đăng phải lớn hơn 0',
-          type: 'warning'
-        });
-        return;
-      }
+      // ⚠️ KHÔNG GỬI credits và price để tránh thay đổi giá trị quan trọng
+      const requestBody = {
+        packageName: formData.packageName,
+        description: formData.description,
+        isActive: formData.isActive
+      };
+      
+      console.log('📤 Sending PUT request to:', `/api/admin/credit-packages/${feeId}`);
+      console.log('📦 Request body (chỉ tên, mô tả, trạng thái):', requestBody);
 
       const updated = await apiRequest(`/api/admin/credit-packages/${feeId}`, {
         method: 'PUT',
-        body: {
-          credits: parseInt(formData.credits),
-          price: parseFloat(formData.price),
-          packageName: formData.packageName,
-          description: formData.description,
-          isActive: formData.isActive
-        }
+        body: requestBody
       });
+      
+      console.log('✅ Update response:', updated);
 
+      console.log('🔄 Updating local state...');
       setPackages(packages.map(p => p.feeId === feeId ? updated : p));
       setEditingId(null);
       resetForm();
       
+      console.log('✅ Update completed successfully');
       showToast({
         title: 'Thành công',
         description: 'Đã cập nhật gói credit',
@@ -126,9 +120,15 @@ export const CreditPackageManagement = () => {
       });
 
       // Reload statistics
+      console.log('🔄 Reloading data...');
       loadData();
     } catch (error) {
-      console.error('Error updating package:', error);
+      console.error('❌ Error updating package:', error);
+      console.error('❌ Error details:', {
+        message: error.message,
+        response: error.response,
+        status: error.status
+      });
       showToast({
         title: 'Lỗi',
         description: error.message || 'Không thể cập nhật gói credit',
@@ -187,9 +187,21 @@ export const CreditPackageManagement = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h2 className="text-2xl font-bold text-gray-900">Quản lý Gói Credit</h2>
-        <p className="text-gray-600 mt-1">Quản lý các gói credit cho đăng tin</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">Quản lý Gói Credit</h2>
+          <p className="text-gray-600 mt-1">Quản lý các gói credit cho đăng tin</p>
+        </div>
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <p className="text-sm text-blue-800 font-medium mb-2">
+            ℹ️ Lưu ý quan trọng
+          </p>
+          <ul className="text-xs text-blue-700 space-y-1">
+            <li>• Không thể sửa <strong>số lượt</strong> và <strong>giá</strong> của gói</li>
+            <li>• Để thay đổi, hãy <strong>tạo gói mới</strong> và <strong>ẩn gói cũ</strong></li>
+            <li>• Điều này đảm bảo công bằng cho người đã mua</li>
+          </ul>
+        </div>
       </div>
 
       {/* Overall Statistics */}
@@ -261,26 +273,40 @@ export const CreditPackageManagement = () => {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Số lượt đăng *
+                        <span className="ml-2 text-xs text-orange-600">
+                          (Không thể sửa - tạo gói mới nếu cần)
+                        </span>
                       </label>
                       <input
                         type="number"
                         value={formData.credits}
-                        onChange={(e) => setFormData({ ...formData, credits: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                        disabled={true}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
                         placeholder="VD: 10"
+                        title="Không thể sửa số lượt để đảm bảo tính nhất quán về giá"
                       />
+                      <p className="text-xs text-gray-500 mt-1">
+                        💡 Để thay đổi số lượt, hãy tạo gói mới
+                      </p>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Giá (VND) *
+                        <span className="ml-2 text-xs text-orange-600">
+                          (Không thể sửa - tạo gói mới nếu cần)
+                        </span>
                       </label>
                       <input
                         type="number"
                         value={formData.price}
-                        onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                        disabled={true}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
                         placeholder="VD: 85000"
+                        title="Không thể sửa giá để đảm bảo công bằng cho người đã mua"
                       />
+                      <p className="text-xs text-gray-500 mt-1">
+                        💡 Để thay đổi giá, hãy tạo gói mới và ẩn gói cũ
+                      </p>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
