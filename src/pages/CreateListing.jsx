@@ -351,6 +351,38 @@ export const CreateListing = () => {
       return;
     }
 
+    // ✅ CHECK CREDIT BALANCE BEFORE ALLOWING POST CREATION
+    try {
+      const creditResponse = await apiRequest(`/api/User/${user?.userId || user?.id}/listings/count`);
+      const remainingCredits = creditResponse.PostCredits || 0;
+      
+      if (remainingCredits <= 0) {
+        show({
+          title: "Hết lượt đăng tin",
+          description: "Bạn đã hết lượt đăng tin. Vui lòng mua thêm gói để tiếp tục.",
+          type: "error"
+        });
+        
+        // Redirect to buy credits page after 2 seconds
+        setTimeout(() => {
+          navigate("/credits/buy");
+        }, 2000);
+        return;
+      }
+      
+      // Show warning if low on credits
+      if (remainingCredits <= 2) {
+        show({
+          title: "Sắp hết lượt đăng tin",
+          description: `Bạn chỉ còn ${remainingCredits} lượt đăng tin. Hãy mua thêm gói để tiếp tục sử dụng dịch vụ.`,
+          type: "warning"
+        });
+      }
+    } catch (creditError) {
+      console.error("Error checking credits:", creditError);
+      // Continue anyway if credit check fails (backward compatibility)
+    }
+
     // Check if token is valid
     try {
       const parsed = JSON.parse(authData);

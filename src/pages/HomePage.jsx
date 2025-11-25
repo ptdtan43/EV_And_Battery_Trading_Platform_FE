@@ -63,7 +63,7 @@ export const HomePage = () => {
   const [sellerCache, setSellerCache] = useState(() => {
     try {
       // ✅ CLEAR OLD CACHE - Force refresh seller names
-      console.log('🔄 Clearing old seller cache to refresh names');
+      console.log('Clearing old seller cache to refresh names');
       localStorage.removeItem('sellerNameCache');
       return {};
       
@@ -113,7 +113,7 @@ export const HomePage = () => {
       localStorage.setItem('sellerNameCache', JSON.stringify(cacheToSave));
     } catch (error) {
       if (error.name === 'QuotaExceededError' || error.message.includes('quota')) {
-        console.error('❌ localStorage quota exceeded! Clearing seller cache...');
+        console.error('localStorage quota exceeded! Clearing seller cache...');
         // ✅ Clear seller cache if quota exceeded
         try {
           localStorage.removeItem('sellerNameCache');
@@ -136,7 +136,7 @@ export const HomePage = () => {
     // Check for payment success parameters
     checkPaymentSuccess();
     
-    // ✅ Check localStorage for payment success (backup method)
+    // Check localStorage for payment success (backup method)
     const checkLocalStoragePayment = () => {
       try {
         const paymentDataStr = localStorage.getItem('evtb_payment_success');
@@ -158,7 +158,7 @@ export const HomePage = () => {
             if (paymentData.paymentType !== 'PostCredit') {
               showToast({
                 type: 'success',
-                title: isVerification ? '✅ Thanh toán kiểm định thành công!' : '🎉 Thanh toán đặt cọc thành công!',
+                title: isVerification ? 'Thanh toán kiểm định thành công!' : '🎉 Thanh toán đặt cọc thành công!',
                 message: isVerification 
                   ? `Yêu cầu kiểm định đã được thanh toán (${formattedAmount} VND).`
                   : `Bạn đã đặt cọc thành công (${formattedAmount} VND).`,
@@ -169,6 +169,12 @@ export const HomePage = () => {
             // Show banner
             setPaymentBannerInfo({ amount: formattedAmount, type: paymentData.paymentType || 'Deposit' });
             setShowPaymentBanner(true);
+            
+            // ✅ Refresh credits if PostCredit payment
+            if (paymentData.paymentType === 'PostCredit' && typeof window.refreshCredits === 'function') {
+              console.log('🔄 Refreshing credits after buying credits...');
+              window.refreshCredits();
+            }
             
             // Mark as processed
             paymentData.processed = true;
@@ -266,7 +272,7 @@ export const HomePage = () => {
           if (paymentType !== 'PostCredit') {
             showToast({
               type: 'success',
-              title: isVerification ? '✅ Thanh toán kiểm định thành công!' : '🎉 Thanh toán đặt cọc thành công!',
+              title: isVerification ? 'Thanh toán kiểm định thành công!' : '🎉 Thanh toán đặt cọc thành công!',
               message: isVerification 
                 ? `Yêu cầu kiểm định đã được thanh toán (${formattedAmount} VND).`
                 : `Bạn đã đặt cọc thành công (${formattedAmount} VND).`,
@@ -277,6 +283,12 @@ export const HomePage = () => {
           // Also show persistent banner as a fallback UI
           setPaymentBannerInfo({ amount: formattedAmount, type: paymentType || 'Deposit' });
           setShowPaymentBanner(true);
+          
+          // ✅ Refresh credits if PostCredit payment
+          if (paymentType === 'PostCredit' && typeof window.refreshCredits === 'function') {
+            console.log('🔄 Refreshing credits after buying credits...');
+            window.refreshCredits();
+          }
           
           console.log('[HomePage] Toast shown');
         }
@@ -330,7 +342,7 @@ export const HomePage = () => {
     if (paymentSuccess === 'true' && paymentId) {
       const formattedAmount = amount ? (parseInt(amount) / 100).toLocaleString('vi-VN') : 'N/A';
       
-      // ✅ Determine payment type (from URL or API)
+      //Determine payment type (from URL or API)
       let finalPaymentType = paymentType || 'Deposit';
       
       // Check if this is a verification payment and notify admin
@@ -354,7 +366,7 @@ export const HomePage = () => {
         // Silently fail - don't show error to user
       }
       
-      // ✅ Show specific notification based on payment type (only once)
+      // Show specific notification based on payment type (only once)
       if (!paymentToastShown.current) {
         paymentToastShown.current = true;
         
@@ -363,14 +375,14 @@ export const HomePage = () => {
           if (finalPaymentType === 'Verification') {
             showToast({
               type: 'success',
-              title: '✅ Thanh toán kiểm định thành công!',
+              title: 'Thanh toán kiểm định thành công!',
               message: `Yêu cầu kiểm định đã được thanh toán (${formattedAmount} VND). Admin sẽ xác nhận trong thời gian sớm nhất.`,
               duration: 10000
             });
           } else {
             showToast({
               type: 'success',
-              title: '🎉 Thanh toán đặt cọc thành công!',
+              title: 'Thanh toán đặt cọc thành công!',
               message: `Bạn đã đặt cọc thành công (${formattedAmount} VND). Vui lòng liên hệ người bán để hoàn tất giao dịch.`,
               duration: 10000
             });
@@ -381,6 +393,12 @@ export const HomePage = () => {
       // ✅ Also show a persistent banner at top of HomePage
       setPaymentBannerInfo({ amount: formattedAmount, type: finalPaymentType });
       setShowPaymentBanner(true);
+      
+      // ✅ Refresh credits if PostCredit payment
+      if (finalPaymentType === 'PostCredit' && typeof window.refreshCredits === 'function') {
+        console.log('🔄 Refreshing credits after buying credits...');
+        window.refreshCredits();
+      }
 
       // Clear URL parameters after showing notification
       const newUrl = window.location.pathname;
@@ -388,7 +406,7 @@ export const HomePage = () => {
     } else if (paymentError === 'true' && paymentId) {
       showToast({
         type: 'error',
-        title: '❌ Lỗi thanh toán',
+        title: 'Lỗi thanh toán',
         message: `Có lỗi xảy ra khi xử lý giao dịch ${paymentId}. Vui lòng liên hệ hỗ trợ.`,
         duration: 8000
       });
@@ -427,7 +445,7 @@ export const HomePage = () => {
           
           // Debug logging for ALL products (especially batteries) to see their status
           if (productType === "battery" || productType === "pin") {
-            console.log(`🔋 Battery product ${x.id || x.productId || x.ProductId || 'unknown'}:`, {
+            console.log(`Battery product ${x.id || x.productId || x.ProductId || 'unknown'}:`, {
               title: x.title || x.Title,
               status: status,
               rawStatus: x.status || x.Status,
@@ -443,7 +461,7 @@ export const HomePage = () => {
           
           // Log if product is sold but still showing
           if (status === "sold" && shouldShow) {
-            console.warn(`⚠️ WARNING: Sold product ${x.id || x.productId || x.ProductId} is still showing!`, {
+            console.warn(`WARNING: Sold product ${x.id || x.productId || x.ProductId} is still showing!`, {
               title: x.title || x.Title,
               status: status,
               productType: productType
@@ -625,8 +643,8 @@ export const HomePage = () => {
       setFeaturedProducts(sortedProducts);
       setAllProducts(sortedProducts); // Store all products for search
     } catch (err) {
-      console.error("❌ Error loading featured products:", err);
-      console.error("❌ Error details:", {
+      console.error("Error loading featured products:", err);
+      console.error("Error details:", {
         message: err.message,
         status: err.status,
         data: err.data,
@@ -672,7 +690,7 @@ export const HomePage = () => {
   const handleToggleFavorite = async (productId) => {
     if (!user) {
       showToast({
-        title: "⚠️ Cần đăng nhập",
+        title: "Cần đăng nhập",
         description: "Vui lòng đăng nhập để thêm vào yêu thích",
         type: "warning",
       });
@@ -698,8 +716,8 @@ export const HomePage = () => {
 
         showToast({
           title: result.isFavorited
-            ? "❤️ Đã thêm vào yêu thích"
-            : "💔 Đã xóa khỏi yêu thích",
+            ? "Đã thêm vào yêu thích"
+            : "Đã xóa khỏi yêu thích",
           description: result.isFavorited
             ? "Sản phẩm đã được thêm vào danh sách yêu thích"
             : "Sản phẩm đã được xóa khỏi danh sách yêu thích",
@@ -708,7 +726,7 @@ export const HomePage = () => {
       } else {
         // If API is not available, show warning but don't crash
         showToast({
-          title: "⚠️ Tính năng yêu thích tạm thời không khả dụng",
+          title: "Tính năng yêu thích tạm thời không khả dụng",
           description:
             "Backend chưa hỗ trợ tính năng yêu thích. Vui lòng thử lại sau.",
           type: "warning",
@@ -717,7 +735,7 @@ export const HomePage = () => {
     } catch (error) {
       console.error("Error toggling favorite:", error);
       showToast({
-        title: "⚠️ Tính năng yêu thích tạm thời không khả dụng",
+        title: "Tính năng yêu thích tạm thời không khả dụng",
         description:
           "Backend chưa hỗ trợ tính năng yêu thích. Vui lòng thử lại sau.",
         type: "warning",
@@ -731,7 +749,7 @@ export const HomePage = () => {
     if (!searchQuery.trim()) {
       showToast({
         type: "warning",
-        title: "⚠️ Vui lòng nhập từ khóa tìm kiếm",
+        title: "Vui lòng nhập từ khóa tìm kiếm",
         message: "Bạn cần nhập hãng xe, mẫu xe hoặc biển số để tìm kiếm",
         duration: 3000
       });
@@ -788,7 +806,7 @@ export const HomePage = () => {
                 }
               }
             } catch (error) {
-              console.log("⚠️ License plate API search failed, using local search:", error);
+              console.log("License plate API search failed, using local search:", error);
             }
           }
         }
@@ -814,7 +832,7 @@ export const HomePage = () => {
           
         showToast({
           type: "success",
-          title: "✅ Tìm thấy kết quả",
+          title: "Tìm thấy kết quả",
           message: `Tìm thấy ${results.length} xe với ${searchDescription}`,
           duration: 4000
         });
@@ -828,16 +846,16 @@ export const HomePage = () => {
           
         showToast({
           type: "info",
-          title: "🔍 Không tìm thấy kết quả",
+          title: "Không tìm thấy kết quả",
           message: `Không có xe nào với ${searchDescription}`,
           duration: 4000
         });
       }
     } catch (error) {
-      console.error("❌ Search error:", error);
+      console.error("Search error:", error);
       showToast({
         type: "error",
-        title: "❌ Lỗi tìm kiếm",
+        title: "Lỗi tìm kiếm",
         message: error.message || "Có lỗi xảy ra khi tìm kiếm",
         duration: 5000
       });
@@ -876,7 +894,7 @@ export const HomePage = () => {
     setFeaturedProducts(allProducts);
     showToast({
       type: "success",
-      title: "🔄 Đã tải lại",
+      title: "Đã tải lại",
       message: "Hiển thị tất cả sản phẩm",
       duration: 3000
     });
@@ -934,14 +952,14 @@ export const HomePage = () => {
       const filterCount = Object.keys(filters).length;
       showToast({
         type: "success",
-        title: "✅ Đã áp dụng bộ lọc",
+        title: "Đã áp dụng bộ lọc",
         message: `Tìm thấy ${results.length} sản phẩm với ${filterCount} tiêu chí lọc`,
         duration: 4000
       });
     } catch (error) {
       showToast({
         type: "error",
-        title: "❌ Lỗi tìm kiếm",
+        title: "Lỗi tìm kiếm",
         message: error.message || "Có lỗi xảy ra khi lọc sản phẩm",
         duration: 5000
       });
