@@ -49,6 +49,8 @@ import ApiTest from "./components/ApiTest";
 import UserDebug from "./components/UserDebug";
 import { ToastProvider } from "./contexts/ToastContext";
 import { ChatHistory } from "./pages/ChatHistory";
+import { BuyCreditsPage } from "./pages/BuyCreditsPage";
+import { CreditHistoryPage } from "./pages/CreditHistoryPage";
 
 const PAYMENT_STORAGE_KEY = "evtb_payment_success";
 const DEFAULT_PAYMENT_AMOUNT = "5000000";
@@ -304,6 +306,17 @@ const AppContent = () => {
             element={
               <ProtectedRoute userOnly>
                 <EditListing />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Credit Routes */}
+          <Route path="/credits/buy" element={<BuyCreditsPage />} />
+          <Route
+            path="/credits/history"
+            element={
+              <ProtectedRoute>
+                <CreditHistoryPage />
               </ProtectedRoute>
             }
           />

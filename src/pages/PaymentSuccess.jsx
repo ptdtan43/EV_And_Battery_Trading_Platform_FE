@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { CheckCircle, Clock, CreditCard, Calendar, User, Package, Shield } from "lucide-react";
+import { CheckCircle, Clock, CreditCard, Calendar, User, Package, Shield, Coins } from "lucide-react";
 import { useToast } from "../contexts/ToastContext";
 import { apiRequest } from "../lib/api";
 
@@ -38,65 +38,139 @@ const PaymentSuccess = () => {
         
         setPaymentData(basicData);
 
-        // ✅ Fetch payment details from API to get payment type
-        try {
-          const payment = await apiRequest(`/api/Payment/${vnpTxnRef}`);
-          if (payment) {
-            const type = payment.PaymentType || payment.paymentType || 'Deposit';
-            setPaymentType(type);
+        // ✅ TRY TO GET PAYMENT TYPE FROM MULTIPLE SOURCES
+        let fetchedType = null;
+        
+        // SOURCE 1: Check if backend sent postMessage with type
+        // (This happens when VNPay redirects back and backend sends postMessage)
+        const checkPostMessage = () => {
+          return new Promise((resolve) => {
+            const handler = (event) => {
+              console.log('📨 Received postMessage:', event.data);
+              if (event.data?.status === 'success' && event.data?.type) {
+                console.log('✅ Got payment type from postMessage:', event.data.type);
+                window.removeEventListener('message', handler);
+                resolve(event.data.type);
+              }
+            };
+            window.addEventListener('message', handler);
+            // Timeout after 1 second
+            setTimeout(() => {
+              window.removeEventListener('message', handler);
+              resolve(null);
+            }, 1000);
+          });
+        };
+        
+        fetchedType = await checkPostMessage();
+        
+        // SOURCE 2: If no postMessage, fetch from API
+        if (!fetchedType) {
+          try {
+            console.log('🔍 Fetching payment details from API for:', vnpTxnRef);
+            const payment = await apiRequest(`/api/Payment/${vnpTxnRef}`);
+            console.log('📦 Payment data received:', payment);
             
-            // Update payment data with full details
-            setPaymentData({
-              ...basicData,
-              paymentType: type,
-              productId: payment.ProductId || payment.productId
-            });
+            if (payment) {
+              // Try to detect payment type from multiple sources
+              fetchedType = payment.PaymentType || payment.paymentType;
+              
+              // Fallback: If has PostCredits field → It's PostCredit payment
+              if (!fetchedType && (payment.PostCredits || payment.postCredits)) {
+                fetchedType = 'PostCredit';
+                console.log('💡 Detected PostCredit from PostCredits field');
+              }
+              
+              // Fallback: If has OrderId → It's Deposit
+              if (!fetchedType && (payment.OrderId || payment.orderId)) {
+                fetchedType = 'Deposit';
+                console.log('💡 Detected Deposit from OrderId field');
+              }
+              
+              // Fallback: If has ProductId but no OrderId → It's Verification
+              if (!fetchedType && (payment.ProductId || payment.productId) && !(payment.OrderId || payment.orderId)) {
+                fetchedType = 'Verification';
+                console.log('💡 Detected Verification from ProductId field');
+              }
+              
+              // Update payment data with full details
+              setPaymentData({
+                ...basicData,
+                paymentType: fetchedType,
+                productId: payment.ProductId || payment.productId,
+                postCredits: payment.PostCredits || payment.postCredits
+              });
+            }
+          } catch (error) {
+            console.error('❌ Could not fetch payment details:', error);
           }
-        } catch (error) {
-          console.warn('Could not fetch payment details:', error);
-          // Default to Deposit if can't fetch
-          setPaymentType('Deposit');
         }
-      }
-
-      // Show toast notification for success with specific message
-      if (isSuccess && vnpTxnRef) {
-        // Wait a bit for payment type to be loaded
-        setTimeout(() => {
-          const type = paymentType || 'Deposit';
-          const title = type === 'Verification' 
-            ? '✅ Thanh toán kiểm định thành công!' 
-            : '🎉 Thanh toán đặt cọc thành công!';
-          const message = type === 'Verification'
-            ? `Yêu cầu kiểm định của bạn đã được thanh toán. Admin sẽ xác nhận trong thời gian sớm nhất.`
-            : `Bạn đã đặt cọc thành công. Vui lòng liên hệ người bán để hoàn tất giao dịch.`;
-            
+        
+        // Final fallback
+        if (!fetchedType) {
+          fetchedType = 'Deposit';
+          console.warn('⚠️ Could not determine payment type, defaulting to Deposit');
+        }
+        
+        console.log('✅ Final payment type:', fetchedType);
+        setPaymentType(fetchedType);
+        
+        // Show toast notification AFTER fetching payment type
+        if (isSuccess) {
+          console.log('🎯 Showing toast for payment type:', fetchedType);
+          
+          let title, message;
+          
+          if (fetchedType === 'PostCredit') {
+            title = '💎 Mua Credits thành công!';
+            message = 'Credits đã được cộng vào tài khoản của bạn.';
+            console.log('✅ Using PostCredit message');
+          } else if (fetchedType === 'Verification') {
+            title = '✅ Thanh toán kiểm định thành công!';
+            message = 'Yêu cầu kiểm định của bạn đã được thanh toán. Admin sẽ xác nhận trong thời gian sớm nhất.';
+            console.log('✅ Using Verification message');
+          } else {
+            title = '🎉 Thanh toán đặt cọc thành công!';
+            message = 'Bạn đã đặt cọc thành công. Vui lòng liên hệ người bán để hoàn tất giao dịch.';
+            console.log('✅ Using Deposit message');
+          }
+          
+          console.log('📢 Toast:', { title, message });
+          
           showToast({
             type: 'success',
             title: title,
             message: message,
             duration: 6000
           });
+        }
+        
+        // Refresh credits if PostCredit payment
+        if (fetchedType === 'PostCredit' && typeof window.refreshCredits === 'function') {
+          window.refreshCredits();
+        }
 
-          // Notify opener (homepage) if opened in a new tab/window
-          try {
-            if (window.opener && typeof window.opener.postMessage === 'function') {
-              window.opener.postMessage({
-                type: 'EVTB_PAYMENT_SUCCESS',
-                payload: {
-                  paymentId: vnpTxnRef,
-                  amount: vnpAmount,
-                  transactionNo: vnpTransactionNo,
-                  paymentType: type
-                }
-              }, '*');
-            }
-          } catch (_) {}
-        }, 500);
+        // Notify opener (homepage) if opened in a new tab/window
+        try {
+          if (window.opener && typeof window.opener.postMessage === 'function') {
+            window.opener.postMessage({
+              type: 'EVTB_PAYMENT_SUCCESS',
+              payload: {
+                paymentId: vnpTxnRef,
+                amount: vnpAmount,
+                transactionNo: vnpTransactionNo,
+                paymentType: fetchedType
+              }
+            }, '*');
+          }
+        } catch (_) {}
       }
+    };
 
-      // Start countdown for redirect
-      if (isSuccess) {
+    loadPaymentDetails();
+
+    // Start countdown for redirect
+    if (isSuccess) {
         const timer = setInterval(() => {
           setCountdown((prev) => {
             if (prev <= 1) {
@@ -121,11 +195,8 @@ const PaymentSuccess = () => {
           });
         }, 1000);
 
-        return () => clearInterval(timer);
-      }
-    };
-
-    loadPaymentDetails();
+      return () => clearInterval(timer);
+    }
   }, [isSuccess, navigate, vnpTxnRef, vnpAmount, vnpTransactionNo, vnpResponseCode, vnpResponseMessage, showToast, paymentType]);
 
   const formatAmount = (amount) => {
@@ -225,19 +296,27 @@ const PaymentSuccess = () => {
           {/* Success Header */}
           <div className="bg-gradient-to-r from-green-500 to-emerald-600 px-6 py-8 text-center">
             <div className="mx-auto flex items-center justify-center h-20 w-20 rounded-full bg-white/20 backdrop-blur-sm mb-4">
-              {paymentType === 'Verification' ? (
+              {paymentType === 'PostCredit' ? (
+                <Coins className="h-10 w-10 text-white" />
+              ) : paymentType === 'Verification' ? (
                 <Shield className="h-10 w-10 text-white" />
               ) : (
                 <CheckCircle className="h-10 w-10 text-white" />
               )}
             </div>
             <h1 className="text-3xl font-bold text-white mb-2">
-              {paymentType === 'Verification' ? 'Thanh toán kiểm định thành công!' : 'Thanh toán đặt cọc thành công!'}
+              {paymentType === 'PostCredit' 
+                ? 'Mua Credits thành công!' 
+                : paymentType === 'Verification' 
+                  ? 'Thanh toán kiểm định thành công!' 
+                  : 'Thanh toán đặt cọc thành công!'}
             </h1>
             <p className="text-green-100">
-              {paymentType === 'Verification' 
-                ? 'Yêu cầu kiểm định đã được gửi đến admin' 
-                : 'Giao dịch đặt cọc đã được xử lý thành công'}
+              {paymentType === 'PostCredit'
+                ? 'Credits đã được cộng vào tài khoản của bạn'
+                : paymentType === 'Verification' 
+                  ? 'Yêu cầu kiểm định đã được gửi đến admin' 
+                  : 'Giao dịch đặt cọc đã được xử lý thành công'}
             </p>
           </div>
 
@@ -245,21 +324,27 @@ const PaymentSuccess = () => {
           <div className="px-6 py-6">
             <div className="text-center mb-6">
               <div className="inline-flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mb-4 animate-pulse">
-                {paymentType === 'Verification' ? (
+                {paymentType === 'PostCredit' ? (
+                  <Coins className="h-8 w-8 text-green-600" />
+                ) : paymentType === 'Verification' ? (
                   <Shield className="h-8 w-8 text-green-600" />
                 ) : (
                   <CheckCircle className="h-8 w-8 text-green-600" />
                 )}
               </div>
               <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                {paymentType === 'Verification' 
-                  ? 'Yêu cầu kiểm định đã được gửi!' 
-                  : 'Cảm ơn bạn đã đặt cọc!'}
+                {paymentType === 'PostCredit'
+                  ? 'Credits đã được cộng vào tài khoản!'
+                  : paymentType === 'Verification' 
+                    ? 'Yêu cầu kiểm định đã được gửi!' 
+                    : 'Cảm ơn bạn đã đặt cọc!'}
               </h2>
               <p className="text-gray-600">
-                {paymentType === 'Verification'
-                  ? 'Admin sẽ kiểm tra và xác nhận yêu cầu kiểm định của bạn trong thời gian sớm nhất.'
-                  : 'Vui lòng liên hệ người bán để hoàn tất giao dịch và nhận xe.'}
+                {paymentType === 'PostCredit'
+                  ? 'Bạn có thể sử dụng credits để đăng tin sản phẩm ngay bây giờ.'
+                  : paymentType === 'Verification'
+                    ? 'Admin sẽ kiểm tra và xác nhận yêu cầu kiểm định của bạn trong thời gian sớm nhất.'
+                    : 'Vui lòng liên hệ người bán để hoàn tất giao dịch và nhận xe.'}
               </p>
             </div>
 

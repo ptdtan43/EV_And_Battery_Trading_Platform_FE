@@ -153,14 +153,18 @@ export const HomePage = () => {
             
             // Show toast only once
             paymentToastShown.current = true;
-            showToast({
-              type: 'success',
-              title: isVerification ? '✅ Thanh toán kiểm định thành công!' : '🎉 Thanh toán đặt cọc thành công!',
-              message: isVerification 
-                ? `Yêu cầu kiểm định đã được thanh toán (${formattedAmount} VND).`
-                : `Bạn đã đặt cọc thành công (${formattedAmount} VND).`,
-              duration: 8000
-            });
+            
+            // ⚠️ Skip toast for PostCredit - banner already shows message
+            if (paymentData.paymentType !== 'PostCredit') {
+              showToast({
+                type: 'success',
+                title: isVerification ? '✅ Thanh toán kiểm định thành công!' : '🎉 Thanh toán đặt cọc thành công!',
+                message: isVerification 
+                  ? `Yêu cầu kiểm định đã được thanh toán (${formattedAmount} VND).`
+                  : `Bạn đã đặt cọc thành công (${formattedAmount} VND).`,
+                duration: 8000
+              });
+            }
             
             // Show banner
             setPaymentBannerInfo({ amount: formattedAmount, type: paymentData.paymentType || 'Deposit' });
@@ -257,14 +261,18 @@ export const HomePage = () => {
           
           console.log('[HomePage] Showing success toast...');
           paymentToastShown.current = true;
-          showToast({
-            type: 'success',
-            title: isVerification ? '✅ Thanh toán kiểm định thành công!' : '🎉 Thanh toán đặt cọc thành công!',
-            message: isVerification 
-              ? `Yêu cầu kiểm định đã được thanh toán (${formattedAmount} VND).`
-              : `Bạn đã đặt cọc thành công (${formattedAmount} VND).`,
-            duration: 8000
-          });
+          
+          // ⚠️ Skip toast for PostCredit - banner already shows message
+          if (paymentType !== 'PostCredit') {
+            showToast({
+              type: 'success',
+              title: isVerification ? '✅ Thanh toán kiểm định thành công!' : '🎉 Thanh toán đặt cọc thành công!',
+              message: isVerification 
+                ? `Yêu cầu kiểm định đã được thanh toán (${formattedAmount} VND).`
+                : `Bạn đã đặt cọc thành công (${formattedAmount} VND).`,
+              duration: 8000
+            });
+          }
           
           // Also show persistent banner as a fallback UI
           setPaymentBannerInfo({ amount: formattedAmount, type: paymentType || 'Deposit' });
@@ -349,20 +357,24 @@ export const HomePage = () => {
       // ✅ Show specific notification based on payment type (only once)
       if (!paymentToastShown.current) {
         paymentToastShown.current = true;
-        if (finalPaymentType === 'Verification') {
-          showToast({
-            type: 'success',
-            title: '✅ Thanh toán kiểm định thành công!',
-            message: `Yêu cầu kiểm định đã được thanh toán (${formattedAmount} VND). Admin sẽ xác nhận trong thời gian sớm nhất.`,
-            duration: 10000
-          });
-        } else {
-          showToast({
-            type: 'success',
-            title: '🎉 Thanh toán đặt cọc thành công!',
-            message: `Bạn đã đặt cọc thành công (${formattedAmount} VND). Vui lòng liên hệ người bán để hoàn tất giao dịch.`,
-            duration: 10000
-          });
+        
+        // ⚠️ Skip toast for PostCredit - banner already shows message
+        if (finalPaymentType !== 'PostCredit') {
+          if (finalPaymentType === 'Verification') {
+            showToast({
+              type: 'success',
+              title: '✅ Thanh toán kiểm định thành công!',
+              message: `Yêu cầu kiểm định đã được thanh toán (${formattedAmount} VND). Admin sẽ xác nhận trong thời gian sớm nhất.`,
+              duration: 10000
+            });
+          } else {
+            showToast({
+              type: 'success',
+              title: '🎉 Thanh toán đặt cọc thành công!',
+              message: `Bạn đã đặt cọc thành công (${formattedAmount} VND). Vui lòng liên hệ người bán để hoàn tất giao dịch.`,
+              duration: 10000
+            });
+          }
         }
       }
 
@@ -956,12 +968,18 @@ export const HomePage = () => {
                   {/* Message */}
                   <div>
                     <h3 className="text-2xl font-bold mb-1">
-                      {paymentBannerInfo.type === 'Verification' ? 'Đã thanh toán kiểm định thành công!' : 'Đã thanh toán đặt cọc thành công!'}
+                      {paymentBannerInfo.type === 'PostCredit' 
+                        ? 'Đã mua Credits thành công!' 
+                        : paymentBannerInfo.type === 'Verification' 
+                          ? 'Đã thanh toán kiểm định thành công!' 
+                          : 'Đã thanh toán đặt cọc thành công!'}
                     </h3>
                     <p className="text-green-50 text-base">
-                      {paymentBannerInfo.type === 'Verification' 
-                        ? 'Yêu cầu kiểm định của bạn đã được thanh toán thành công. Admin sẽ xác nhận sớm nhất.' 
-                        : 'Giao dịch đặt cọc đã hoàn tất. Vui lòng liên hệ người bán để hoàn tất giao dịch.'}
+                      {paymentBannerInfo.type === 'PostCredit'
+                        ? 'Credits đã được cộng vào tài khoản của bạn. Bạn có thể sử dụng để đăng tin sản phẩm.'
+                        : paymentBannerInfo.type === 'Verification' 
+                          ? 'Yêu cầu kiểm định của bạn đã được thanh toán thành công. Admin sẽ xác nhận sớm nhất.' 
+                          : 'Giao dịch đặt cọc đã hoàn tất. Vui lòng liên hệ người bán để hoàn tất giao dịch.'}
                     </p>
                   </div>
                 </div>

@@ -1018,15 +1018,25 @@ export const CreateListing = () => {
           ? " Đã yêu cầu kiểm định xe - Admin sẽ liên hệ để hẹn lịch kiểm tra."
           : "";
 
+      // ✅ Get remaining credits from response (already deducted)
+      const remainingCredits = created?.remainingPostCredits ?? created?.RemainingPostCredits;
+      console.log('💎 Remaining credits after posting:', remainingCredits);
+
       show({
         title: "✅ Tạo bài đăng thành công",
-        description: `${imageStatus}${inspectionStatus} Bài đăng của bạn đang chờ duyệt từ admin. ${
+        description: `${imageStatus}${inspectionStatus} Bài đăng của bạn đang chờ admin duyệt. ${
           notificationSent
             ? "Bạn sẽ được thông báo khi được duyệt."
             : "(Hệ thống thông báo tạm thời không khả dụng)"
-        }`,
+        }${remainingCredits !== undefined ? ` Bạn còn ${remainingCredits} credit${remainingCredits !== 1 ? 's' : ''}.` : ''} ⚠️ Nếu bị từ chối, credit sẽ được hoàn lại.`,
         type: "success",
       });
+
+      // ✅ Refresh credits immediately after posting (already deducted)
+      if (typeof window.refreshCredits === 'function') {
+        console.log('🔄 Refreshing credits widget...');
+        window.refreshCredits();
+      }
 
       // Reset form to prevent duplicate submissions
       console.log("🔄 Resetting form after successful submission");
@@ -1145,6 +1155,28 @@ export const CreateListing = () => {
               {error}
             </div>
           )}
+
+          {/* Credit Info Banner */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-start space-x-3">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="text-sm font-medium text-blue-800 mb-2">
+                  💎 Chính sách Credits
+                </h3>
+                <ul className="text-sm text-blue-700 space-y-1">
+                  <li>✅ Đăng tin sẽ <strong>TRỪ 1 CREDIT</strong> ngay lập tức</li>
+                  <li>✅ Nếu admin <strong>TỪ CHỐI</strong> → <strong>HOÀN LẠI 1 CREDIT</strong></li>
+                  <li>✅ Bạn có thể sửa và gửi lại (trừ 1 credit mỗi lần resubmit)</li>
+                  <li>⚠️ Vui lòng đăng tin chất lượng để tránh bị từ chối</li>
+                </ul>
+              </div>
+            </div>
+          </div>
 
           {/* Basic Information */}
           <div className="bg-white rounded-xl shadow-sm p-6">
