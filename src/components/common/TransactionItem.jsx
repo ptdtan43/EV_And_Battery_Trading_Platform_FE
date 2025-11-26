@@ -158,7 +158,8 @@ export const TransactionItem = ({
 
           {/* Related Links */}
           <div className="flex flex-wrap gap-2">
-            {relatedPayment && onViewPayment && (
+            {/* Hide payment link for credit package purchases */}
+            {relatedPayment && onViewPayment && changeType !== 'Purchase' && (
               <button
                 onClick={() => onViewPayment(relatedPayment)}
                 className="text-xs text-blue-600 hover:text-blue-700 hover:underline"
