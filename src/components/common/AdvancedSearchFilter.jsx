@@ -72,12 +72,6 @@ export const AdvancedSearchFilter = ({ initialFilters = {}, onFilterChange, onCl
   const popularBrands = ["VinFast", "Tesla", "BYD", "Hyundai", "Kia", "BMW", "Audi", "Mercedes"];
   const vehicleTypes = ["Car", "Motorcycle", "Truck", "Bus"];
   const fuelTypes = ["Electric", "Hybrid", "Gasoline", "Diesel"];
-  const conditions = [
-    { value: "excellent", label: "Xuất sắc" },
-    { value: "good", label: "Tốt" },
-    { value: "fair", label: "Khá" },
-    { value: "poor", label: "Cần sửa chữa" }
-  ];
   const batteryBrands = [
     "CATL",
     "BYD", 
@@ -235,29 +229,6 @@ export const AdvancedSearchFilter = ({ initialFilters = {}, onFilterChange, onCl
               placeholder="Giá tối đa"
               className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white text-sm"
             />
-          </div>
-        </div>
-
-        {/* Condition */}
-        <div className="mb-6">
-          <div className="flex items-center space-x-2 mb-3">
-            <Tag className="h-5 w-5 text-blue-600" />
-            <h4 className="font-bold text-gray-900">Tình trạng</h4>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            {conditions.map((cond) => (
-              <button
-                key={cond.value}
-                onClick={() => handleInputChange("condition", cond.value)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  filters.condition === cond.value
-                    ? "bg-blue-600 text-white shadow-md"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
-              >
-                {cond.label}
-              </button>
-            ))}
           </div>
         </div>
 
