@@ -1848,28 +1848,37 @@ export const CreateListing = () => {
           )}
 
           {/* Submit Button */}
-          <div className="flex justify-end space-x-4">
-            <button
-              type="button"
-              onClick={() => navigate(-1)}
-              className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-            >
-              Hủy
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              onClick={(e) => {
-                // Additional protection against double clicks
-                if (loading) {
-                  e.preventDefault();
-                  return false;
-                }
-              }}
-            >
-              {loading ? "Đang tạo..." : "Tạo bài đăng"}
-            </button>
+          <div className="space-y-4">
+            {/* Notice message */}
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <p className="text-sm text-yellow-800 font-medium">
+                ⚠️ Lưu ý: Bài đăng của bạn chỉ được duyệt khi xe đã được gửi lên chi nhánh của chúng tôi! Đ/c: 123 Đống Đa, Hà Nội, Việt Nam 
+              </p>
+            </div>
+            
+            <div className="flex justify-end space-x-4">
+              <button
+                type="button"
+                onClick={() => navigate(-1)}
+                className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              >
+                Hủy
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={(e) => {
+                  // Additional protection against double clicks
+                  if (loading) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+              >
+                {loading ? "Đang tạo..." : "Tạo bài đăng"}
+              </button>
+            </div>
           </div>
         </form>
       </div>

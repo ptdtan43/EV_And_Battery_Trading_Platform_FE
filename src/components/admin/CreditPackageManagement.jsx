@@ -261,9 +261,6 @@ export const CreditPackageManagement = () => {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Số lượt đăng *
-                        <span className="ml-2 text-xs text-orange-600">
-                          (Không thể sửa - tạo gói mới nếu cần)
-                        </span>
                       </label>
                       <input
                         type="number"
@@ -273,16 +270,10 @@ export const CreditPackageManagement = () => {
                         placeholder="VD: 10"
                         title="Không thể sửa số lượt để đảm bảo tính nhất quán về giá"
                       />
-                      <p className="text-xs text-gray-500 mt-1">
-                        Lưu ý: Để thay đổi số lượt, hãy tạo gói mới
-                      </p>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Giá (VND) *
-                        <span className="ml-2 text-xs text-orange-600">
-                          (Không thể sửa - tạo gói mới nếu cần)
-                        </span>
                       </label>
                       <input
                         type="number"
@@ -292,9 +283,6 @@ export const CreditPackageManagement = () => {
                         placeholder="VD: 85000"
                         title="Không thể sửa giá để đảm bảo công bằng cho người đã mua"
                       />
-                      <p className="text-xs text-gray-500 mt-1">
-                        Lưu ý: Để thay đổi giá, hãy tạo gói mới và ẩn gói cũ
-                      </p>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
