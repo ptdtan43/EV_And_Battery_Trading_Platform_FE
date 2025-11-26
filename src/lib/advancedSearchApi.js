@@ -7,7 +7,7 @@ import { apiRequest } from "./api";
  */
 export const advancedSearchProducts = async (filters) => {
     try {
-        console.log("🔍 [Advanced Search] Starting with filters:", filters);
+        console.log("[Advanced Search] Starting with filters:", filters);
 
         // Build query string from filters
         const queryParams = new URLSearchParams();
@@ -19,26 +19,26 @@ export const advancedSearchProducts = async (filters) => {
         });
 
         const queryString = queryParams.toString();
-        console.log("🔍 [Advanced Search] Query string:", queryString);
+        console.log("[Advanced Search] Query string:", queryString);
 
         // Try to use the backend search endpoint if available
         try {
             const endpoint = `/api/Product/search/advanced?${queryString}`;
-            console.log("🔍 [Advanced Search] Calling API:", endpoint);
+            console.log("[Advanced Search] Calling API:", endpoint);
 
             const results = await apiRequest(endpoint);
             const productsArray = Array.isArray(results) ? results : results?.items || [];
 
-            console.log(`✅ [Advanced Search] Backend returned ${productsArray.length} products`);
+            console.log(`[Advanced Search] Backend returned ${productsArray.length} products`);
             return productsArray;
         } catch (apiError) {
-            console.warn("⚠️ [Advanced Search] Backend endpoint not available, using client-side filtering:", apiError.message);
+            console.warn("[Advanced Search] Backend endpoint not available, using client-side filtering:", apiError.message);
 
             // Fallback to client-side filtering
             return await clientSideAdvancedSearch(filters);
         }
     } catch (error) {
-        console.error("❌ [Advanced Search] Error:", error);
+        console.error("[Advanced Search] Error:", error);
         throw error;
     }
 };
@@ -49,7 +49,7 @@ export const advancedSearchProducts = async (filters) => {
  */
 const clientSideAdvancedSearch = async (filters) => {
     try {
-        console.log("🔍 [Client-side Search] Fetching all products...");
+        console.log("[Client-side Search] Fetching all products...");
 
         // Get all products from backend
         const allProductsData = await apiRequest("/api/Product");
@@ -57,7 +57,7 @@ const clientSideAdvancedSearch = async (filters) => {
             ? allProductsData
             : allProductsData?.items || [];
 
-        console.log(`🔍 [Client-side Search] Total products: ${allProducts.length}`);
+        console.log(`[Client-side Search] Total products: ${allProducts.length}`);
 
         // Filter products based on criteria
         const filteredProducts = allProducts.filter(product => {
@@ -185,10 +185,10 @@ const clientSideAdvancedSearch = async (filters) => {
             return true;
         });
 
-        console.log(`✅ [Client-side Search] Filtered to ${filteredProducts.length} products`);
+        console.log(`[Client-side Search] Filtered to ${filteredProducts.length} products`);
         return filteredProducts;
     } catch (error) {
-        console.error("❌ [Client-side Search] Error:", error);
+        console.error("[Client-side Search] Error:", error);
         throw new Error("Không thể tìm kiếm sản phẩm. Vui lòng thử lại sau.");
     }
 };

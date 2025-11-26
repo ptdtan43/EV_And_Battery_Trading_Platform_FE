@@ -117,7 +117,7 @@ export const RegisterForm = () => {
         setError("");
         showToast({
           title: "🎉 Đăng ký thành công!",
-          description: "Chào mừng bạn đến với EV Market!",
+          description: "Chào mừng bạn đến với EV Market! Bạn đã nhận được 3 lượt đăng tin miễn phí.",
           type: "success",
         });
 
@@ -137,7 +137,7 @@ export const RegisterForm = () => {
         showToast({
           title: "🎉 Đăng ký thành công!",
           description:
-            "Tài khoản của bạn đã được tạo. Vui lòng đăng nhập để tiếp tục.",
+            "Tài khoản của bạn đã được tạo và nhận 3 lượt đăng tin miễn phí. Vui lòng đăng nhập để tiếp tục.",
           type: "success",
         });
 

@@ -55,12 +55,12 @@ function getAuthToken() {
                 const isExpired = payload.exp && payload.exp < currentTime;
 
                 if (isExpired) {
-                    console.warn("⚠️ Token is expired, but keeping it for development");
-                    console.log("🎭 DEVELOPMENT MODE: Keeping expired token");
+                    console.warn("Token is expired, but keeping it for development");
+                    console.log("DEVELOPMENT MODE: Keeping expired token");
                     return token;
                 }
             } catch (decodeError) {
-                console.warn("⚠️ Invalid token format, clearing auth data:", decodeError);
+                console.warn("Invalid token format, clearing auth data:", decodeError);
                 localStorage.removeItem("evtb_auth");
                 return null;
             }
@@ -117,7 +117,7 @@ async function apiRequest(path, { method = "GET", body, headers } = {}) {
 
     // Debug logging for failed requests
     if (!res.ok && import.meta.env.DEV) {
-        console.group('🚨 API Error Debug');
+        console.group('API Error Debug');
         console.log('URL:', url);
         console.log('Status:', res.status);
         console.log('Response:', data);
@@ -129,7 +129,7 @@ async function apiRequest(path, { method = "GET", body, headers } = {}) {
 
         // Handle 401 Unauthorized specifically
         if (res.status === 401) {
-            console.warn("🚨 401 Unauthorized - Token may be expired or invalid");
+            console.warn("401 Unauthorized - Token may be expired or invalid");
 
             // Skip refresh for login/register endpoints
             const isAuthEndpoint = path.includes('/login') || path.includes('/register') || path.includes('/forgot-password');

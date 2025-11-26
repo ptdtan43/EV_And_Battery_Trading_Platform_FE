@@ -10,7 +10,7 @@ function getAuthToken() {
   try {
     const raw = localStorage.getItem("evtb_auth");
     if (!raw) {
-      console.log("🔍 No auth data in localStorage");
+      console.log("No auth data in localStorage");
       return null;
     }
     const parsed = JSON.parse(raw);
@@ -25,15 +25,15 @@ function getAuthToken() {
         const isExpired = payload.exp && payload.exp < currentTime;
 
         if (isExpired) {
-          console.warn("⚠️ Token is expired, but keeping it for development");
+          console.warn("Token is expired, but keeping it for development");
           // Don't clear auth data in development
           // localStorage.removeItem("evtb_auth");
           // return null;
-          console.log("🎭 DEVELOPMENT MODE: Keeping expired token");
+          console.log("DEVELOPMENT MODE: Keeping expired token");
           return token;
         }
 
-        console.log("🔍 Auth token check:", {
+        console.log("Auth token check:", {
           hasAuth: !!raw,
           hasToken: !!token,
           tokenLength: token?.length || 0,
@@ -43,7 +43,7 @@ function getAuthToken() {
           parsedData: parsed
         });
       } catch (decodeError) {
-        console.warn("⚠️ Invalid token format, clearing auth data:", decodeError);
+        console.warn("Invalid token format, clearing auth data:", decodeError);
         localStorage.removeItem("evtb_auth");
         return null;
       }
@@ -51,7 +51,7 @@ function getAuthToken() {
 
     return token;
   } catch (error) {
-    console.error("🔍 Error getting auth token:", error);
+    console.error("Error getting auth token:", error);
     return null;
   }
 }
@@ -92,7 +92,7 @@ export async function apiRequest(path, { method = "GET", body, headers } = {}) {
 
   // Debug logging for registration requests
   if (path.includes('/User/register') && import.meta.env.DEV) {
-    console.group('🔍 Registration Request Debug');
+    console.group('Registration Request Debug');
     console.log('URL:', url);
     console.log('Method:', method);
     console.log('Headers:', {
@@ -117,7 +117,7 @@ export async function apiRequest(path, { method = "GET", body, headers } = {}) {
 
   // Debug logging for failed requests
   if (!res.ok && import.meta.env.DEV) {
-    console.group('🚨 API Error Debug');
+    console.group('API Error Debug');
     console.log('URL:', url);
     console.log('Status:', res.status);
     console.log('Status Text:', res.statusText);
@@ -132,13 +132,13 @@ export async function apiRequest(path, { method = "GET", body, headers } = {}) {
 
     // Handle 401 Unauthorized specifically
     if (res.status === 401) {
-      console.warn("🚨 401 Unauthorized - Token may be expired or invalid");
+      console.warn("401 Unauthorized - Token may be expired or invalid");
 
       // Skip refresh for login/register endpoints
       const isAuthEndpoint = path.includes('/login') || path.includes('/register') || path.includes('/forgot-password');
 
       if (!isAuthEndpoint) {
-        console.warn("🔄 Token invalid, clearing auth and redirecting to login");
+        console.warn("Token invalid, clearing auth and redirecting to login");
 
         // Clear auth data
         tokenManager.clearAuth();
@@ -150,7 +150,7 @@ export async function apiRequest(path, { method = "GET", body, headers } = {}) {
           }, 1000);
         }
       } else {
-        console.warn("🔐 Login/Auth endpoint failed - check credentials");
+        console.warn("Login/Auth endpoint failed - check credentials");
         // Use backend message for auth endpoints
         if (data && typeof data === 'object') {
           message = data.message || data.error || data.detail || data.title || 'Invalid email or password.';
@@ -217,3 +217,67 @@ export async function apiRequest(path, { method = "GET", body, headers } = {}) {
 }
 
 export { API_BASE_URL };
+
+// ==================== CREDIT SYSTEM HELPERS ====================
+
+/**
+ * Quick helper to get current user's credits
+ * Requires user to be logged in
+ * @returns {Promise<number>} Current credit balance
+ */
+export async function getMyCredits() {
+  try {
+    // Get user from localStorage
+    const authData = localStorage.getItem("evtb_auth");
+    if (!authData) {
+      throw new Error("User not logged in");
+    }
+    
+    const { user } = JSON.parse(authData);
+    const userId = user?.id || user?.userId;
+    
+    if (!userId) {
+      throw new Error("User ID not found");
+    }
+    
+    const response = await apiRequest(`/api/User/${userId}/listings/count`);
+    return response.postCredits || 0;
+  } catch (error) {
+    console.error("Error getting user credits:", error);
+    return 0;
+  }
+}
+
+/**
+ * Format price to Vietnamese currency
+ * @param {number} price - Price in VND
+ * @returns {string} Formatted price
+ * @example
+ * formatPrice(90000) // "90.000 ₫"
+ */
+export function formatPrice(price) {
+  if (!price && price !== 0) return "0 ₫";
+  return new Intl.NumberFormat('vi-VN', {
+    style: 'currency',
+    currency: 'VND'
+  }).format(price);
+}
+
+/**
+ * Format date to Vietnamese format
+ * @param {string|Date} date - Date to format
+ * @returns {string} Formatted date
+ * @example
+ * formatDate("2024-01-15T10:30:00") // "15/01/2024 10:30"
+ */
+export function formatDate(date) {
+  if (!date) return "";
+  const d = new Date(date);
+  return new Intl.DateTimeFormat('vi-VN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(d);
+}

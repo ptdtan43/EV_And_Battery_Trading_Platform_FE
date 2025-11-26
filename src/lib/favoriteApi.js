@@ -8,7 +8,7 @@ import { apiRequest } from './api';
  */
 export const addToFavorites = async (userId, productId) => {
   try {
-    console.log("🔍 addToFavorites called with:", { userId, productId });
+    console.log("addToFavorites called with:", { userId, productId });
     
     const favoriteData = {
       userId: userId,
@@ -16,14 +16,14 @@ export const addToFavorites = async (userId, productId) => {
       createdDate: new Date().toISOString()
     };
 
-    console.log("🔍 Sending favorite data:", favoriteData);
+    console.log("Sending favorite data:", favoriteData);
 
     const response = await apiRequest('/api/Favorite', {
       method: 'POST',
       body: favoriteData
     });
 
-    console.log("🔍 addToFavorites response:", response);
+    console.log("addToFavorites response:", response);
     return response;
   } catch (error) {
     console.error('Error adding to favorites:', error);
@@ -60,9 +60,9 @@ export const removeFromFavorites = async (favoriteId) => {
  */
 export const getUserFavorites = async (userId) => {
   try {
-    console.log("🔍 getUserFavorites called with userId:", userId);
+    console.log("getUserFavorites called with userId:", userId);
     const response = await apiRequest(`/api/Favorite/user/${userId}`);
-    console.log("🔍 getUserFavorites response:", response);
+    console.log("getUserFavorites response:", response);
     return Array.isArray(response) ? response : [];
   } catch (error) {
     console.error('Error getting user favorites:', error);
@@ -83,10 +83,10 @@ export const getUserFavorites = async (userId) => {
  */
 export const isProductFavorited = async (userId, productId) => {
   try {
-    console.log("🔍 isProductFavorited called with:", { userId, productId });
+    console.log("isProductFavorited called with:", { userId, productId });
     const favorites = await getUserFavorites(userId);
     const result = favorites.find(fav => fav.productId === productId) || null;
-    console.log("🔍 isProductFavorited result:", result);
+    console.log("isProductFavorited result:", result);
     return result;
   } catch (error) {
     console.error('Error checking if product is favorited:', error);

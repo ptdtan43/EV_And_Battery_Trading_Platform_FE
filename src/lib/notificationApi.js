@@ -21,7 +21,7 @@ export const NOTIFICATION_TYPES = {
  * @returns {Promise<Object>} Created notification
  */
 export const createNotification = async (notificationData) => {
-  console.log("🔔 Creating notification:", notificationData);
+  console.log("Creating notification:", notificationData);
 
   try {
     const response = await apiRequest('/api/Notification', {
@@ -29,10 +29,10 @@ export const createNotification = async (notificationData) => {
       body: notificationData
     });
 
-    console.log("✅ Notification created successfully:", response);
+    console.log("Notification created successfully:", response);
     return response;
   } catch (error) {
-    console.error("❌ Error creating notification:", error);
+    console.error("Error creating notification:", error);
     throw error;
   }
 };
@@ -45,11 +45,11 @@ export const createNotification = async (notificationData) => {
  * @returns {Promise<Object>} Notifications with pagination
  */
 export const getUserNotifications = async (userId, page = 1, pageSize = 10) => {
-  console.log("🔔 Getting notifications for user:", userId);
+  console.log("Getting notifications for user:", userId);
 
   try {
     const response = await apiRequest(`/api/Notification/user/${userId}`);
-    console.log("✅ Retrieved notifications:", response);
+    console.log("Retrieved notifications:", response);
 
     // Handle different response formats
     let notifications = [];
@@ -62,8 +62,8 @@ export const getUserNotifications = async (userId, page = 1, pageSize = 10) => {
     }
 
     // Debug notification structure
-    console.log("🔔 First notification structure:", notifications[0]);
-    console.log("🔔 All notification IDs:", notifications.map(n => ({ id: n.id, notificationId: n.notificationId })));
+    console.log("First notification structure:", notifications[0]);
+    console.log("All notification IDs:", notifications.map(n => ({ id: n.id, notificationId: n.notificationId })));
 
     // Add pagination info
     const result = {
@@ -75,10 +75,10 @@ export const getUserNotifications = async (userId, page = 1, pageSize = 10) => {
       hasMore: false
     };
 
-    console.log("✅ Processed notifications result:", result);
+    console.log("Processed notifications result:", result);
     return result;
   } catch (error) {
-    console.error("❌ Error getting user notifications:", error);
+    console.error("Error getting user notifications:", error);
     throw error;
   }
 };
@@ -89,11 +89,11 @@ export const getUserNotifications = async (userId, page = 1, pageSize = 10) => {
  * @returns {Promise<number>} Unread count
  */
 export const getUnreadCount = async (userId) => {
-  console.log("🔔 Getting unread count for user:", userId);
+  console.log("Getting unread count for user:", userId);
 
   try {
     const response = await apiRequest(`/api/Notification/user/${userId}`);
-    console.log("🔔 Raw response for unread count:", response);
+    console.log("Raw response for unread count:", response);
 
     // Handle different response formats
     let notifications = [];
@@ -107,10 +107,10 @@ export const getUnreadCount = async (userId) => {
 
     const unreadCount = notifications.filter(n => !n.isRead).length;
 
-    console.log("✅ Unread count:", unreadCount);
+    console.log("Unread count:", unreadCount);
     return unreadCount;
   } catch (error) {
-    console.error("❌ Error getting unread count:", error);
+    console.error("Error getting unread count:", error);
     return 0;
   }
 };
@@ -121,10 +121,10 @@ export const getUnreadCount = async (userId) => {
  * @returns {Promise<Object>} Updated notification
  */
 export const markAsRead = async (notificationId) => {
-  console.log("🔔 Marking notification as read:", notificationId);
+  console.log("Marking notification as read:", notificationId);
 
   if (!notificationId) {
-    console.error("❌ Notification ID is undefined or null");
+    console.error("Notification ID is undefined or null");
     throw new Error("Notification ID is required");
   }
 
@@ -134,11 +134,11 @@ export const markAsRead = async (notificationId) => {
       method: 'PUT'
     });
 
-    console.log("✅ Notification marked as read:", response);
+    console.log("Notification marked as read:", response);
     return { id: notificationId, isRead: true, ...response };
   } catch (error) {
-    console.error("❌ Error marking notification as read:", error);
-    console.error("❌ Error details:", {
+    console.error("Error marking notification as read:", error);
+    console.error("Error details:", {
       message: error.message,
       notificationId: notificationId,
       stack: error.stack
@@ -153,7 +153,7 @@ export const markAsRead = async (notificationId) => {
  * @returns {Promise<number>} Number of notifications marked as read
  */
 export const markAllAsRead = async (userId) => {
-  console.log("🔔 Marking all notifications as read for user:", userId);
+  console.log("Marking all notifications as read for user:", userId);
 
   try {
     // Use the new bulk endpoint: PUT /api/Notification/mark-all-read
@@ -161,22 +161,22 @@ export const markAllAsRead = async (userId) => {
       method: 'PUT'
     });
 
-    console.log("✅ Bulk mark all as read successful:", response);
-    console.log("✅ Response type:", typeof response);
-    console.log("✅ Response keys:", Object.keys(response || {}));
+    console.log("Bulk mark all as read successful:", response);
+    console.log("Response type:", typeof response);
+    console.log("Response keys:", Object.keys(response || {}));
     
     // Handle different response formats
     if (typeof response === 'object' && response !== null) {
       // Backend returns { message: "...", count: X }
       const count = response.count ?? response.Count ?? 0;
-      console.log("✅ Extracted count:", count);
+      console.log("Extracted count:", count);
       return count;
     }
     
     return 0;
   } catch (error) {
-    console.error("❌ Error marking all notifications as read:", error);
-    console.error("❌ Error details:", {
+    console.error("Error marking all notifications as read:", error);
+    console.error("Error details:", {
       message: error.message,
       stack: error.stack,
       response: error.response
@@ -191,10 +191,10 @@ export const markAllAsRead = async (userId) => {
  * @returns {Promise<boolean>} Success status
  */
 export const deleteNotification = async (notificationId) => {
-  console.log("🔔 Deleting notification:", notificationId);
+  console.log("Deleting notification:", notificationId);
 
   if (!notificationId) {
-    console.error("❌ Notification ID is undefined or null");
+    console.error("Notification ID is undefined or null");
     throw new Error("Notification ID is required");
   }
 
@@ -204,12 +204,12 @@ export const deleteNotification = async (notificationId) => {
       method: 'DELETE'
     });
 
-    console.log("✅ Notification deleted successfully:", response);
+    console.log("Notification deleted successfully:", response);
     // 204 No Content means success, response might be null/undefined
     return true;
   } catch (error) {
-    console.error("❌ Error deleting notification:", error);
-    console.error("❌ Error details:", {
+    console.error("Error deleting notification:", error);
+    console.error("Error details:", {
       message: error.message,
       status: error.status,
       notificationId: notificationId,
@@ -241,7 +241,7 @@ export const notifyPostCreated = async (userId, postTitle) => {
     await createNotification({
       userId,
       notificationType: NOTIFICATION_TYPES.POST_CREATED,
-      title: '📝 Bài đăng đã được tạo',
+      title: 'Bài đăng đã được tạo',
       content: `Bài đăng "${postTitle}" đã được tạo thành công và đang chờ duyệt.`
     });
     return true;
@@ -262,7 +262,7 @@ export const notifyPostApproved = async (userId, postTitle) => {
     await createNotification({
       userId,
       notificationType: NOTIFICATION_TYPES.POST_APPROVED,
-      title: '✅ Bài đăng đã được duyệt',
+      title: 'Bài đăng đã được duyệt',
       content: `Bài đăng "${postTitle}" đã được admin duyệt và hiển thị trên trang chủ.`
     });
     return true;
@@ -283,7 +283,7 @@ export const notifyPostRejected = async (userId, postTitle) => {
     await createNotification({
       userId,
       notificationType: NOTIFICATION_TYPES.POST_REJECTED,
-      title: '❌ Bài đăng bị từ chối',
+      title: 'Bài đăng bị từ chối',
       content: `Bài đăng "${postTitle}" đã bị admin từ chối. Vui lòng kiểm tra và chỉnh sửa.`
     });
     return true;
@@ -363,17 +363,17 @@ export const notifyUserVerificationCompleted = async (userId, productTitle, prod
     let content = `Sản phẩm "${productTitle}" (ID: ${productId}) của bạn ${statusText}.`;
 
     if (adminNotes) {
-      content += `\n\n📝 Ghi chú từ admin: ${adminNotes}`;
+      content += `\n\nGhi chú từ admin: ${adminNotes}`;
     }
 
     if (isVerified) {
-      content += `\n\n🎉 Sản phẩm của bạn giờ đã có chứng nhận kiểm định và sẽ được ưu tiên hiển thị trên trang chủ!`;
+      content += `\n\nSản phẩm của bạn giờ đã có chứng nhận kiểm định và sẽ được ưu tiên hiển thị trên trang chủ!`;
     } else {
-      content += `\n\n⚠️ Bạn đã bị admin từ chối kiểm định.`;
+      content += `\n\nBạn đã bị admin từ chối kiểm định.`;
       if (adminNotes) {
-        content += `\n\n📋 Lý do từ chối: ${adminNotes}`;
+        content += `\n\nLý do từ chối: ${adminNotes}`;
       }
-      content += `\n\n💡 Vui lòng cập nhật lại bài viết để gửi yêu cầu kiểm duyệt lại miễn phí.`;
+      content += `\n\nVui lòng cập nhật lại bài viết để gửi yêu cầu kiểm duyệt lại miễn phí.`;
     }
 
     await createNotification({
@@ -407,12 +407,12 @@ export const notifyUserVerificationCompleted = async (userId, productTitle, prod
  */
 export const notifyAdminProductUpdated = async (adminUserId, productTitle, productId, sellerName) => {
   try {
-    console.log(`🔔 Sending product update notification to admin ${adminUserId} for product ${productId}`);
+    console.log(`Sending product update notification to admin ${adminUserId} for product ${productId}`);
 
     await createNotification({
       userId: adminUserId,
       notificationType: NOTIFICATION_TYPES.POST_UPDATED,
-      title: '🔄 Bài đăng đã được cập nhật',
+      title: 'Bài đăng đã được cập nhật',
       content: `Người bán "${sellerName}" đã cập nhật bài đăng "${productTitle}" (ID: ${productId}). Vui lòng kiểm tra lại và duyệt bài đăng.`,
       metadata: {
         productId: productId,
@@ -424,10 +424,10 @@ export const notifyAdminProductUpdated = async (adminUserId, productTitle, produ
       }
     });
 
-    console.log(`✅ Product update notification sent to admin for product ${productId}`);
+    console.log(`Product update notification sent to admin for product ${productId}`);
     return true;
   } catch (error) {
-    console.error('❌ Error sending product update notification to admin:', error);
+    console.error('Error sending product update notification to admin:', error);
     return false;
   }
 };
@@ -442,12 +442,12 @@ export const notifyAdminProductUpdated = async (adminUserId, productTitle, produ
  */
 export const notifyAdminReportReceived = async (adminUserId, productTitle, productId, reporterName, reportType) => {
   try {
-    console.log(`🔔 Sending report notification to admin ${adminUserId} for product ${productId}`);
+    console.log(`Sending report notification to admin ${adminUserId} for product ${productId}`);
 
     await createNotification({
       userId: adminUserId,
       notificationType: NOTIFICATION_TYPES.POST_REPORTED,
-      title: '🚨 Báo cáo vi phạm mới',
+      title: 'Báo cáo vi phạm mới',
       content: `Người dùng "${reporterName}" đã báo cáo bài đăng "${productTitle}" (ID: ${productId}) với lý do: ${reportType}. Vui lòng xem xét và xử lý.`,
       metadata: {
         productId: productId,
@@ -460,10 +460,10 @@ export const notifyAdminReportReceived = async (adminUserId, productTitle, produ
       }
     });
 
-    console.log(`✅ Report notification sent to admin for product ${productId}`);
+    console.log(`Report notification sent to admin for product ${productId}`);
     return true;
   } catch (error) {
-    console.error('❌ Error sending report notification to admin:', error);
+    console.error('Error sending report notification to admin:', error);
     return false;
   }
 };

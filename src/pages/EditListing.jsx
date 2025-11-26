@@ -719,6 +719,18 @@ export const EditListing = () => {
       });
       const pid = updated?.id || updated?.productId || updated?.Id || id;
 
+      // ✅ Check if this was a resubmit (credit was deducted)
+      const isResubmit = updated?.isResubmit || false;
+      const remainingCredits = updated?.remainingPostCredits;
+      
+      console.log('📊 Update response:', { isResubmit, remainingCredits });
+
+      // ✅ Refresh credits if this was a resubmit
+      if (isResubmit && typeof window.refreshCredits === 'function') {
+        console.log('🔄 Refreshing credits after resubmit...');
+        window.refreshCredits();
+      }
+
       // Delete product images that user marked for deletion
       if (imagesToDelete.length > 0) {
         for (const imageId of imagesToDelete) {
@@ -901,11 +913,19 @@ export const EditListing = () => {
         // Don't block the flow if notification fails
       }
 
+      // ✅ Build success message with credit info
+      let successMessage = shouldAutoRequestVerification 
+        ? "Bài đăng đã được cập nhật và yêu cầu kiểm duyệt lại đã được gửi miễn phí tới admin"
+        : "Bài đăng đã được cập nhật và thông báo đã được gửi tới admin";
+
+      // Add credit info if this was a resubmit
+      if (isResubmit && remainingCredits !== undefined) {
+        successMessage += `. Đã trừ 1 credit. Bạn còn ${remainingCredits} credit${remainingCredits !== 1 ? 's' : ''}.`;
+      }
+
       show({
         title: "Cập nhật thành công",
-        description: shouldAutoRequestVerification 
-          ? "Bài đăng đã được cập nhật và yêu cầu kiểm duyệt lại đã được gửi miễn phí tới admin"
-          : "Bài đăng đã được cập nhật và thông báo đã được gửi tới admin",
+        description: successMessage,
         type: "success",
       });
       navigate("/my-listings");

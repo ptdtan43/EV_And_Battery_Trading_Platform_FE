@@ -26,7 +26,8 @@ export const API_CONFIG = {
       BASE: '/api/User',
       BY_ID: (id) => `/api/User/${id}`,
       UPDATE: (id) => `/api/User/${id}`,
-      DELETE: (id) => `/api/User/${id}`
+      DELETE: (id) => `/api/User/${id}`,
+      CREDITS: (id) => `/api/User/${id}/listings/count`
     },
 
     // Products
@@ -61,12 +62,17 @@ export const API_CONFIG = {
       CANCEL: (id) => `/api/Order/${id}/cancel`
     },
 
-    // Payments
+    // Payments & Credits
     PAYMENTS: {
-      BASE: '/api/payment',
-      BY_ID: (id) => `/api/payment/${id}`,
-      BY_USER: (userId) => `/api/payment/user/${userId}`,
-      STATUS: (id) => `/api/payment/${id}/status`
+      BASE: '/api/Payment',
+      BY_ID: (id) => `/api/Payment/${id}`,
+      BY_USER: (userId) => `/api/Payment/user/${userId}`,
+      STATUS: (id) => `/api/Payment/${id}/status`,
+      // Credit System
+      PACKAGES: '/api/Payment/packages',
+      CREDIT_HISTORY: '/api/Payment/credits/history',
+      ADMIN_ADJUST: '/api/Payment/admin/credits/adjust',
+      ADMIN_HISTORY: '/api/Payment/admin/credits/history'
     },
 
     // Favorites

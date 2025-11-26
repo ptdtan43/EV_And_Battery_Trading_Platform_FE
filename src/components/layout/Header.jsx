@@ -11,6 +11,7 @@ import {
 import { useAuth } from "../../contexts/AuthContext";
 import { NotificationBell } from "../common/NotificationBell";
 import { ChatBell } from "../common/ChatBell";
+import { CreditWidget } from "../common/CreditWidget";
 
 export const Header = () => {
   const { user, profile, signOut, isAdmin } = useAuth();
@@ -92,6 +93,8 @@ export const Header = () => {
                 {!isAdmin && <NotificationBell />}
 
                 {!isAdmin && <ChatBell />}
+
+                {!isAdmin && <CreditWidget />}
 
                 {!isAdmin && (
                   <Link

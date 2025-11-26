@@ -1,22 +1,65 @@
 import { apiRequest } from "./api";
 
 /**
+ * Create a new product (costs 1 credit immediately, refunded if rejected)
+ * @param {Object} productData - Product data
+ * @returns {Promise<Object>} Created product with remainingPostCredits
+ * @throws {Error} If user doesn't have enough credits
+ * @example
+ * const product = await createProduct({
+ *   productType: "Vehicle",
+ *   title: "Tesla Model 3",
+ *   description: "2020 Tesla Model 3",
+ *   price: 500000000,
+ *   brand: "Tesla",
+ *   model: "Model 3",
+ *   condition: "Used"
+ * });
+ * // Returns: { productId, title, status: "Draft", remainingPostCredits: 14, message: "1 credit deducted. Will be refunded if rejected." }
+ * // Note: Credit is deducted immediately but refunded if admin rejects
+ */
+export const createProduct = async (productData) => {
+  console.log("Creating product:", productData);
+  
+  try {
+    const response = await apiRequest("/api/Product", {
+      method: "POST",
+      body: productData
+    });
+    
+    console.log("✅ Product created successfully:", response);
+    console.log(`💎 Remaining credits: ${response.remainingPostCredits}`);
+    
+    return response;
+  } catch (error) {
+    console.error("❌ Error creating product:", error);
+    
+    // Handle specific error: not enough credits
+    if (error.message?.includes("not have enough post credits")) {
+      throw new Error("Bạn không đủ credits để đăng tin. Đăng tin sẽ trừ 1 credit ngay (hoàn lại nếu bị từ chối). Vui lòng mua thêm credits.");
+    }
+    
+    throw error;
+  }
+};
+
+/**
  * Approve a product
  * @param {number} productId - Product ID
  * @returns {Promise<Object>} API response
  */
 export const approveProduct = async (productId) => {
-  console.log("✅ Approving product:", productId);
+  console.log("Approving product:", productId);
   
   try {
     const response = await apiRequest(`/api/Product/approve/${productId}`, {
       method: "PUT"
     });
     
-    console.log("✅ Product approved successfully:", response);
+    console.log("Product approved successfully:", response);
     return response;
   } catch (error) {
-    console.error("❌ Error approving product:", error);
+    console.error("Error approving product:", error);
     throw error;
   }
 };
@@ -28,7 +71,7 @@ export const approveProduct = async (productId) => {
  * @returns {Promise<Object>} API response
  */
 export const rejectProduct = async (productId, rejectionReason) => {
-  console.log("🚫 Rejecting product:", productId, "Reason:", rejectionReason);
+  console.log("Rejecting product:", productId, "Reason:", rejectionReason);
   
   // Validate productId
   if (!productId || productId === 'undefined') {
@@ -41,10 +84,10 @@ export const rejectProduct = async (productId, rejectionReason) => {
       body: { RejectionReason: rejectionReason }
     });
     
-    console.log("✅ Product rejected successfully:", response);
+    console.log("Product rejected successfully:", response);
     return response;
   } catch (error) {
-    console.error("❌ Error rejecting product:", error);
+    console.error("Error rejecting product:", error);
     throw error;
   }
 };
@@ -55,17 +98,17 @@ export const rejectProduct = async (productId, rejectionReason) => {
  * @returns {Promise<Object>} API response
  */
 export const resubmitProduct = async (productId) => {
-  console.log("🔄 Resubmitting product:", productId);
+  console.log("Resubmitting product:", productId);
   
   try {
     const response = await apiRequest(`/api/Product/resubmit/${productId}`, {
       method: "PUT"
     });
     
-    console.log("✅ Product resubmitted successfully:", response);
+    console.log("Product resubmitted successfully:", response);
     return response;
   } catch (error) {
-    console.error("❌ Error resubmitting product:", error);
+    console.error("Error resubmitting product:", error);
     throw error;
   }
 };
@@ -76,14 +119,14 @@ export const resubmitProduct = async (productId) => {
  * @returns {Promise<Array>} Products array
  */
 export const getProductsByStatus = async (status) => {
-  console.log("📋 Getting products by status:", status);
+  console.log("Getting products by status:", status);
   
   try {
     const response = await apiRequest(`/api/Product/status/${status}`);
-    console.log("✅ Products loaded:", response);
+    console.log("Products loaded:", response);
     return response;
   } catch (error) {
-    console.error("❌ Error loading products by status:", error);
+    console.error("Error loading products by status:", error);
     throw error;
   }
 };
@@ -94,14 +137,14 @@ export const getProductsByStatus = async (status) => {
  * @returns {Promise<Array>} Rejected products array
  */
 export const getRejectedProducts = async (sellerId) => {
-  console.log("📋 Getting rejected products for seller:", sellerId);
+  console.log("Getting rejected products for seller:", sellerId);
   
   try {
     const response = await apiRequest(`/api/Product/seller/${sellerId}/rejected`);
-    console.log("✅ Rejected products loaded:", response);
+    console.log("Rejected products loaded:", response);
     return response;
   } catch (error) {
-    console.error("❌ Error loading rejected products:", error);
+    console.error("Error loading rejected products:", error);
     throw error;
   }
 };
@@ -112,7 +155,7 @@ export const getRejectedProducts = async (sellerId) => {
  * @returns {Promise<Array>} Products array matching the license plate
  */
 export const searchProductsByLicensePlate = async (licensePlate) => {
-  console.log("🔍 Searching products by license plate:", licensePlate);
+  console.log("Searching products by license plate:", licensePlate);
   
   if (!licensePlate || licensePlate.trim() === '') {
     throw new Error("License plate is required");
@@ -120,10 +163,10 @@ export const searchProductsByLicensePlate = async (licensePlate) => {
   
   try {
     const response = await apiRequest(`/api/Product/search/license-plate/${encodeURIComponent(licensePlate.trim())}`);
-    console.log("✅ Products found by license plate:", response);
+    console.log("Products found by license plate:", response);
     return response;
   } catch (error) {
-    console.error("❌ Error searching products by license plate:", error);
+    console.error("Error searching products by license plate:", error);
     throw error;
   }
 };
@@ -135,14 +178,14 @@ export const searchProductsByLicensePlate = async (licensePlate) => {
  * @returns {Array} Products array matching the search query
  */
 export const searchProducts = (searchQuery, allProducts = []) => {
-  console.log("🔍 Searching products by query:", searchQuery);
+  console.log("Searching products by query:", searchQuery);
   
   if (!searchQuery || searchQuery.trim() === '') {
     return [];
   }
   
   const query = searchQuery.trim().toLowerCase();
-  console.log("🔍 Search query normalized:", query);
+  console.log("Search query normalized:", query);
   
   // Filter products that match the search query
   const matchingProducts = allProducts.filter(product => {
@@ -162,7 +205,7 @@ export const searchProducts = (searchQuery, allProducts = []) => {
     const isMatch = matchesBrand || matchesModel || matchesLicensePlate || matchesTitle || matchesDescription;
     
     if (isMatch) {
-      console.log(`✅ Product ${product.productId || product.ProductId} matches:`, {
+      console.log(`Product ${product.productId || product.ProductId} matches:`, {
         brand: brand,
         model: model,
         licensePlate: licensePlate,
@@ -178,7 +221,7 @@ export const searchProducts = (searchQuery, allProducts = []) => {
     return isMatch;
   });
   
-  console.log(`✅ Found ${matchingProducts.length} products matching "${searchQuery}"`);
+  console.log(`Found ${matchingProducts.length} products matching "${searchQuery}"`);
   return matchingProducts;
 };
 

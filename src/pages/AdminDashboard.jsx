@@ -37,6 +37,7 @@ import { notifyPostApproved, notifyPostRejected } from "../lib/notificationApi";
 import { rejectProduct, approveProduct } from "../lib/productApi";
 import { RejectProductModal } from "../components/admin/RejectProductModal";
 import { AdminReports } from "../components/admin/AdminReports";
+import { CreditPackageManagement } from "../components/admin/CreditPackageManagement";
 import { updateVerificationStatus, getVerificationRequests } from "../lib/verificationApi";
 import { getUserNotifications, getUnreadCount, notifyUserVerificationCompleted } from "../lib/notificationApi";
 import { forceSendNotificationsForAllSuccessfulPayments, sendNotificationsForKnownPayments, sendNotificationsForVerifiedProducts } from "../lib/verificationNotificationService";
@@ -53,7 +54,7 @@ export const AdminDashboard = () => {
     } catch (_) {
       return "dashboard";
     }
-  }); // dashboard, vehicles, batteries, inspections, transactions, reports, users, fees
+  }); // dashboard, vehicles, batteries, inspections, transactions, reports, users, fees, credit-packages
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalListings: 0,
@@ -64,6 +65,7 @@ export const AdminDashboard = () => {
     depositRevenue: 0,
     verificationRevenue: 0,
     cancelledNoRefundRevenue: 0,
+    creditPackageRevenue: 0,
     vehicleListings: 0,
     batteryListings: 0,
     activeListings: 0,
@@ -1789,22 +1791,26 @@ export const AdminDashboard = () => {
         return orderStatus === "completed";
       });
 
-      // ✅ NEW: Fetch revenue statistics from new API endpoint
+      // ✅ Fetch revenue statistics from backend (includes credit packages)
       let totalRevenue = 0;
       let depositRevenue = 0;
       let verificationRevenue = 0;
       let cancelledNoRefundRevenue = 0;
+      let creditPackageRevenue = 0;
       let cancelledNoRefundOrders = [];
       let allVerificationPayments = []; // Keep for date-based calculations
+      let allCreditPackagePayments = []; // Keep for date-based calculations
       
       try {
         const revenueStats = await apiRequest('/api/Order/revenue-statistics');
         console.log('💰 [REVENUE API] Revenue statistics:', revenueStats);
         
+        // ✅ Backend now includes credit packages in totalRevenue
         totalRevenue = revenueStats.totalRevenue || 0;
         depositRevenue = revenueStats.completedOrdersRevenue || 0;
         verificationRevenue = revenueStats.verificationRevenue || 0;
         cancelledNoRefundRevenue = revenueStats.cancelledNoRefundRevenue || 0;
+        creditPackageRevenue = revenueStats.creditPackagesRevenue || 0; // ✅ From backend
         cancelledNoRefundOrders = revenueStats.cancelledNoRefundOrders || [];
         
         console.log('💰 [REVENUE DEBUG] Revenue breakdown:', {
@@ -1812,12 +1818,14 @@ export const AdminDashboard = () => {
           depositRevenue: depositRevenue.toLocaleString('vi-VN'),
           verificationRevenue: verificationRevenue.toLocaleString('vi-VN'),
           cancelledNoRefundRevenue: cancelledNoRefundRevenue.toLocaleString('vi-VN'),
+          creditPackageRevenue: creditPackageRevenue.toLocaleString('vi-VN'),
           completedOrdersCount: revenueStats.completedOrdersCount,
           verificationPaymentsCount: revenueStats.verificationPaymentsCount,
-          cancelledNoRefundCount: revenueStats.cancelledNoRefundCount
+          cancelledNoRefundCount: revenueStats.cancelledNoRefundCount,
+          creditPackagesSoldCount: revenueStats.creditPackagesSoldCount
         });
         
-        // Still fetch verification payments for date-based calculations
+        // Still fetch verification and credit package payments for date-based calculations
         try {
           const payments = await apiRequest('/api/Payment');
           const verificationPayments = payments.filter(p => {
@@ -1826,11 +1834,27 @@ export const AdminDashboard = () => {
             return paymentType === 'verification' && status === 'success';
           });
           
+          const creditPackagePayments = payments.filter(p => {
+            const paymentType = (p.paymentType || p.PaymentType || '').toLowerCase();
+            const status = (p.status || p.Status || '').toLowerCase();
+            return paymentType === 'credit' && status === 'success';
+          });
+          
           const seenPaymentIds = new Set();
           allVerificationPayments = verificationPayments.filter(p => {
             const paymentId = p.paymentId || p.PaymentId || p.id || p.Id;
             if (paymentId && !seenPaymentIds.has(paymentId)) {
               seenPaymentIds.add(paymentId);
+              return true;
+            }
+            return !paymentId;
+          });
+          
+          const seenCreditPaymentIds = new Set();
+          allCreditPackagePayments = creditPackagePayments.filter(p => {
+            const paymentId = p.paymentId || p.PaymentId || p.id || p.Id;
+            if (paymentId && !seenCreditPaymentIds.has(paymentId)) {
+              seenCreditPaymentIds.add(paymentId);
               return true;
             }
             return !paymentId;
@@ -1896,7 +1920,16 @@ export const AdminDashboard = () => {
         })
         .reduce((sum, p) => sum + parseFloat(p.amount || p.Amount || 0), 0);
 
-      const todaysRevenue = todaysDepositRevenue + todaysVerificationRevenue;
+      // ✅ Today's revenue from credit packages
+      const todaysCreditPackageRevenue = allCreditPackagePayments
+        .filter(p => {
+          const paymentDate = new Date(p.createdDate || p.CreatedDate || p.paymentDate || p.PaymentDate || 0);
+          paymentDate.setHours(0, 0, 0, 0);
+          return paymentDate.getTime() === today.getTime();
+        })
+        .reduce((sum, p) => sum + parseFloat(p.amount || p.Amount || 0), 0);
+
+      const todaysRevenue = todaysDepositRevenue + todaysVerificationRevenue + todaysCreditPackageRevenue;
 
       // ✅ This year's revenue from deposits
       const thisYearDepositRevenue = completedOrdersList
@@ -1916,7 +1949,16 @@ export const AdminDashboard = () => {
         })
         .reduce((sum, p) => sum + parseFloat(p.amount || p.Amount || 0), 0);
 
-      const thisYearRevenue = thisYearDepositRevenue + thisYearVerificationRevenue;
+      // ✅ This year's revenue from credit packages
+      const thisYearCreditPackageRevenue = allCreditPackagePayments
+        .filter(p => {
+          const paymentDate = new Date(p.createdDate || p.CreatedDate || p.paymentDate || p.PaymentDate || 0);
+          const currentYear = new Date().getFullYear();
+          return paymentDate.getFullYear() === currentYear;
+        })
+        .reduce((sum, p) => sum + parseFloat(p.amount || p.Amount || 0), 0);
+
+      const thisYearRevenue = thisYearDepositRevenue + thisYearVerificationRevenue + thisYearCreditPackageRevenue;
 
       // ✅ This month's revenue from deposits
       const thisMonthDepositRevenue = completedOrdersList
@@ -1938,11 +1980,21 @@ export const AdminDashboard = () => {
         })
         .reduce((sum, p) => sum + parseFloat(p.amount || p.Amount || 0), 0);
 
-      const thisMonthRevenue = thisMonthDepositRevenue + thisMonthVerificationRevenue;
+      // ✅ This month's revenue from credit packages
+      const thisMonthCreditPackageRevenue = allCreditPackagePayments
+        .filter(p => {
+          const paymentDate = new Date(p.createdDate || p.CreatedDate || p.paymentDate || p.PaymentDate || 0);
+          const currentDate = new Date();
+          return paymentDate.getMonth() === currentDate.getMonth() &&
+                 paymentDate.getFullYear() === currentDate.getFullYear();
+        })
+        .reduce((sum, p) => sum + parseFloat(p.amount || p.Amount || 0), 0);
 
-      // ✅ FIX: Calculate average deposit value from completed orders only (exclude verification fees for more accurate per-order average)
+      const thisMonthRevenue = thisMonthDepositRevenue + thisMonthVerificationRevenue + thisMonthCreditPackageRevenue;
+
+      // FIX: Calculate average deposit value from completed orders only (exclude verification fees for more accurate per-order average)
       const averageDepositValue = completedOrdersList.length > 0 ? depositRevenue / completedOrdersList.length : 0;
-      // ✅ Total average includes both deposit and verification
+      // Total average includes both deposit and verification
       const averageOrderValue = completedOrdersList.length > 0 ? totalRevenue / completedOrdersList.length : 0;
       const completionRate = transactionsArray.length > 0 ? (completedOrders / transactionsArray.length) * 100 : 0;
 
@@ -1956,6 +2008,7 @@ export const AdminDashboard = () => {
         depositRevenue,
         verificationRevenue,
         cancelledNoRefundRevenue,
+        creditPackageRevenue,
         vehicleListings: vehicleListings.length,
         batteryListings: batteryListings.length,
         activeListings: approvedListings.length,
@@ -3034,6 +3087,16 @@ export const AdminDashboard = () => {
               <Settings className="h-5 w-5" />
               <span>Quản lý phí</span>
             </div>
+            <div
+              className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors ${activeTab === "credit-packages"
+                  ? "bg-blue-50 text-blue-600"
+                  : "text-gray-600 hover:bg-gray-50"
+                }`}
+              onClick={() => handleTabChange("credit-packages")}
+            >
+              <CreditCard className="h-5 w-5" />
+              <span>Quản lý gói</span>
+            </div>
           </div>
         </nav>
 
@@ -3066,6 +3129,7 @@ export const AdminDashboard = () => {
                 {activeTab === "transactions" && "Quản lý giao dịch"}
                 {activeTab === "reports" && "Báo cáo vi phạm"}
                 {activeTab === "fees" && "Quản lý phí"}
+                {activeTab === "credit-packages" && "Quản lý gói"}
               </h1>
               <p className="text-gray-600">
                 {activeTab === "dashboard" && "Tổng quan hệ thống EV Market • Cập nhật theo thời gian thực"}
@@ -3075,6 +3139,7 @@ export const AdminDashboard = () => {
                 {activeTab === "transactions" && "Quản lý các giao dịch giữa người bán và người mua"}
                 {activeTab === "reports" && "Xem xét và xử lý các báo cáo vi phạm từ người dùng"}
                 {activeTab === "fees" && "Quản lý phí đặt cọc và phí kiểm định"}
+                {activeTab === "credit-packages" && "Quản lý các gói đăng tin"}
               </p>
             </div>
           </div>
@@ -3091,7 +3156,7 @@ export const AdminDashboard = () => {
                   <p className="text-3xl font-bold text-gray-900 mt-2">
                     {formatPrice(stats.totalRevenue)}
                   </p>
-                  <p className="text-xs text-gray-600 mt-1">Bao gồm 3 nguồn doanh thu</p>
+                  <p className="text-xs text-gray-600 mt-1">Bao gồm 4 nguồn doanh thu</p>
                 </div>
                 <div className="bg-green-100 p-4 rounded-xl">
                   <TrendingUp className="h-8 w-8 text-green-600" />
@@ -3100,6 +3165,7 @@ export const AdminDashboard = () => {
               <div className="mt-4 space-y-1">
                 <p className="text-xs text-green-600">Đơn hoàn thành: {formatPrice(stats.depositRevenue)}</p>
                 <p className="text-xs text-blue-600">Phí kiểm định: {formatPrice(stats.verificationRevenue)}</p>
+                <p className="text-xs text-purple-600">Gói credit: {formatPrice(stats.creditPackageRevenue)}</p>
                 <p className="text-xs text-orange-600">Đơn hủy (không hoàn): {formatPrice(stats.cancelledNoRefundRevenue)}</p>
               </div>
             </div>
@@ -3491,6 +3557,11 @@ export const AdminDashboard = () => {
               </div>
             )}
           </div>
+        )}
+
+        {/* Credit Package Management */}
+        {activeTab === 'credit-packages' && (
+          <CreditPackageManagement />
         )}
 
         {/* Users Management */}
@@ -3952,8 +4023,8 @@ export const AdminDashboard = () => {
             </div>
           </div>
         )}
-        {/* Filters and Search - Hide on reports, users, transactions, fees, vehicles, and batteries tabs */}
-        {activeTab !== "reports" && activeTab !== "users" && activeTab !== "transactions" && activeTab !== "fees" && activeTab !== "vehicles" && activeTab !== "batteries" && (
+        {/* Filters and Search - Hide on reports, users, transactions, fees, vehicles, batteries and credit-packages tabs */}
+        {activeTab !== "reports" && activeTab !== "users" && activeTab !== "transactions" && activeTab !== "fees" && activeTab !== "vehicles" && activeTab !== "batteries" && activeTab !== "credit-packages" && (
           <div className="bg-white rounded-2xl shadow-lg p-6 mb-8 border border-gray-100">
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0 lg:space-x-6">
               {/* Search bar */}
@@ -4008,8 +4079,8 @@ export const AdminDashboard = () => {
           </div>
         )}
 
-        {/* Listings Table - Hide on inspections, transactions, reports, users and fees tabs */}
-        {activeTab !== "inspections" && activeTab !== "transactions" && activeTab !== "reports" && activeTab !== "users" && activeTab !== "fees" && (
+        {/* Listings Table - Hide on inspections, transactions, reports, users, fees and credit-packages tabs */}
+        {activeTab !== "inspections" && activeTab !== "transactions" && activeTab !== "reports" && activeTab !== "users" && activeTab !== "fees" && activeTab !== "credit-packages" && (
           <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-200">
               <h2 className="text-xl font-semibold text-gray-900">
