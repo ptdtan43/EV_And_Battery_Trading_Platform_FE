@@ -40,16 +40,16 @@ import { ReportModal } from "../components/common/ReportModal";
 import { fetchProductImages } from "../utils/imageLoader";
 import { feeService } from "../services/feeService";
 
-// Helper function to fix Vietnamese character encoding
+// Hàm hỗ trợ sửa lỗi encoding ký tự tiếng Việt
 const fixVietnameseEncoding = (str) => {
   if (!str || typeof str !== "string") return str;
 
-  // Only fix if the string contains the specific encoding issues
+  // Chỉ sửa nếu chuỗi chứa vấn đề encoding cụ thể
   if (!str.includes("?")) {
     return str;
   }
 
-  // Common encoding fixes for Vietnamese characters
+  // Các bản sửa encoding phổ biến cho ký tự tiếng Việt
   const fixes = {
     "B?o": "Bảo",
     "Th?ch": "Thạch",
@@ -115,7 +115,7 @@ export const ProductDetail = () => {
       try {
         const data = event.data || {};
         
-        // Filter out extension messages
+        // Lọc bỏ các message từ extension
         if (data.posdMessageId || data.type === 'VIDEO_XHR_CANDIDATE' || data.from === 'detector') {
           return;
         }
@@ -127,11 +127,11 @@ export const ProductDetail = () => {
           const frontendUrl = window.location.origin;
           const redirectUrl = `${frontendUrl}/?payment_success=true&payment_id=${paymentId}&amount=${amount}&transaction_no=${data.payload.transactionNo}`;
           
-          // Redirect to homepage
+          // Chuyển hướng về trang chủ
           window.location.replace(redirectUrl);
         }
         
-        // Also handle redirect message
+        // Xử lý message chuyển hướng
         if (data.type === 'EVTB_REDIRECT' && data.url) {
           console.log('[ProductDetail] Redirect message received, going to:', data.url);
           window.location.replace(data.url);
@@ -141,7 +141,7 @@ export const ProductDetail = () => {
       }
     };
     
-    // Also check localStorage periodically
+    // Kiểm tra localStorage định kỳ
     const checkLocalStorage = () => {
       try {
         const paymentDataStr = localStorage.getItem('evtb_payment_success');
@@ -163,7 +163,7 @@ export const ProductDetail = () => {
     
     window.addEventListener('message', handlePaymentSuccess);
     
-    // Check localStorage every 500ms for first 10 seconds
+    // Kiểm tra localStorage mỗi 500ms trong 10 giây đầu
     const interval = setInterval(checkLocalStorage, 500);
     const timeout = setTimeout(() => clearInterval(interval), 10000);
     
@@ -178,10 +178,10 @@ export const ProductDetail = () => {
     try {
       setLoading(true);
 
-      // Load product details
+      // Tải thông tin chi tiết sản phẩm
       const productData = await apiRequest(`/api/Product/${id}`);
 
-      // Normalize product data to ensure frontend compatibility
+      // Chuẩn hóa dữ liệu sản phẩm để đảm bảo tương thích frontend
       const normalizedProduct = {
         ...productData,
         id: productData.productId || productData.id,
@@ -191,14 +191,14 @@ export const ProductDetail = () => {
         price: productData.price || 0,
         images: productData.imageUrls || productData.images || [],
         status: productData.status || "Available",
-        // Normalize productType (handle both "Vehicle" and "vehicle")
+        // Chuẩn hóa productType (xử lý cả "Vehicle" và "vehicle")
         productType: productData.productType || productData.product_type || productData.ProductType || "Vehicle",
-        // Normalize verificationStatus (handle various formats)
+        // Chuẩn hóa verificationStatus (xử lý nhiều định dạng)
         verificationStatus: productData.verificationStatus || productData.verification_status || productData.VerificationStatus || "NotRequested",
-        // Normalize year and manufactureYear: convert 0 to null to avoid displaying "0"
+        // Chuẩn hóa year và manufactureYear: chuyển 0 thành null để tránh hiển thị "0"
         year: (productData.year && productData.year > 0) ? productData.year : (productData.manufactureYear && productData.manufactureYear > 0) ? productData.manufactureYear : null,
         manufactureYear: (productData.manufactureYear && productData.manufactureYear > 0) ? productData.manufactureYear : (productData.year && productData.year > 0) ? productData.year : null,
-        // Normalize numeric fields: convert 0 to null for battery products to prevent rendering "0"
+        // Chuẩn hóa các trường số: chuyển 0 thành null cho sản phẩm pin để tránh hiển thị "0"
         mileage: productData.mileage && productData.mileage > 0 ? productData.mileage : null,
         seatCount: productData.seatCount && productData.seatCount > 0 ? productData.seatCount : null,
         batteryHealth: productData.batteryHealth && productData.batteryHealth > 0 ? productData.batteryHealth : null,
@@ -210,30 +210,31 @@ export const ProductDetail = () => {
       console.log("[ProductDetail] Raw product data:", productData);
       console.log("[ProductDetail] Normalized product:", normalizedProduct);
 
-      // ✅ FIX: Check status but don't return early - still need to load images and seller info
-      // Normalize status to consistent format (case-insensitive)
+      // ✅ SỬA: Kiểm tra trạng thái nhưng không return sớm - vẫn cần tải ảnh và thông tin người bán
+      // Chuẩn hóa trạng thái sang định dạng nhất quán (không phân biệt hoa thường)
       const productStatus = String(normalizedProduct.status || "").toLowerCase();
       if (productStatus === "sold") {
         console.log("[ProductDetail] Product is sold, but still loading full details");
-        normalizedProduct.status = "sold"; // Use lowercase consistently
+        normalizedProduct.status = "sold"; // Dùng chữ thường nhất quán
       } else if (productStatus === "reserved") {
         console.log("[ProductDetail] Product is reserved, but still loading full details");
-        normalizedProduct.status = "reserved"; // Use lowercase consistently
+        normalizedProduct.status = "reserved"; // Dùng chữ thường nhất quán
       } else {
-        // Normalize other statuses to lowercase for consistency
+        // Chuẩn hóa các trạng thái khác sang chữ thường để nhất quán
         normalizedProduct.status = productStatus;
       }
 
       setProduct(normalizedProduct);
 
-      // ✅ FIX: Load orders for this product to check if it's actually sold
+      // ✅ FIX: Load orders for this product to check if it's actually sold 
+      // Gọi API lấy tất cả đơn hàng liên quan đến sản phẩm này
       try {
         const productId = normalizedProduct.id || normalizedProduct.productId;
         if (productId) {
           const ordersData = await apiRequest("/api/Order");
           const ordersArray = Array.isArray(ordersData) ? ordersData : [];
           
-          // Filter orders for this product
+          // Lọc các đơn hàng liên quan đến sản phẩm này
           const relatedOrders = ordersArray.filter(order => {
             const orderProductId = order.productId || order.ProductId || order.product?.id || order.product?.productId;
             return orderProductId == productId || orderProductId === productId;
@@ -242,7 +243,7 @@ export const ProductDetail = () => {
           setProductOrders(relatedOrders);
           console.log(`[ProductDetail] Found ${relatedOrders.length} orders for product ${productId}:`, relatedOrders);
           
-          // ✅ FIX: If there's a completed order, update product status to "sold"
+          // Kiểm tra nếu có đơn hàng completed → sản phẩm đã bán
           const hasCompletedOrder = relatedOrders.some(order => {
             const orderStatus = (order.status || order.Status || order.orderStatus || order.OrderStatus || "").toLowerCase();
             return orderStatus === "completed";
@@ -259,7 +260,7 @@ export const ProductDetail = () => {
         // Continue even if order loading fails
       }
 
-      // Load seller information
+      // Load thông tin người bán
       const sellerId = normalizedProduct.sellerId;
       if (sellerId) {
         try {
@@ -272,7 +273,7 @@ export const ProductDetail = () => {
           console.log("Loaded seller data:", sellerData);
         } catch (sellerError) {
           console.warn("Could not load seller data:", sellerError);
-          // Set fallback seller data
+          // Đặt dữ liệu người bán dự phòng
           setSeller({
             fullName: fixVietnameseEncoding(
               productData.sellerName || "Người bán"
@@ -287,17 +288,18 @@ export const ProductDetail = () => {
       // ✅ OPTIMIZED: Load product images using optimized image loader
       try {
         console.log(`🖼️ Loading images for product ${id}...`);
+        // Gọi API lấy tất cả ảnh liên quan đến sản phẩm
         const allImages = await fetchProductImages(id);
         
         console.log("🔍 All images data:", allImages);
         console.log("🔍 First image structure:", allImages[0]);
 
-        // Separate product images from document images based on Name field
+        // Phân loại ảnh: Product vs Document
         const productImages = allImages.filter((img) => {
           const imageName = (img.name || img.Name || "").toLowerCase();
           console.log(`🔍 Image name for ${img.id || "unknown"}:`, imageName);
 
-          // Check if this is a product image based on Name field (case insensitive)
+          // Ảnh sản phẩm: name = "vehicle", "battery", "car", "product"
           if (imageName === "vehicle" || imageName === "battery" || imageName === "car" || imageName === "product") {
             console.log(
               `🔍 Image ${img.id}: treating as PRODUCT (${imageName})`
@@ -305,7 +307,7 @@ export const ProductDetail = () => {
             return true;
           }
 
-          // If no name field or unknown name, check imageType as fallback
+          // Nếu không có name → check imageType
           const imageType =
             img.imageType || img.type || img.image_type || img.category;
           if (imageType && imageType !== "document") {
@@ -325,7 +327,7 @@ export const ProductDetail = () => {
           const imageName = (img.name || img.Name || "").toLowerCase();
           console.log(`🔍 Image name for ${img.id || "unknown"}:`, imageName);
 
-          // Check if this is a document image based on Name field (case insensitive)
+          // Ảnh tài liệu: name = "document", "doc", "paperwork"
           if (imageName === "document" || imageName === "doc" || imageName === "paperwork") {
             console.log(
               `🔍 Image ${img.id}: treating as DOCUMENT (${imageName})`
@@ -333,7 +335,7 @@ export const ProductDetail = () => {
             return true;
           }
 
-          // If no name field or unknown name, check imageType as fallback
+          // Nếu không có name → check imageType
           const imageType =
             img.imageType || img.type || img.image_type || img.category;
           if (imageType === "document") {
@@ -343,7 +345,7 @@ export const ProductDetail = () => {
             return true;
           }
 
-          // If neither name nor type indicates document, it's not a document
+          // Nếu cả name và type đều không chỉ ra là tài liệu, thì không phải tài liệu
           console.log(
             `🔍 Image ${img.id}: treating as PRODUCT (name: ${imageName}, type: ${imageType})`
           );
@@ -353,7 +355,7 @@ export const ProductDetail = () => {
         console.log("🔍 Product images:", productImages.length);
         console.log("🔍 Document images:", docImages.length);
 
-        // Detect inspected images (uploaded by admin verification)
+        // Phát hiện ảnh kiểm định (do admin tải lên)
         const getStr = (v) => (typeof v === "string" ? v.toLowerCase() : "");
         const isInspected = (img) => {
           const tag = getStr(img.tag || img.Tag || img.label || img.Label);
@@ -383,8 +385,9 @@ export const ProductDetail = () => {
         // ✅ Remove duplicates based on URL
         const uniqueProductUrls = [...new Set(productUrls)];
         const uniqueDocUrls = [...new Set(docUrls)];
-
+        // Lọc ảnh kiểm định
         // Put inspected images first in the gallery
+         // Đặt ảnh kiểm định lên đầu gallery
         const inspectedUrls = productImages.filter(isInspected).map(urlOf).filter(Boolean);
         // ✅ Remove duplicates from inspected URLs
         const uniqueInspectedUrls = [...new Set(inspectedUrls)];
@@ -406,7 +409,7 @@ export const ProductDetail = () => {
         setInspectedSet(new Set());
       }
 
-      // Check if product is favorited by current user
+      // Kiểm tra xem sản phẩm có được người dùng hiện tại yêu thích hay không
       if (user) {
         try {
           const favoriteData = await isProductFavorited(
@@ -433,7 +436,7 @@ export const ProductDetail = () => {
       setLoading(false);
     }
   };
-
+//Chuyển ảnh
   const handleImageNavigation = (direction) => {
     if (direction === "prev") {
       setCurrentImageIndex((prev) =>
@@ -447,6 +450,7 @@ export const ProductDetail = () => {
   };
 
   const handleFavorite = async () => {
+    
     if (!user) {
       showToast({
         title: "⚠️ Cần đăng nhập",
@@ -462,7 +466,7 @@ export const ProductDetail = () => {
         id
       );
 
-      // Only update UI if we got a valid result
+      // Chỉ cập nhật UI nếu nhận được kết quả hợp lệ
       if (result && typeof result.isFavorited === "boolean") {
         setIsFavorite(result.isFavorited);
         setFavoriteId(result.favoriteId || null);
@@ -509,7 +513,7 @@ export const ProductDetail = () => {
   };
 
   const handleSendMessage = async (message) => {
-    // This function is no longer needed as ChatModal handles the API call directly
+    // Function này không còn cần thiết vì ChatModal xử lý API call trực tiếp
     console.log("Message sent:", message);
   };
 
@@ -539,29 +543,29 @@ export const ProductDetail = () => {
     setShowPaymentModal(true);
   };
 
-  // Calculate deposit amount based on product type & price (using dynamic fee from API)
+  // Tính số tiền cọc dựa trên loại sản phẩm & giá (sử dụng phí động từ API)
   const calculateDepositAmount = async () => {
     if (!product) return 0;
     
     const price = product?.price || 0;
     
-    // ✅ Use percentage from API settings for ALL product types (Vehicle, Battery, etc.)
+     // Gọi API lấy % cọc từ settings
     try {
       const amount = await feeService.calculateDepositAmount(price, product.productType);
       return amount;
     } catch (error) {
       console.error('Failed to calculate deposit amount:', error);
-      // Fallback to old calculation
+      // Dự phòng: dùng cách tính cũ
       return price > 300000000 ? 10000000 : 5000000;
     }
   };
 
-  // Get deposit amount (synchronous version for display)
+  // Lấy số tiền cọc (phiên bản đồng bộ để hiển thị)
   const getDepositAmount = () => {
     return depositAmount || 0;
   };
 
-  // Load deposit amount when product changes
+  // Tải số tiền cọc khi sản phẩm thay đổi
   useEffect(() => {
     if (product) {
       const loadDeposit = async () => {
@@ -578,7 +582,7 @@ export const ProductDetail = () => {
   useEffect(() => {
     if (showPaymentModal && product) {
       const loadDeposit = async () => {
-        // Clear cache to ensure we get latest fee settings
+        // Xóa cache để đảm bảo lấy cài đặt phí mới nhất
         feeService.clearCache();
         const amount = await calculateDepositAmount();
         setDepositAmount(amount);
@@ -587,7 +591,7 @@ export const ProductDetail = () => {
     }
   }, [showPaymentModal]);
 
-  // Handle payment deposit
+  // Xử lý thanh toán đặt cọc
   const onPayDeposit = async () => {
     if (paying) return;
 
@@ -596,7 +600,7 @@ export const ProductDetail = () => {
     try {
       console.log("[VNPay] Starting payment process...");
 
-      // Get auth token
+      // 🔹 BƯỚC 1: Lấy token từ localStorage
       const authData = localStorage.getItem("evtb_auth");
       const token = authData ? JSON.parse(authData)?.token : null;
 
@@ -604,7 +608,7 @@ export const ProductDetail = () => {
         throw new Error("Bạn cần đăng nhập để thực hiện thanh toán");
       }
 
-      // Debug user info
+      // Debug thông tin user
       console.log("[VNPay] User info:", {
         user: user,
         roleId: user?.roleId,
@@ -612,7 +616,7 @@ export const ProductDetail = () => {
         roleName: user?.roleName,
       });
 
-      // Check user role (should be role=2 for member) - More flexible check
+      // 🔹 BƯỚC 2: Kiểm tra role (phải là member)
       const userRoleId = user?.roleId || user?.role;
       const isMember =
         userRoleId === 2 ||
@@ -620,8 +624,8 @@ export const ProductDetail = () => {
         user?.roleName?.toLowerCase() === "member" ||
         user?.roleName?.toLowerCase() === "user";
 
-      // TEMPORARY: Allow all authenticated users for testing
-      const allowAllUsers = true; // Set to false in production
+      // TẠM THỜI: Cho phép tất cả user đã xác thực để test
+      const allowAllUsers = true; // Đặt false khi production
 
       if (!isMember && !allowAllUsers) {
         console.log("[VNPay] Role check failed:", {
@@ -642,7 +646,7 @@ export const ProductDetail = () => {
         );
       }
 
-      // ✅ CRITICAL: Check if user is trying to buy their own product
+     // 🔹 BƯỚC 3: Kiểm tra không được mua sản phẩm của chính mình
       const currentUserId = user?.id || user?.userId || user?.accountId;
       const productSellerId = product?.sellerId || product?.seller_id;
 
@@ -669,7 +673,7 @@ export const ProductDetail = () => {
         throw new Error("Không tìm thấy thông tin sản phẩm");
       }
 
-      // VNPay validation: Amount must be between 5,000 and 999,999,999 VND
+     // 🔹 BƯỚC 4: Validate số tiền (VNPay yêu cầu 5,000 - 999,999,999 VNĐ)
       const VNPAY_MIN_AMOUNT = 5000;
       const VNPAY_MAX_AMOUNT = 999999999;
       
@@ -687,13 +691,13 @@ export const ProductDetail = () => {
         isValid: depositAmount >= VNPAY_MIN_AMOUNT && depositAmount <= VNPAY_MAX_AMOUNT
       });
 
-      // Create order first if not exists
+      // 🔹 BƯỚC 5: Tạo đơn hàng nếu chưa có
       let orderId = currentOrderId;
       if (!orderId) {
         console.log("[VNPay] Creating new order...");
         const orderData = {
           productId: product.id,
-          sellerId: product.sellerId || product.seller_id || 1, // Default to admin as seller for testing
+          sellerId: product.sellerId || product.seller_id || 1, // Mặc định admin làm người bán để test
           depositAmount: depositAmount,
           totalAmount: totalAmount,
         };
@@ -713,7 +717,7 @@ export const ProductDetail = () => {
         productId: product?.id,
       });
 
-      // Create payment
+      // 🔹 BƯỚC 6: Tạo giao dịch thanh toán
       const res = await createPayment(
         {
           orderId: orderId,
@@ -730,7 +734,7 @@ export const ProductDetail = () => {
         throw new Error("paymentUrl empty");
       }
 
-      // Close modal and show success message
+       // 🔹 BƯỚC 7: Đóng modal và redirect đến VNPay
       setShowPaymentModal(false);
       showToast({
         title: "✅ Đang chuyển đến VNPay",

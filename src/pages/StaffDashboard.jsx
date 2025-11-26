@@ -72,10 +72,10 @@ export const StaffDashboard = () => {
   const [orderStatusFilter, setOrderStatusFilter] = useState("all");
   const [processingIds, setProcessingIds] = useState(new Set());
   
-  // Pagination state
+  // Trạng thái phân trang
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage] = useState(10); // 10 orders per page
-  
+  const [itemsPerPage] = useState(10); // 10 đơn hàng mỗi trang
+  //upload hop dong
   const [uploadContractModal, setUploadContractModal] = useState({
     isOpen: false,
     order: null,
@@ -84,7 +84,7 @@ export const StaffDashboard = () => {
     filePreview: null,
   });
 
-  // Transaction failure modal state for staff to reject transactions
+  // Trạng thái modal từ chối giao dịch cho nhân viên
   const [transactionFailureModal, setTransactionFailureModal] = useState({
     isOpen: false,
     product: null,
@@ -94,7 +94,7 @@ export const StaffDashboard = () => {
     refundOption: 'refund', // 'refund' or 'no_refund'
   });
 
-  // Order detail modal state
+  // Trạng thái modal chi tiết đơn hàng
   const [orderDetailModal, setOrderDetailModal] = useState({
     isOpen: false,
     order: null,
@@ -102,7 +102,7 @@ export const StaffDashboard = () => {
     loading: false,
   });
 
-  // Transaction failure reason options
+  // Các lựa chọn lý do từ chối giao dịch
   const transactionFailureReasons = [
     { code: 'BUYER_REQUEST', label: 'Người mua yêu cầu hủy' },
     { code: 'SELLER_CANCEL', label: 'Người bán hủy giao dịch' },
@@ -116,29 +116,29 @@ export const StaffDashboard = () => {
     { code: 'OTHER', label: 'Lý do khác' },
   ];
 
-  // Persist selected tab
+  // Lưu tab đã chọn
   useEffect(() => {
     try {
       sessionStorage.setItem('staff_active_tab', activeTab);
     } catch (_) {}
   }, [activeTab]);
 
-  // Load dashboard stats
+  // Tải thống kê dashboard
   const loadStats = async () => {
     try {
-      // Load orders
+      // Tải đơn hàng
       const ordersData = await apiRequest("/api/Order");
       const ordersArray = Array.isArray(ordersData) ? ordersData : [];
       
-      // Load products
+      // Tải sản phẩm
       const productsData = await apiRequest("/api/Product");
       const productsArray = Array.isArray(productsData) ? productsData : [];
       
-      // Load users
+      // Tải người dùng
       const usersData = await apiRequest("/api/User");
       const usersArray = Array.isArray(usersData) ? usersData : [];
 
-      // Calculate stats
+      // 4. Tính toán thống kê
       const totalOrders = ordersArray.length;
       const pendingOrders = ordersArray.filter(o => 
         (o.status || o.Status || "").toLowerCase() === "pending"
@@ -207,7 +207,7 @@ export const StaffDashboard = () => {
         activeUsers,
       });
 
-      // Enrich orders with product information
+       // 5. Gộp thông tin sản phẩm vào đơn hàng (enrich)
       const enrichedOrders = ordersArray.map(order => {
         const productId = order.productId || order.ProductId;
         let productName = order.productName || order.ProductName;
@@ -222,7 +222,7 @@ export const StaffDashboard = () => {
           }
         }
         
-        // Also try to get from order.product object if available
+        // Cũng thử lấy từ object order.product nếu có
         if (!productName && order.product) {
           productName = order.product.title || order.product.Title || "N/A";
         }
@@ -234,11 +234,11 @@ export const StaffDashboard = () => {
         };
       });
 
-      // Sort orders by creation date (newest first)
+      // Sắp xếp đơn hàng theo ngày tạo (mới nhất trước)
       const sortedOrders = enrichedOrders.sort((a, b) => {
         const dateA = new Date(a.createdDate || a.CreatedDate || a.createdAt || a.CreatedAt || a.orderDate || a.OrderDate || 0);
         const dateB = new Date(b.createdDate || b.CreatedDate || b.createdAt || b.CreatedAt || b.orderDate || b.OrderDate || 0);
-        return dateB.getTime() - dateA.getTime(); // Descending order (newest first)
+        return dateB.getTime() - dateA.getTime(); // Sắp xếp giảm dần (mới nhất trước)
       });
 
       setOrders(sortedOrders);
@@ -252,7 +252,7 @@ export const StaffDashboard = () => {
     }
   };
 
-  // Load data based on active tab
+  // Tải dữ liệu dựa trên tab đang hoạt động
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
@@ -268,7 +268,7 @@ export const StaffDashboard = () => {
     loadData();
   }, [activeTab]);
 
-  // Filter orders
+  // Lọc đơn hàng
   useEffect(() => {
     let filtered = [...orders];
 
@@ -294,7 +294,7 @@ export const StaffDashboard = () => {
     }
 
     setFilteredOrders(filtered);
-    // Reset to page 1 when filter changes
+    // Đặt lại về trang 1 khi bộ lọc thay đổi
     setCurrentPage(1);
   }, [orders, orderStatusFilter, searchTerm]);
 
@@ -304,11 +304,11 @@ export const StaffDashboard = () => {
     setOrderStatusFilter("all");
   };
 
-  // Handle file selection
+  // Xử lý chọn file (Hợp đồng)
   const handleFileSelect = (e) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Validate file size (10MB max)
+      // Kiểm tra kích thước file (tối đa 10MB)
       if (file.size > 10 * 1024 * 1024) {
         showToast({
           title: "Lỗi",
@@ -318,7 +318,7 @@ export const StaffDashboard = () => {
         return;
       }
 
-      // Create preview for images
+      // Tạo bản xem trước cho hình ảnh
       let preview = null;
       if (file.type.startsWith('image/')) {
         preview = URL.createObjectURL(file);
@@ -333,7 +333,7 @@ export const StaffDashboard = () => {
     }
   };
 
-  // Handle contract upload
+  // Xử lý tải lên hợp đồng
   const handleUploadContract = async () => {
     if (!uploadContractModal.order || !uploadContractModal.selectedFile) {
       showToast({
@@ -363,7 +363,7 @@ export const StaffDashboard = () => {
         type: "success",
       });
 
-      // Clean up preview URL
+      // Dọn dẹp URL bản xem trước
       if (uploadContractModal.filePreview) {
         URL.revokeObjectURL(uploadContractModal.filePreview);
       }
@@ -376,7 +376,7 @@ export const StaffDashboard = () => {
         filePreview: null,
       });
       
-      // Reset file input
+      // Đặt lại input file
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -419,8 +419,8 @@ export const StaffDashboard = () => {
     };
     return statusMap[statusLower] || status;
   };
-
-  // Handle mark transaction as failed - Staff can reject transactions using admin-reject endpoint
+  // Hủy giao dịch
+  // Xử lý đánh dấu giao dịch thất bại - Nhân viên có thể từ chối giao dịch
   const handleMarkTransactionFailed = async (failureReason = null) => {
     if (!failureReason) {
       return;
@@ -443,7 +443,7 @@ export const StaffDashboard = () => {
         return;
       }
 
-      // Build failure reason text from ReasonCode + ReasonNote
+      // Xây dựng văn bản lý do từ chối từ Mã lý do + Ghi chú
       const reasonCode = failureReason.reasonCode || '';
       const reasonNote = failureReason.reasonNote || '';
       const refundOption = failureReason.refundOption || 'refund';
@@ -461,18 +461,18 @@ export const StaffDashboard = () => {
         cancellationReasonText = 'Không xác định';
       }
 
-      // Add refund information to cancellation reason
+      // Thêm thông tin hoàn tiền vào lý do hủy
       if (refundOption === 'refund') {
         cancellationReasonText += '\n\nThông tin hoàn tiền: Đơn hàng này sẽ được hoàn tiền.';
       } else {
         cancellationReasonText += '\n\nThông tin hoàn tiền: Đơn hàng này không được hoàn tiền theo điều khoản hủy giao dịch.';
       }
      
-      // Call API to save cancellation reason to Order using admin-reject endpoint
-      // Note: This endpoint may only allow admin. If staff gets 403, backend needs to be updated
+      // Gọi API để lưu lý do hủy vào Đơn hàng
+      // Lưu ý: Endpoint này có thể chỉ cho phép admin. Nếu staff nhận 403, cần cập nhật backend
       try {
         
-        // Use staff-reject endpoint (allows both Staff and Admin)
+        // Sử dụng endpoint staff-reject (cho phép cả Nhân viên và Quản trị viên)
         const response = await apiRequest(`/api/Order/${orderId}/staff-reject`, {
           method: 'POST',
           body: {
@@ -489,9 +489,9 @@ export const StaffDashboard = () => {
           refundAmount: response.refundAmount
         });
         
-        // Send notification to buyer
+        // Gửi thông báo cho người mua
         try {
-          // Get order details to find buyer
+          // Lấy chi tiết đơn hàng để tìm ID người mua
           const orderDetails = await apiRequest(`/api/Order/details/${orderId}`);
           const buyerId = orderDetails.userId || orderDetails.UserId || response.buyerId;
           
@@ -523,7 +523,7 @@ export const StaffDashboard = () => {
           type: 'success',
         });
 
-        // Close modal
+        // Đóng modal
         setTransactionFailureModal({
           isOpen: false,
           product: null,
@@ -533,12 +533,12 @@ export const StaffDashboard = () => {
           refundOption: 'refund',
         });
 
-        // Reload data
+        // Tải lại dữ liệu
         await loadStats();
       } catch (orderError) {
         console.error('❌ Could not update order:', orderError);
         
-        // Check if error is 403 Forbidden (endpoint only allows admin)
+        // Kiểm tra lỗi 403 Forbidden (endpoint chỉ cho phép admin)
         const errorMessage = orderError.message || '';
         if (errorMessage.includes('403') || errorMessage.includes('Forbidden') || errorMessage.includes('từ chối truy cập')) {
           showToast({
