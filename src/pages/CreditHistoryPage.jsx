@@ -63,12 +63,15 @@ export const CreditHistoryPage = () => {
   }) || [];
 
   // Filter options
+  const adminAdjustCount = historyData?.history?.filter(h => h.changeType === 'AdminAdjust').length || 0;
+  
   const filterOptions = [
     { value: 'all', label: 'Tất cả', count: historyData?.history?.length || 0 },
     { value: 'purchase', label: 'Mua credits', count: historyData?.history?.filter(h => h.changeType === 'Purchase').length || 0 },
     { value: 'use', label: 'Sử dụng', count: historyData?.history?.filter(h => h.changeType === 'Use').length || 0 },
-    { value: 'refund', label: 'Hoàn tiền', count: historyData?.history?.filter(h => h.changeType === 'Refund').length || 0 },
-    { value: 'adminadjust', label: 'Điều chỉnh', count: historyData?.history?.filter(h => h.changeType === 'AdminAdjust').length || 0 },
+    { value: 'refund', label: 'Hoàn credit', count: historyData?.history?.filter(h => h.changeType === 'Refund').length || 0 },
+    // Chỉ hiển thị tab "Điều chỉnh" nếu có giao dịch điều chỉnh từ admin
+    ...(adminAdjustCount > 0 ? [{ value: 'adminadjust', label: 'Điều chỉnh', count: adminAdjustCount }] : []),
   ];
 
   return (
@@ -94,20 +97,8 @@ export const CreditHistoryPage = () => {
               </p>
             </div>
             
-            {/* Export button (optional) */}
-            <button
-              onClick={() => {
-                showToast({
-                  type: 'info',
-                  title: 'Tính năng đang phát triển',
-                  description: 'Xuất file sẽ sớm có'
-                });
-              }}
-              className="hidden md:flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-            >
-              <Download size={18} />
-              <span>Xuất file</span>
-            </button>
+       
+            
           </div>
         </div>
 
@@ -127,34 +118,7 @@ export const CreditHistoryPage = () => {
                 />
               )}
 
-              {/* Quick Stats */}
-              {!loading && historyData && (
-                <div className="bg-white rounded-xl p-6 border border-gray-200">
-                  <h3 className="font-semibold text-gray-900 mb-4">
-                    Thống kê
-                  </h3>
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-gray-600">Tổng giao dịch</span>
-                      <span className="font-semibold text-gray-900">
-                        {historyData.history?.length || 0}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-gray-600">Đã mua</span>
-                      <span className="font-semibold text-green-600">
-                        +{historyData.totalPurchased || 0}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-gray-600">Đã dùng</span>
-                      <span className="font-semibold text-red-600">
-                        -{historyData.totalUsed || 0}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
+             
             </div>
           </div>
 

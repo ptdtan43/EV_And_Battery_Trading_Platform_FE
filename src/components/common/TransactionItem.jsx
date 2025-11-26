@@ -2,6 +2,34 @@ import { CreditCard, FileText, RotateCcw, Settings, TrendingUp, TrendingDown } f
 import { formatDate, formatPrice } from '../../lib/api';
 
 /**
+ * Translate English reason to Vietnamese
+ */
+const translateReason = (reason) => {
+  if (!reason) return '';
+  
+  const translations = {
+    'Posted product': 'Đã đăng sản phẩm',
+    'Reapproved product after rejection': 'Đăng lại sản phẩm sau khi bị từ chối',
+    'Product rejected': 'Sản phẩm bị từ chối',
+    'Purchased credit package': 'Đã mua gói credit',
+    'Admin adjustment': 'Điều chỉnh bởi admin',
+    'Refund for rejected product': 'Hoàn credit cho sản phẩm bị từ chối',
+    'System refund': 'Hoàn credit hệ thống',
+    'Resubmitted product after rejection': 'Đăng lại sau khi bị từ chối',
+    'Reason': 'Lý do',
+  };
+  
+  // Check if reason matches any translation key
+  for (const [eng, vie] of Object.entries(translations)) {
+    if (reason.includes(eng)) {
+      return reason.replace(eng, vie);
+    }
+  }
+  
+  return reason;
+};
+
+/**
  * TransactionItem - Display a credit transaction in history
  * @param {Object} props
  * @param {Object} props.transaction - Transaction data
@@ -25,6 +53,9 @@ export const TransactionItem = ({
     relatedProduct,
     adminName
   } = transaction;
+  
+  // Translate reason to Vietnamese
+  const translatedReason = translateReason(reason);
 
   // Icon and color based on change type
   const getTypeConfig = () => {
@@ -51,7 +82,7 @@ export const TransactionItem = ({
           color: 'text-purple-600',
           bgColor: 'bg-purple-50',
           borderColor: 'border-purple-200',
-          label: 'Hoàn tiền'
+          label: 'Hoàn credit'
         };
       case 'AdminAdjust':
         return {
@@ -115,7 +146,7 @@ export const TransactionItem = ({
 
           {/* Reason */}
           <div className="text-sm text-gray-700 mb-2">
-            {reason}
+            {translatedReason}
           </div>
 
           {/* Balance Change */}

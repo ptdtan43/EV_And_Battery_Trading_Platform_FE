@@ -187,21 +187,9 @@ export const CreditPackageManagement = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Quản lý Gói Credit</h2>
-          <p className="text-gray-600 mt-1">Quản lý các gói credit cho đăng tin</p>
-        </div>
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <p className="text-sm text-blue-800 font-medium mb-2">
-            ℹ️ Lưu ý quan trọng
-          </p>
-          <ul className="text-xs text-blue-700 space-y-1">
-            <li>• Không thể sửa <strong>số lượt</strong> và <strong>giá</strong> của gói</li>
-            <li>• Để thay đổi, hãy <strong>tạo gói mới</strong> và <strong>ẩn gói cũ</strong></li>
-            <li>• Điều này đảm bảo công bằng cho người đã mua</li>
-          </ul>
-        </div>
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900">Quản lý Gói Credit</h2>
+        <p className="text-gray-600 mt-1">Quản lý các gói credit cho đăng tin</p>
       </div>
 
       {/* Overall Statistics */}
@@ -286,7 +274,7 @@ export const CreditPackageManagement = () => {
                         title="Không thể sửa số lượt để đảm bảo tính nhất quán về giá"
                       />
                       <p className="text-xs text-gray-500 mt-1">
-                        💡 Để thay đổi số lượt, hãy tạo gói mới
+                        Lưu ý: Để thay đổi số lượt, hãy tạo gói mới
                       </p>
                     </div>
                     <div>
@@ -305,7 +293,7 @@ export const CreditPackageManagement = () => {
                         title="Không thể sửa giá để đảm bảo công bằng cho người đã mua"
                       />
                       <p className="text-xs text-gray-500 mt-1">
-                        💡 Để thay đổi giá, hãy tạo gói mới và ẩn gói cũ
+                        Lưu ý: Để thay đổi giá, hãy tạo gói mới và ẩn gói cũ
                       </p>
                     </div>
                     <div>

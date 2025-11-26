@@ -2,6 +2,41 @@ import { Check, TrendingUp } from 'lucide-react';
 import { formatPrice } from '../../lib/api';
 
 /**
+ * Extract package name from description
+ * VD: "Starter Package - 5 lượt đăng" → "Gói Khởi Đầu"
+ */
+const extractPackageName = (description) => {
+  if (!description) return '';
+  
+  // Map từ tiếng Anh sang tiếng Việt
+  const nameMap = {
+    'Starter Package': 'Gói Khởi Đầu',
+    'Popular Package': 'Gói Phổ Biến',
+    'Value Package': 'Gói Tiết Kiệm',
+    'Premium Package': 'Gói Premium',
+    'Basic Package': 'Gói Cơ Bản',
+    'Standard Package': 'Gói Tiêu Chuẩn',
+    'Pro Package': 'Gói Pro',
+    'Ultimate Package': 'Gói Cao Cấp',
+  };
+  
+  // Tìm tên gói trong description
+  for (const [eng, vie] of Object.entries(nameMap)) {
+    if (description.includes(eng)) {
+      return vie;
+    }
+  }
+  
+  // Nếu không match, trả về phần trước dấu "-"
+  const parts = description.split('-');
+  if (parts.length > 0) {
+    return parts[0].trim();
+  }
+  
+  return description;
+};
+
+/**
  * PackageCard - Display credit package for purchase
  * @param {Object} props
  * @param {Object} props.package - Package data
@@ -22,7 +57,8 @@ export const PackageCard = ({
     pricePerCredit,
     discountPercent,
     isPopular,
-    description
+    description,
+    packageName
   } = pkg;
 
   return (
@@ -84,9 +120,9 @@ export const PackageCard = ({
           </div>
         </div>
 
-        {/* Description */}
-        <div className="text-sm text-gray-600 mb-4 min-h-[40px]">
-          {description}
+        {/* Package Name */}
+        <div className="text-sm font-medium text-gray-700 mb-4 min-h-[40px]">
+          {packageName || extractPackageName(description)}
         </div>
 
         {/* Buy Button */}

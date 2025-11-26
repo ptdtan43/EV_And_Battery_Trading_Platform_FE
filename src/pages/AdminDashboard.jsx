@@ -1992,9 +1992,9 @@ export const AdminDashboard = () => {
 
       const thisMonthRevenue = thisMonthDepositRevenue + thisMonthVerificationRevenue + thisMonthCreditPackageRevenue;
 
-      // ✅ FIX: Calculate average deposit value from completed orders only (exclude verification fees for more accurate per-order average)
+      // FIX: Calculate average deposit value from completed orders only (exclude verification fees for more accurate per-order average)
       const averageDepositValue = completedOrdersList.length > 0 ? depositRevenue / completedOrdersList.length : 0;
-      // ✅ Total average includes both deposit and verification
+      // Total average includes both deposit and verification
       const averageOrderValue = completedOrdersList.length > 0 ? totalRevenue / completedOrdersList.length : 0;
       const completionRate = transactionsArray.length > 0 ? (completedOrders / transactionsArray.length) * 100 : 0;
 

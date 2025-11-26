@@ -186,6 +186,33 @@ const detectPhoneNumber = (text) => {
 };
 
 /**
+ * Phát hiện địa chỉ cụ thể (số nhà + tên đường)
+ * VD: "512 Ngô Quyền", "123 Lê Lợi", "45A Trần Hưng Đạo"
+ */
+const detectAddress = (text) => {
+    if (!text || typeof text !== 'string') return false;
+    
+    // Pattern: Số nhà (có thể có chữ A,B,C) + tên đường
+    // VD: "512 Ngô Quyền", "123A Lê Lợi", "45/12 Trần Hưng Đạo"
+    const addressPatterns = [
+        // Số + tên đường phổ biến
+        /\b\d{1,4}[A-Za-z]?\s+(?:đường|duong|phố|pho|street|st\.?)\s+[\w\s]+/gi,
+        // Số + tên người nổi tiếng (thường là tên đường)
+        /\b\d{1,4}[A-Za-z]?(?:\/\d{1,3})?\s+(?:Ngô|Ngo|Lê|Le|Trần|Tran|Nguyễn|Nguyen|Phan|Phạm|Pham|Hoàng|Hoang|Võ|Vo|Đặng|Dang|Bùi|Bui|Đỗ|Do|Hồ|Ho|Đinh|Dinh|Vũ|Vu)\s+[\w\s]+/gi,
+        // Số + các từ khóa địa chỉ
+        /\b\d{1,4}[A-Za-z]?(?:\/\d{1,3})?\s+(?:khu|kdc|kcn|ccn|tòa|toa|lô|lo|block|tầng|tang)\s+[\w\s]+/gi,
+    ];
+    
+    for (const pattern of addressPatterns) {
+        if (pattern.test(text)) {
+            return true;
+        }
+    }
+    
+    return false;
+};
+
+/**
  * Phát hiện link/URL
  */
 const detectLinks = (text) => {
@@ -376,6 +403,15 @@ export const validateMessage = (message) => {
             isValid: false,
             reason: 'phone_number_words',
             warning: '⚠️ Không được phép gửi thông tin liên hệ dưới dạng số viết bằng chữ. Vui lòng sử dụng tính năng chat của hệ thống.'
+        };
+    }
+
+    // Kiểm tra địa chỉ cụ thể
+    if (detectAddress(trimmed)) {
+        return {
+            isValid: false,
+            reason: 'address',
+            warning: '⚠️ Không được phép gửi địa chỉ cụ thể trong tin nhắn để bảo vệ thông tin cá nhân. Vui lòng trao đổi trực tiếp sau khi đã thỏa thuận.'
         };
     }
 

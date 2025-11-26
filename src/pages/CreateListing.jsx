@@ -354,7 +354,10 @@ export const CreateListing = () => {
     // ✅ CHECK CREDIT BALANCE BEFORE ALLOWING POST CREATION
     try {
       const creditResponse = await apiRequest(`/api/User/${user?.userId || user?.id}/listings/count`);
-      const remainingCredits = creditResponse.PostCredits || 0;
+      // Handle both camelCase and PascalCase from backend
+      const remainingCredits = creditResponse.postCredits || creditResponse.PostCredits || 0;
+      
+      console.log('💳 Credit check:', { creditResponse, remainingCredits });
       
       if (remainingCredits <= 0) {
         show({
@@ -1060,7 +1063,7 @@ export const CreateListing = () => {
           notificationSent
             ? "Bạn sẽ được thông báo khi được duyệt."
             : "(Hệ thống thông báo tạm thời không khả dụng)"
-        }${remainingCredits !== undefined ? ` Bạn còn ${remainingCredits} credit${remainingCredits !== 1 ? 's' : ''}.` : ''} ⚠️ Nếu bị từ chối, credit sẽ được hoàn lại.`,
+        }${remainingCredits !== undefined ? ` Bạn còn ${remainingCredits} credit${remainingCredits !== 1 ? 's' : ''}.` : ''} Lưu ý: Nếu bị từ chối, credit sẽ được hoàn lại.`,
         type: "success",
       });
 
@@ -1198,13 +1201,13 @@ export const CreateListing = () => {
               </div>
               <div className="flex-1">
                 <h3 className="text-sm font-medium text-blue-800 mb-2">
-                  💎 Chính sách Credits
+                  Chính sách Credits
                 </h3>
                 <ul className="text-sm text-blue-700 space-y-1">
-                  <li>✅ Đăng tin sẽ <strong>TRỪ 1 CREDIT</strong> ngay lập tức</li>
-                  <li>✅ Nếu admin <strong>TỪ CHỐI</strong> → <strong>HOÀN LẠI 1 CREDIT</strong></li>
-                  <li>✅ Bạn có thể sửa và gửi lại (trừ 1 credit mỗi lần resubmit)</li>
-                  <li>⚠️ Vui lòng đăng tin chất lượng để tránh bị từ chối</li>
+                  <li>• Đăng tin sẽ <strong>TRỪ 1 CREDIT</strong> ngay lập tức</li>
+                  <li>• Nếu admin <strong>TỪ CHỐI</strong> → <strong>HOÀN LẠI 1 CREDIT</strong></li>
+                  <li>• Bạn có thể sửa và gửi lại (trừ 1 credit mỗi lần resubmit)</li>
+                  <li><strong>Lưu ý:</strong> Vui lòng đăng tin chất lượng để tránh bị từ chối</li>
                 </ul>
               </div>
             </div>
