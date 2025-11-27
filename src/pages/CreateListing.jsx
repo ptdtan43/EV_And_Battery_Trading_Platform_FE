@@ -1852,7 +1852,7 @@ export const CreateListing = () => {
             {/* Notice message */}
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
               <p className="text-sm text-yellow-800 font-medium">
-                ⚠️ Lưu ý: Bài đăng của bạn chỉ được duyệt khi xe đã được gửi lên chi nhánh của chúng tôi! Đ/c: 123 Đống Đa, Hà Nội, Việt Nam 
+                ⚠️ Bài đăng của bạn chỉ được duyệt khi xe/pin đã được gửi lên chi nhánh của chúng tôi! Đ/c: 123 Đống Đa, Hà Nội, Việt Nam 
               </p>
             </div>
             
