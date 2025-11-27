@@ -32,9 +32,9 @@ export const Favorites = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [viewMode, setViewMode] = useState("grid");
   const [sortBy, setSortBy] = useState("newest");
-  const [productTypeFilter, setProductTypeFilter] = useState("all"); // all, vehicle, battery
+  const [productTypeFilter, setProductTypeFilter] = useState("all"); // tất cả, xe, pin
 
-  // Calculate counts for tabs
+  // Tính số lượng cho các tab
   const vehicleCount = favorites.filter(
     (p) => (p.productType || "").toLowerCase() === "vehicle" || (p.productType || "").toLowerCase() === "xe"
   ).length;
@@ -60,12 +60,12 @@ export const Favorites = () => {
       setLoading(true);
       const userId = user?.id || user?.userId || user?.accountId;
 
-      // Get user's favorite product IDs
+      // Lấy danh sách ID sản phẩm yêu thích của user
       const favoritesData = await apiRequest(`/api/Favorite/user/${userId}`);
       console.log("🔍 Favorites data from API:", favoritesData);
       console.log("🔍 Favorites data type:", Array.isArray(favoritesData) ? "Array" : typeof favoritesData);
       
-      // Handle different response formats
+      // Xử lý các định dạng response khác nhau
       let favoriteList = [];
       if (Array.isArray(favoritesData)) {
         favoriteList = favoritesData;
@@ -77,7 +77,7 @@ export const Favorites = () => {
       
       const favoriteIds = favoriteList
         .map((fav) => fav.productId || fav.ProductId || fav.product_id || fav.Id)
-        .filter((id) => id != null && id !== undefined); // Remove null/undefined
+        .filter((id) => id != null && id !== undefined); // Loại bỏ null/undefined
 
       console.log("🔍 Favorite product IDs:", favoriteIds);
       console.log("🔍 Total favorites:", favoriteIds.length);
@@ -88,14 +88,14 @@ export const Favorites = () => {
         return;
       }
 
-      // ✅ Get product details for each favorite in parallel
+      // ✅ Lấy chi tiết sản phẩm cho mỗi favorite song song
       const productPromises = favoriteIds.map(async (productId, index) => {
-        // Use favoriteList from outer scope
+        // Sử dụng favoriteList từ scope bên ngoài
         const favList = favoriteList;
         try {
           console.log(`🔍 Loading product ${index + 1}/${favoriteIds.length}:`, productId);
           
-          // ✅ Call API và kiểm tra status code
+          // ✅ Gọi API và kiểm tra status code
           let productData;
           try {
             const productPromise = apiRequest(`/api/Product/${productId}`);
@@ -112,7 +112,7 @@ export const Favorites = () => {
             
             console.log(`✅ Loaded product ${productId}:`, productData?.title || productData?.name);
           } catch (apiError) {
-            // Kiểm tra xem có phải lỗi 404 không
+            // Kiểm tra có phải lỗi 404 không
             const errorMessage = apiError.message || apiError.toString();
             const isNotFound = 
               apiError.status === 404 || 
@@ -139,13 +139,13 @@ export const Favorites = () => {
                 }
               }
               
-              // Return null để filter ra khỏi danh sách
+              // Trả về null để lọc ra khỏi danh sách
               return null;
             }
             throw apiError;
           }
 
-          // Load product images
+          // Tải ảnh sản phẩm
           let images = [];
           try {
             const imagesData = await apiRequest(
@@ -155,22 +155,22 @@ export const Favorites = () => {
               ? imagesData
               : imagesData?.items || [];
             
-            // Filter chỉ lấy product images (Vehicle/Battery), không lấy Document images
+            // Lọc chỉ lấy ảnh sản phẩm (Xe/Pin), không lấy ảnh giấy tờ
             const filteredImages = productImages.filter((img) => {
               const imageName = (img.name || img.Name || "").toLowerCase();
               const imageType = (img.imageType || img.type || img.image_type || "").toLowerCase();
-              // Chỉ lấy product images, không lấy document images
+              // Chỉ lấy ảnh sản phẩm, không lấy ảnh giấy tờ
               return imageName !== "document" && imageName !== "doc" && imageType !== "document";
             });
             
             images = filteredImages
               .map((img) => img.imageData || img.imageUrl || img.url)
-              .filter(Boolean); // Remove empty values
+              .filter(Boolean); // Loại bỏ giá trị rỗng
           } catch (imageError) {
             console.log("⚠️ No images found for product:", productId, imageError);
           }
 
-          // Find favoriteId from favoritesData
+          // Tìm favoriteId từ favoritesData
           const favoriteObj = favList.find(
             (fav) => 
               (fav.productId || fav.ProductId || fav.product_id) == productId ||
@@ -209,7 +209,7 @@ export const Favorites = () => {
             images: [],
             error: error.message,
             favoriteId: favoriteId,
-            canRetry: true, // Đánh dấu có thể retry
+            canRetry: true, // Đánh dấu có thể thử lại
           };
         }
       });
@@ -217,7 +217,7 @@ export const Favorites = () => {
       const products = await Promise.all(productPromises);
       console.log("🔍 All loaded products:", products);
       
-      // Filter null (products đã bị xóa) và giữ lại products có lỗi để retry
+      // Lọc null (sản phẩm đã bị xóa) và giữ lại sản phẩm có lỗi để thử lại
       const validProducts = products.filter((product) => product !== null);
       const deletedProducts = products.filter((product) => product === null).length;
       
@@ -258,7 +258,7 @@ export const Favorites = () => {
   const filterAndSortFavorites = () => {
     let filtered = [...favorites];
 
-    // Product Type filter
+    // Lọc theo loại sản phẩm
     if (productTypeFilter !== "all") {
       filtered = filtered.filter((product) => {
         const productType = (product.productType || "").toLowerCase();
@@ -271,7 +271,7 @@ export const Favorites = () => {
       });
     }
 
-    // Search filter
+    // Lọc theo từ khóa tìm kiếm
     if (searchTerm) {
       filtered = filtered.filter(
         (product) =>
@@ -281,7 +281,7 @@ export const Favorites = () => {
       );
     }
 
-    // Sort
+    // Sắp xếp
     switch (sortBy) {
       case "newest":
         filtered = filtered.sort(

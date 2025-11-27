@@ -2,7 +2,7 @@ import { useState } from "react";
 import { X, Filter, Car, Battery, Tag, DollarSign, Hash } from "lucide-react";
 
 export const AdvancedSearchFilter = ({ initialFilters = {}, onFilterChange, onClose }) => {
-  const [activeTab, setActiveTab] = useState("vehicle"); // vehicle, battery
+  const [activeTab, setActiveTab] = useState("vehicle"); // xe, pin
   const [filters, setFilters] = useState({
     productType: initialFilters.productType || "",
     minPrice: initialFilters.minPrice || "",
@@ -35,14 +35,15 @@ export const AdvancedSearchFilter = ({ initialFilters = {}, onFilterChange, onCl
 
   const handleApplyFilters = () => {
     const activeFilters = {};
+    // 2. Lọc bỏ các field rỗng
     Object.entries(filters).forEach(([key, value]) => {
       if (value !== "" && value !== null && value !== undefined) {
-        activeFilters[key] = value;
+        activeFilters[key] = value;  // Chỉ thêm nếu có giá trị
       }
     });
     onFilterChange(activeFilters);
   };
-
+//Đặt lại tất cả**
   const handleResetFilters = () => {
     setFilters({
       productType: "",
@@ -95,7 +96,7 @@ export const AdvancedSearchFilter = ({ initialFilters = {}, onFilterChange, onCl
   ];
   const batteryTypes = ["Lithium-ion", "LiFePO4", "NMC", "LTO", "Solid-state"];
 
-  // Quick prices for vehicles
+  // Giá nhanh cho xe
   const vehicleQuickPrices = [
     { label: "< 300tr", max: 300000000 },
     { label: "300-500tr", min: 300000000, max: 500000000 },
@@ -103,7 +104,7 @@ export const AdvancedSearchFilter = ({ initialFilters = {}, onFilterChange, onCl
     { label: "> 800tr", min: 800000000 },
   ];
 
-  // Quick prices for batteries
+  // Giá nhanh cho pin
   const batteryQuickPrices = [
     { label: "< 10tr", max: 10000000 },
     { label: "10-30tr", min: 10000000, max: 30000000 },
@@ -112,7 +113,7 @@ export const AdvancedSearchFilter = ({ initialFilters = {}, onFilterChange, onCl
     { label: "> 100tr", min: 100000000 },
   ];
 
-  // Select appropriate quick prices based on active tab
+  // Chọn giá nhanh phù hợp dựa trên tab đang hoạt động
   const quickPrices = activeTab === "battery" ? batteryQuickPrices : vehicleQuickPrices;
 
   const activeFilterCount = Object.values(filters).filter(v => v !== "").length;
