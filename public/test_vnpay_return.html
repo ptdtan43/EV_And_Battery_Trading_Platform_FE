@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Test VNPay Return Direct Call</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        button { padding: 10px 20px; margin: 10px; background: #3b82f6; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #2563eb; }
+        #result { margin-top: 20px; padding: 10px; background: #f3f4f6; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Test Backend VNPay Return Endpoint</h1>
+    <p>This will test if the backend returns the correct HTML with localStorage script</p>
+    
+    <button onclick="testBackend()">Test Backend Return</button>
+    <button onclick="checkLocalStorage()">Check localStorage</button>
+    <button onclick="simulatePayment()">Simulate Payment Event</button>
+    
+    <div id="result"></div>
+    
+    <script>
+        async function testBackend() {
+            const url = 'http://localhost:5044/api/payment/vnpay-return?vnp_ResponseCode=00&vnp_TxnRef=999&vnp_Amount=500000000&vnp_TransactionNo=TEST123&vnp_BankCode=NCB&vnp_SecureHash=test';
+            
+            try {
+                const response = await fetch(url);
+                const html = await response.text();
+                document.getElementById('result').innerHTML = `
+                    <h3>Backend Response:</h3>
+                    <pre style="background: #1f2937; color: #f3f4f6; padding: 15px; border-radius: 5px; overflow-x: auto; max-height: 400px;">${html}</pre>
+                `;
+                
+                // Check if HTML contains localStorage.setItem
+                if (html.includes('localStorage.setItem')) {
+                    document.getElementById('result').innerHTML += '<div style="color: green; margin-top: 10px;">✅ HTML contains localStorage script!</div>';
+                } else {
+                    document.getElementById('result').innerHTML += '<div style="color: red; margin-top: 10px;">❌ HTML does NOT contain localStorage script</div>';
+                }
+            } catch (error) {
+                document.getElementById('result').innerHTML = `<div style="color: red;">Error: ${error.message}</div>`;
+            }
+        }
+        
+        function checkLocalStorage() {
+            const data = localStorage.getItem('evtb_payment_success');
+            if (data) {
+                document.getElementById('result').innerHTML = `
+                    <h3>localStorage Data:</h3>
+                    <pre style="background: #1f2937; color: #f3f4f6; padding: 15px; border-radius: 5px;">${JSON.stringify(JSON.parse(data), null, 2)}</pre>
+                `;
+            } else {
+                document.getElementById('result').innerHTML = '<div style="color: orange;">No payment data in localStorage</div>';
+            }
+        }
+        
+        function simulatePayment() {
+            const testData = {
+                timestamp: Date.now(),
+                paymentId: '888',
+                amount: '300000000',
+                transactionNo: 'SIMULATED123',
+                paymentType: 'Deposit',
+                processed: false
+            };
+            
+            localStorage.setItem('evtb_payment_success', JSON.stringify(testData));
+            document.getElementById('result').innerHTML = '<div style="color: green;">✅ Simulated payment data saved! Navigate to homepage or product page to see redirect.</div>';
+        }
+    </script>
+</body>
+</html>

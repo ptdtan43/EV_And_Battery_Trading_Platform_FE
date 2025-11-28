@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "dgSpecHash": "BWZpiav4dHw=",
+  "success": true,
+  "projectFilePath": "D:\\FA25_SWP391\\Topic2_Main\\SWP391_Topic2_Frontend_ver2\\SimpleRatingApi\\SimpleRatingApi.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Acer\\.nuget\\packages\\microsoft.aspnetcore.openapi\\9.0.9\\microsoft.aspnetcore.openapi.9.0.9.nupkg.sha512",
+    "C:\\Users\\Acer\\.nuget\\packages\\microsoft.openapi\\1.6.17\\microsoft.openapi.1.6.17.nupkg.sha512"
+  ],
+  "logs": [
+    {
+      "code": "NU1900",
+      "level": "Warning",
+      "message": "Error occurred while getting package vulnerability data: Unable to load the service index for source https://api.nuget.org/v3/index.json.",
+      "projectPath": "D:\\FA25_SWP391\\Topic2_Main\\SWP391_Topic2_Frontend_ver2\\SimpleRatingApi\\SimpleRatingApi.csproj",
+      "warningLevel": 1,
+      "filePath": "D:\\FA25_SWP391\\Topic2_Main\\SWP391_Topic2_Frontend_ver2\\SimpleRatingApi\\SimpleRatingApi.csproj",
+      "targetGraphs": []
+    }
+  ]
+}

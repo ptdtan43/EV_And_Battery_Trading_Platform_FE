@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test PostMessage</title>
+</head>
+<body>
+    <h1>Test PostMessage</h1>
+    <p>Click the button below to open a test page and simulate payment success message</p>
+    <button onclick="openTestPage()">Open Test Page</button>
+    <div id="result"></div>
+    
+    <script>
+        function openTestPage() {
+            const testPage = window.open('', '_blank');
+            testPage.document.write(`
+                <html>
+                    <head><title>Test Payment Success</title></head>
+                    <body>
+                        <h1>Test Payment Success</h1>
+                        <p>This page will send a postMessage in 2 seconds...</p>
+                        <script>
+                            setTimeout(function() {
+                                console.log('Sending test postMessage...');
+                                if (window.opener) {
+                                    window.opener.postMessage({
+                                        type: 'EVTB_PAYMENT_SUCCESS',
+                                        payload: {
+                                            paymentId: '55',
+                                            amount: '500000000',
+                                            transactionNo: '15223227',
+                                            paymentType: 'Deposit'
+                                        }
+                                    }, '*');
+                                    alert('postMessage sent! Check the original page for toast notification.');
+                                } else {
+                                    alert('No window.opener found');
+                                }
+                            }, 2000);
+                        <\/script>
+                    </body>
+                </html>
+            `);
+        }
+        
+        // Listen for messages
+        window.addEventListener('message', function(event) {
+            console.log('Received message:', event.data);
+            document.getElementById('result').innerHTML = '<p style="color: green;">Message received: ' + JSON.stringify(event.data) + '</p>';
+        });
+        
+        console.log('Test page loaded. Click the button to test postMessage.');
+    </script>
+</body>
+</html>
+
+
+

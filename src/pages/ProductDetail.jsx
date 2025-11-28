@@ -1,0 +1,1755 @@
+import { useState, useEffect } from "react";
+import { useParams, Link, useNavigate } from "react-router-dom";
+import {
+  ArrowLeft,
+  Heart,
+  Share2,
+  Phone,
+  MessageCircle,
+  MapPin,
+  Calendar,
+  Gauge,
+  Battery,
+  Car,
+  Shield,
+  ChevronLeft,
+  ChevronRight,
+  CheckCircle,
+  Truck,
+  CreditCard,
+  MessageSquare,
+  Users,
+  Package,
+  X,
+  XCircle,
+  Clock,
+  Flag,
+  AlertCircle,
+  AlertTriangle,
+} from "lucide-react";
+import { apiRequest } from "../lib/api";
+import { createOrder } from "../lib/orderApi";
+import { createPayment } from "../api/payment";
+import { formatPrice } from "../utils/formatters";
+import { useAuth } from "../contexts/AuthContext";
+import { useToast } from "../contexts/ToastContext";
+import { toggleFavorite, isProductFavorited } from "../lib/favoriteApi";
+import { VerificationButton } from "../components/common/VerificationButton";
+import { ChatModal } from "../components/common/ChatModal";
+import { ReportModal } from "../components/common/ReportModal";
+import { fetchProductImages } from "../utils/imageLoader";
+import { feeService } from "../services/feeService";
+
+// Hàm hỗ trợ sửa lỗi encoding ký tự tiếng Việt
+const fixVietnameseEncoding = (str) => {
+  if (!str || typeof str !== "string") return str;
+
+  // Chỉ sửa nếu chuỗi chứa vấn đề encoding cụ thể
+  if (!str.includes("?")) {
+    return str;
+  }
+
+  // Các bản sửa encoding phổ biến cho ký tự tiếng Việt
+  const fixes = {
+    "B?o": "Bảo",
+    "Th?ch": "Thạch",
+    "Nguy?n": "Nguyễn",
+    "Tr?n": "Trần",
+    "Ph?m": "Phạm",
+    "H?:ng": "Hồng",
+    "Th?y": "Thủy",
+    "M?nh": "Mạnh",
+    "V?n": "Văn",
+    "Th?": "Thị",
+    "Qu?c": "Quốc",
+    "Vi?t": "Việt",
+    "B?c": "Bắc",
+    "Đ?ng": "Đông",
+  };
+
+  let fixed = str;
+  Object.entries(fixes).forEach(([wrong, correct]) => {
+    fixed = fixed.replace(new RegExp(wrong.replace("?", "\\?"), "g"), correct);
+  });
+
+  return fixed;
+};
+
+export const ProductDetail = () => {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { show: showToast } = useToast();
+
+  const [product, setProduct] = useState(null);
+  const [seller, setSeller] = useState(null);
+  const [images, setImages] = useState([]);
+  const [documentImages, setDocumentImages] = useState([]);
+  const [inspectedSet, setInspectedSet] = useState(new Set());
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [depositAmount, setDepositAmount] = useState(0);
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [favoriteId, setFavoriteId] = useState(null);
+  const [showChatModal, setShowChatModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showDocumentModal, setShowDocumentModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [currentOrderId, setCurrentOrderId] = useState(null);
+  const [productOrders, setProductOrders] = useState([]);
+
+  useEffect(() => {
+    console.log("ProductDetail - ID from params:", id);
+    if (id && id !== "undefined") {
+      loadProduct();
+    } else {
+      console.error("Invalid product ID:", id);
+      setLoading(false);
+    }
+  }, [id]);
+
+  // ✅ Listen for payment success and redirect to homepage
+  useEffect(() => {
+    const handlePaymentSuccess = (event) => {
+      try {
+        const data = event.data || {};
+        
+        // Lọc bỏ các message từ extension
+        if (data.posdMessageId || data.type === 'VIDEO_XHR_CANDIDATE' || data.from === 'detector') {
+          return;
+        }
+        
+        if (data.type === 'EVTB_PAYMENT_SUCCESS' && data.payload) {
+          console.log('[ProductDetail] Payment success received, redirecting to homepage');
+          
+          const { paymentId, amount, paymentType } = data.payload;
+          const frontendUrl = window.location.origin;
+          const redirectUrl = `${frontendUrl}/?payment_success=true&payment_id=${paymentId}&amount=${amount}&transaction_no=${data.payload.transactionNo}`;
+          
+          // Chuyển hướng về trang chủ
+          window.location.replace(redirectUrl);
+        }
+        
+        // Xử lý message chuyển hướng
+        if (data.type === 'EVTB_REDIRECT' && data.url) {
+          console.log('[ProductDetail] Redirect message received, going to:', data.url);
+          window.location.replace(data.url);
+        }
+      } catch (error) {
+        console.error('[ProductDetail] Error handling payment message:', error);
+      }
+    };
+    
+    // Kiểm tra localStorage định kỳ
+    const checkLocalStorage = () => {
+      try {
+        const paymentDataStr = localStorage.getItem('evtb_payment_success');
+        if (paymentDataStr) {
+          const paymentData = JSON.parse(paymentDataStr);
+          const isRecent = (Date.now() - paymentData.timestamp) < 10000;
+          
+          if (isRecent && !paymentData.processed) {
+            console.log('[ProductDetail] Found recent payment in localStorage, redirecting...');
+            const frontendUrl = window.location.origin;
+            const redirectUrl = `${frontendUrl}/?payment_success=true&payment_id=${paymentData.paymentId}&amount=${paymentData.amount}&transaction_no=${paymentData.transactionNo}`;
+            window.location.replace(redirectUrl);
+          }
+        }
+      } catch (error) {
+        console.error('[ProductDetail] Error checking localStorage:', error);
+      }
+    };
+    
+    window.addEventListener('message', handlePaymentSuccess);
+    
+    // Kiểm tra localStorage mỗi 500ms trong 10 giây đầu
+    const interval = setInterval(checkLocalStorage, 500);
+    const timeout = setTimeout(() => clearInterval(interval), 10000);
+    
+    return () => {
+      window.removeEventListener('message', handlePaymentSuccess);
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [navigate]);
+
+  const loadProduct = async () => {
+    try {
+      setLoading(true);
+
+      // Tải thông tin chi tiết sản phẩm
+      const productData = await apiRequest(`/api/Product/${id}`);
+
+      // Chuẩn hóa dữ liệu sản phẩm để đảm bảo tương thích frontend
+      const normalizedProduct = {
+        ...productData,
+        id: productData.productId || productData.id,
+        productId: productData.productId || productData.id,
+        sellerId: productData.sellerId || productData.seller_id,
+        title: productData.title || productData.name,
+        price: productData.price || 0,
+        images: productData.imageUrls || productData.images || [],
+        status: productData.status || "Available",
+        // Chuẩn hóa productType (xử lý cả "Vehicle" và "vehicle")
+        productType: productData.productType || productData.product_type || productData.ProductType || "Vehicle",
+        // Chuẩn hóa verificationStatus (xử lý nhiều định dạng)
+        verificationStatus: productData.verificationStatus || productData.verification_status || productData.VerificationStatus || "NotRequested",
+        // Chuẩn hóa year và manufactureYear: chuyển 0 thành null để tránh hiển thị "0"
+        year: (productData.year && productData.year > 0) ? productData.year : (productData.manufactureYear && productData.manufactureYear > 0) ? productData.manufactureYear : null,
+        manufactureYear: (productData.manufactureYear && productData.manufactureYear > 0) ? productData.manufactureYear : (productData.year && productData.year > 0) ? productData.year : null,
+        // Chuẩn hóa các trường số: chuyển 0 thành null cho sản phẩm pin để tránh hiển thị "0"
+        mileage: productData.mileage && productData.mileage > 0 ? productData.mileage : null,
+        seatCount: productData.seatCount && productData.seatCount > 0 ? productData.seatCount : null,
+        batteryHealth: productData.batteryHealth && productData.batteryHealth > 0 ? productData.batteryHealth : null,
+        capacity: productData.capacity && productData.capacity > 0 ? productData.capacity : null,
+        voltage: productData.voltage && productData.voltage > 0 ? productData.voltage : null,
+        cycleCount: productData.cycleCount && productData.cycleCount > 0 ? productData.cycleCount : null,
+      };
+
+      console.log("[ProductDetail] Raw product data:", productData);
+      console.log("[ProductDetail] Normalized product:", normalizedProduct);
+
+      // ✅ SỬA: Kiểm tra trạng thái nhưng không return sớm - vẫn cần tải ảnh và thông tin người bán
+      // Chuẩn hóa trạng thái sang định dạng nhất quán (không phân biệt hoa thường)
+      const productStatus = String(normalizedProduct.status || "").toLowerCase();
+      if (productStatus === "sold") {
+        console.log("[ProductDetail] Product is sold, but still loading full details");
+        normalizedProduct.status = "sold"; // Dùng chữ thường nhất quán
+      } else if (productStatus === "reserved") {
+        console.log("[ProductDetail] Product is reserved, but still loading full details");
+        normalizedProduct.status = "reserved"; // Dùng chữ thường nhất quán
+      } else {
+        // Chuẩn hóa các trạng thái khác sang chữ thường để nhất quán
+        normalizedProduct.status = productStatus;
+      }
+
+      setProduct(normalizedProduct);
+
+      // ✅ FIX: Load orders for this product to check if it's actually sold 
+      // Gọi API lấy tất cả đơn hàng liên quan đến sản phẩm này
+      try {
+        const productId = normalizedProduct.id || normalizedProduct.productId;
+        if (productId) {
+          const ordersData = await apiRequest("/api/Order");
+          const ordersArray = Array.isArray(ordersData) ? ordersData : [];
+          
+          // Lọc các đơn hàng liên quan đến sản phẩm này
+          const relatedOrders = ordersArray.filter(order => {
+            const orderProductId = order.productId || order.ProductId || order.product?.id || order.product?.productId;
+            return orderProductId == productId || orderProductId === productId;
+          });
+          
+          setProductOrders(relatedOrders);
+          console.log(`[ProductDetail] Found ${relatedOrders.length} orders for product ${productId}:`, relatedOrders);
+          
+          // Kiểm tra nếu có đơn hàng completed → sản phẩm đã bán
+          const hasCompletedOrder = relatedOrders.some(order => {
+            const orderStatus = (order.status || order.Status || order.orderStatus || order.OrderStatus || "").toLowerCase();
+            return orderStatus === "completed";
+          });
+          
+          if (hasCompletedOrder && normalizedProduct.status !== "sold") {
+            console.log(`[ProductDetail] Product ${productId} has completed order - updating status to "sold"`);
+            normalizedProduct.status = "sold";
+            setProduct(normalizedProduct);
+          }
+        }
+      } catch (orderError) {
+        console.warn("[ProductDetail] Could not load orders:", orderError);
+        // Continue even if order loading fails
+      }
+
+      // Load thông tin người bán
+      const sellerId = normalizedProduct.sellerId;
+      if (sellerId) {
+        try {
+          const sellerData = await apiRequest(`/api/User/${sellerId}`);
+          // Fix Vietnamese encoding for seller name
+          if (sellerData.fullName) {
+            sellerData.fullName = fixVietnameseEncoding(sellerData.fullName);
+          }
+          setSeller(sellerData);
+          console.log("Loaded seller data:", sellerData);
+        } catch (sellerError) {
+          console.warn("Could not load seller data:", sellerError);
+          // Đặt dữ liệu người bán dự phòng
+          setSeller({
+            fullName: fixVietnameseEncoding(
+              productData.sellerName || "Người bán"
+            ),
+            email: productData.sellerEmail || "",
+            phone: productData.sellerPhone || "",
+            avatar: null,
+          });
+        }
+      }
+
+      // ✅ OPTIMIZED: Load product images using optimized image loader
+      try {
+        console.log(`🖼️ Loading images for product ${id}...`);
+        // Gọi API lấy tất cả ảnh liên quan đến sản phẩm
+        const allImages = await fetchProductImages(id);
+        
+        console.log("🔍 All images data:", allImages);
+        console.log("🔍 First image structure:", allImages[0]);
+
+        // Phân loại ảnh: Product vs Document
+        const productImages = allImages.filter((img) => {
+          const imageName = (img.name || img.Name || "").toLowerCase();
+          console.log(`🔍 Image name for ${img.id || "unknown"}:`, imageName);
+
+          // Ảnh sản phẩm: name = "vehicle", "battery", "car", "product"
+          if (imageName === "vehicle" || imageName === "battery" || imageName === "car" || imageName === "product") {
+            console.log(
+              `🔍 Image ${img.id}: treating as PRODUCT (${imageName})`
+            );
+            return true;
+          }
+
+          // Nếu không có name → check imageType
+          const imageType =
+            img.imageType || img.type || img.image_type || img.category;
+          if (imageType && imageType !== "document") {
+            console.log(
+              `🔍 Image ${img.id}: treating as PRODUCT (imageType: ${imageType})`
+            );
+            return true;
+          }
+
+          console.log(
+            `🔍 Image ${img.id}: treating as DOCUMENT (name: ${imageName}, type: ${imageType})`
+          );
+          return false;
+        });
+
+        const docImages = allImages.filter((img) => {
+          const imageName = (img.name || img.Name || "").toLowerCase();
+          console.log(`🔍 Image name for ${img.id || "unknown"}:`, imageName);
+
+          // Ảnh tài liệu: name = "document", "doc", "paperwork"
+          if (imageName === "document" || imageName === "doc" || imageName === "paperwork") {
+            console.log(
+              `🔍 Image ${img.id}: treating as DOCUMENT (${imageName})`
+            );
+            return true;
+          }
+
+          // Nếu không có name → check imageType
+          const imageType =
+            img.imageType || img.type || img.image_type || img.category;
+          if (imageType === "document") {
+            console.log(
+              `🔍 Image ${img.id}: treating as DOCUMENT (imageType: ${imageType})`
+            );
+            return true;
+          }
+
+          // Nếu cả name và type đều không chỉ ra là tài liệu, thì không phải tài liệu
+          console.log(
+            `🔍 Image ${img.id}: treating as PRODUCT (name: ${imageName}, type: ${imageType})`
+          );
+          return false;
+        });
+
+        console.log("🔍 Product images:", productImages.length);
+        console.log("🔍 Document images:", docImages.length);
+
+        // Phát hiện ảnh kiểm định (do admin tải lên)
+        const getStr = (v) => (typeof v === "string" ? v.toLowerCase() : "");
+        const isInspected = (img) => {
+          const tag = getStr(img.tag || img.Tag || img.label || img.Label);
+          const type = getStr(img.imageType || img.type || img.image_type || img.category);
+          const name = getStr(img.name || img.Name);
+          const imageUrl = getStr(img.imageData || img.ImageData || img.url || img.imageUrl);
+          
+          // ✅ Check if filename contains ADMIN-INSPECTION prefix
+          if (imageUrl.includes("admin-inspection")) {
+            console.log(`🔍 Image ${img.id}: ADMIN INSPECTION detected (filename)`);
+            return true;
+          }
+          
+          return (
+            tag.includes("kiểm định") ||
+            tag.includes("admin") ||
+            type.includes("kiểm định") ||
+            type.includes("admin") ||
+            name.includes("kiểm định")
+          );
+        };
+
+        const urlOf = (img) => img.imageData || img.imageUrl || img.url;
+        const productUrls = productImages.map(urlOf).filter(Boolean);
+        const docUrls = docImages.map(urlOf).filter(Boolean);
+
+        // ✅ Remove duplicates based on URL
+        const uniqueProductUrls = [...new Set(productUrls)];
+        const uniqueDocUrls = [...new Set(docUrls)];
+        // Lọc ảnh kiểm định
+        // Put inspected images first in the gallery
+         // Đặt ảnh kiểm định lên đầu gallery
+        const inspectedUrls = productImages.filter(isInspected).map(urlOf).filter(Boolean);
+        // ✅ Remove duplicates from inspected URLs
+        const uniqueInspectedUrls = [...new Set(inspectedUrls)];
+        const inspectedUrlSet = new Set(uniqueInspectedUrls);
+        const otherUrls = uniqueProductUrls.filter((u) => !inspectedUrlSet.has(u));
+
+        console.log("🔍 Before deduplication - Product URLs:", productUrls.length);
+        console.log("🔍 After deduplication - Unique Product URLs:", uniqueProductUrls.length);
+        console.log("🔍 Before deduplication - Inspected URLs:", inspectedUrls.length);
+        console.log("🔍 After deduplication - Unique Inspected URLs:", uniqueInspectedUrls.length);
+
+        setImages([...uniqueInspectedUrls, ...otherUrls]);
+        setInspectedSet(new Set(uniqueInspectedUrls));
+        setDocumentImages(uniqueDocUrls);
+      } catch (imageError) {
+        console.log("No images found for product");
+        setImages([]);
+        setDocumentImages([]);
+        setInspectedSet(new Set());
+      }
+
+      // Kiểm tra xem sản phẩm có được người dùng hiện tại yêu thích hay không
+      if (user) {
+        try {
+          const favoriteData = await isProductFavorited(
+            user.id || user.userId || user.accountId,
+            id
+          );
+          if (favoriteData) {
+            setIsFavorite(true);
+            setFavoriteId(favoriteData.favoriteId);
+          }
+        } catch (favoriteError) {
+          console.warn("Could not check favorite status:", favoriteError);
+        }
+      }
+    } catch (error) {
+      console.error("Error loading product:", error);
+      showToast({
+        title: "❌ Lỗi tải sản phẩm",
+        description: "Không thể tải thông tin sản phẩm. Vui lòng thử lại.",
+        type: "error",
+      });
+      navigate("/");
+    } finally {
+      setLoading(false);
+    }
+  };
+//Chuyển ảnh
+  const handleImageNavigation = (direction) => {
+    if (direction === "prev") {
+      setCurrentImageIndex((prev) =>
+        prev === 0 ? images.length - 1 : prev - 1
+      );
+    } else {
+      setCurrentImageIndex((prev) =>
+        prev === images.length - 1 ? 0 : prev + 1
+      );
+    }
+  };
+
+  const handleFavorite = async () => {
+    
+    if (!user) {
+      showToast({
+        title: "⚠️ Cần đăng nhập",
+        description: "Vui lòng đăng nhập để thêm vào yêu thích",
+        type: "warning",
+      });
+      return;
+    }
+
+    try {
+      const result = await toggleFavorite(
+        user.id || user.userId || user.accountId,
+        id
+      );
+
+      // Chỉ cập nhật UI nếu nhận được kết quả hợp lệ
+      if (result && typeof result.isFavorited === "boolean") {
+        setIsFavorite(result.isFavorited);
+        setFavoriteId(result.favoriteId || null);
+
+        showToast({
+          title: result.isFavorited
+            ? "❤️ Đã thêm vào yêu thích"
+            : "💔 Đã xóa khỏi yêu thích",
+          description: result.isFavorited
+            ? "Sản phẩm đã được thêm vào danh sách yêu thích"
+            : "Sản phẩm đã được xóa khỏi danh sách yêu thích",
+          type: "success",
+        });
+      } else {
+        // If API is not available, show warning but don't crash
+        showToast({
+          title: "⚠️ Tính năng yêu thích tạm thời không khả dụng",
+          description:
+            "Backend chưa hỗ trợ tính năng yêu thích. Vui lòng thử lại sau.",
+          type: "warning",
+        });
+      }
+    } catch (error) {
+      console.error("Error toggling favorite:", error);
+      showToast({
+        title: "⚠️ Tính năng yêu thích tạm thời không khả dụng",
+        description:
+          "Backend chưa hỗ trợ tính năng yêu thích. Vui lòng thử lại sau.",
+        type: "warning",
+      });
+    }
+  };
+
+  const handleContactSeller = () => {
+    if (!user) {
+      showToast({
+        title: "⚠️ Cần đăng nhập",
+        description: "Vui lòng đăng nhập để liên hệ người bán",
+        type: "warning",
+      });
+      return;
+    }
+    setShowChatModal(true);
+  };
+
+  const handleSendMessage = async (message) => {
+    // Function này không còn cần thiết vì ChatModal xử lý API call trực tiếp
+    console.log("Message sent:", message);
+  };
+
+  const handleCreateOrder = () => {
+    if (!user) {
+      showToast({
+        title: "⚠️ Cần đăng nhập",
+        description: "Vui lòng đăng nhập để tạo đơn hàng",
+        type: "warning",
+      });
+      return;
+    }
+
+    // ✅ CRITICAL: Check if user is trying to buy their own product
+    const currentUserId = user?.id || user?.userId || user?.accountId;
+    const productSellerId = product?.sellerId || product?.seller_id;
+
+    if (currentUserId && productSellerId && currentUserId == productSellerId) {
+      showToast({
+        title: "⚠️ Không thể mua",
+        description: "Bạn không thể mua sản phẩm của chính mình!",
+        type: "error",
+      });
+      return;
+    }
+
+    setShowPaymentModal(true);
+  };
+
+  // Tính số tiền cọc dựa trên loại sản phẩm & giá (sử dụng phí động từ API)
+  const calculateDepositAmount = async () => {
+    if (!product) return 0;
+    
+    const price = product?.price || 0;
+    
+     // Gọi API lấy % cọc từ settings
+    try {
+      const amount = await feeService.calculateDepositAmount(price, product.productType);
+      return amount;
+    } catch (error) {
+      console.error('Failed to calculate deposit amount:', error);
+      // Dự phòng: dùng cách tính cũ
+      return price > 300000000 ? 10000000 : 5000000;
+    }
+  };
+
+  // Lấy số tiền cọc (phiên bản đồng bộ để hiển thị)
+  const getDepositAmount = () => {
+    return depositAmount || 0;
+  };
+
+  // Tải số tiền cọc khi sản phẩm thay đổi
+  useEffect(() => {
+    if (product) {
+      const loadDeposit = async () => {
+        const amount = await calculateDepositAmount();
+        setDepositAmount(amount);
+      };
+      loadDeposit();
+    } else {
+      setDepositAmount(0);
+    }
+  }, [product?.id, product?.price, product?.productType]);
+
+  // ✅ Also reload deposit amount when payment modal opens (to get latest fee)
+  useEffect(() => {
+    if (showPaymentModal && product) {
+      const loadDeposit = async () => {
+        // Xóa cache để đảm bảo lấy cài đặt phí mới nhất
+        feeService.clearCache();
+        const amount = await calculateDepositAmount();
+        setDepositAmount(amount);
+      };
+      loadDeposit();
+    }
+  }, [showPaymentModal]);
+
+  // Xử lý thanh toán đặt cọc
+  const onPayDeposit = async () => {
+    if (paying) return;
+
+    setPaying(true);
+
+    try {
+      console.log("[VNPay] Starting payment process...");
+
+      // 🔹 BƯỚC 1: Lấy token từ localStorage
+      const authData = localStorage.getItem("evtb_auth");
+      const token = authData ? JSON.parse(authData)?.token : null;
+
+      if (!token) {
+        throw new Error("Bạn cần đăng nhập để thực hiện thanh toán");
+      }
+
+      // Debug thông tin user
+      console.log("[VNPay] User info:", {
+        user: user,
+        roleId: user?.roleId,
+        role: user?.role,
+        roleName: user?.roleName,
+      });
+
+      // 🔹 BƯỚC 2: Kiểm tra role (phải là member)
+      const userRoleId = user?.roleId || user?.role;
+      const isMember =
+        userRoleId === 2 ||
+        userRoleId === "2" ||
+        user?.roleName?.toLowerCase() === "member" ||
+        user?.roleName?.toLowerCase() === "user";
+
+      // TẠM THỜI: Cho phép tất cả user đã xác thực để test
+      const allowAllUsers = true; // Đặt false khi production
+
+      if (!isMember && !allowAllUsers) {
+        console.log("[VNPay] Role check failed:", {
+          userRoleId,
+          roleName: user?.roleName,
+          isMember,
+        });
+        throw new Error(
+          `Bạn cần đăng nhập với vai trò thành viên. Vai trò hiện tại: ${
+            user?.roleName || userRoleId || "Unknown"
+          }`
+        );
+      }
+
+      if (!isMember && allowAllUsers) {
+        console.log(
+          "[VNPay] ⚠️ TEMPORARY: Allowing payment despite role check failed"
+        );
+      }
+
+     // 🔹 BƯỚC 3: Kiểm tra không được mua sản phẩm của chính mình
+      const currentUserId = user?.id || user?.userId || user?.accountId;
+      const productSellerId = product?.sellerId || product?.seller_id;
+
+      console.log("[VNPay] Seller validation:", {
+        currentUserId,
+        productSellerId,
+        isSameUser: currentUserId == productSellerId,
+        productId: product?.id,
+      });
+
+      if (
+        currentUserId &&
+        productSellerId &&
+        currentUserId == productSellerId
+      ) {
+        throw new Error("Bạn không thể mua sản phẩm của chính mình!");
+      }
+
+      const depositAmount = await calculateDepositAmount();
+      const totalAmount = product?.price || 0;
+
+      // Validate product data
+      if (!product?.id) {
+        throw new Error("Không tìm thấy thông tin sản phẩm");
+      }
+
+     // 🔹 BƯỚC 4: Validate số tiền (VNPay yêu cầu 5,000 - 999,999,999 VNĐ)
+      const VNPAY_MIN_AMOUNT = 5000;
+      const VNPAY_MAX_AMOUNT = 999999999;
+      
+      if (depositAmount < VNPAY_MIN_AMOUNT) {
+        throw new Error(`Số tiền đặt cọc (${formatPrice(depositAmount)}) quá nhỏ. VNPay yêu cầu tối thiểu ${formatPrice(VNPAY_MIN_AMOUNT)}`);
+      }
+      
+      if (depositAmount > VNPAY_MAX_AMOUNT) {
+        throw new Error(`Số tiền đặt cọc (${formatPrice(depositAmount)}) quá lớn. VNPay chỉ chấp nhận tối đa ${formatPrice(VNPAY_MAX_AMOUNT)}. Vui lòng liên hệ admin để xử lý.`);
+      }
+      
+      console.log("[VNPay] Validated deposit amount:", {
+        amount: depositAmount,
+        formatted: formatPrice(depositAmount),
+        isValid: depositAmount >= VNPAY_MIN_AMOUNT && depositAmount <= VNPAY_MAX_AMOUNT
+      });
+
+      // 🔹 BƯỚC 5: Tạo đơn hàng nếu chưa có
+      let orderId = currentOrderId;
+      if (!orderId) {
+        console.log("[VNPay] Creating new order...");
+        const orderData = {
+          productId: product.id,
+          sellerId: product.sellerId || product.seller_id || 1, // Mặc định admin làm người bán để test
+          depositAmount: depositAmount,
+          totalAmount: totalAmount,
+        };
+
+        console.log("[VNPay] Order data:", orderData);
+
+        const orderResponse = await createOrder(orderData, token);
+        orderId = orderResponse.orderId;
+        setCurrentOrderId(orderId);
+        console.log("[VNPay] Order created:", orderId);
+      }
+
+      console.log("[VNPay] POST /api/payment", {
+        orderId,
+        amount: depositAmount,
+        paymentType: "Deposit",
+        productId: product?.id,
+      });
+
+      // 🔹 BƯỚC 6: Tạo giao dịch thanh toán
+      const res = await createPayment(
+        {
+          orderId: orderId,
+          productId: product?.id,
+          amount: depositAmount,
+          paymentType: "Deposit",
+        },
+        token
+      );
+
+      console.log("[VNPay] createPayment res:", res);
+
+      if (!res?.paymentUrl) {
+        throw new Error("paymentUrl empty");
+      }
+
+       // 🔹 BƯỚC 7: Đóng modal và redirect đến VNPay
+      setShowPaymentModal(false);
+      showToast({
+        title: "✅ Đang chuyển đến VNPay",
+        description: `Đơn hàng đã được tạo với số tiền cọc ${formatPrice(
+          depositAmount
+        )}. Đang chuyển đến cổng thanh toán...`,
+        type: "success",
+      });
+
+      // Redirect to VNPay in a new tab so the return page can self-close
+      // ✅ REMOVE noopener to allow window.opener to work
+      const paymentWindow = window.open(
+        res.paymentUrl,
+        "_blank"
+      );
+      // Try focusing the new tab (may be blocked by browser policies)
+      if (paymentWindow && typeof paymentWindow.focus === "function") {
+        paymentWindow.focus();
+      }
+    } catch (err) {
+      console.error("[VNPay] createPayment error:", err);
+
+      // Handle specific errors
+      if (err.message.includes("Phiên đăng nhập hết hạn")) {
+        showToast({
+          title: "❌ Phiên đăng nhập hết hạn",
+          description: "Vui lòng đăng nhập lại để tiếp tục",
+          type: "error",
+        });
+        // Redirect to login
+        setTimeout(() => {
+          window.location.href = "/login";
+        }, 2000);
+      } else if (err.message.includes("vai trò thành viên")) {
+        showToast({
+          title: "❌ Không có quyền",
+          description: "Bạn cần đăng nhập với vai trò thành viên",
+          type: "error",
+        });
+      } else {
+        showToast({
+          title: "❌ Lỗi thanh toán",
+          description:
+            err.message || "Không tạo được giao dịch VNPay. Vui lòng thử lại!",
+          type: "error",
+        });
+      }
+    } finally {
+      setPaying(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  if (!product || id === "undefined" || !id) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">
+            Không tìm thấy sản phẩm
+          </h2>
+          <p className="text-gray-600 mb-4">ID sản phẩm không hợp lệ: {id}</p>
+          <Link to="/" className="text-blue-600 hover:text-blue-700">
+            Quay lại trang chủ
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const currentImage = images[currentImageIndex];
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={() => navigate(-1)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <ArrowLeft className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              {/* Hide favorite and report buttons for sold products */}
+              {product?.status?.toLowerCase() !== 'sold' && product?.status?.toLowerCase() !== 'completed' && (
+                <>
+                  <button
+                    onClick={handleFavorite}
+                    className={`p-2 rounded-lg transition-colors ${
+                      isFavorite
+                        ? "bg-red-50 text-red-600"
+                        : "hover:bg-gray-100 text-gray-600"
+                    }`}
+                    title="Yêu thích"
+                  >
+                    <Heart
+                      className={`h-5 w-5 ${isFavorite ? "fill-current" : ""}`}
+                    />
+                  </button>
+                  <button>
+                   
+                  </button>
+                  {user && (
+                    <button 
+                      onClick={() => setShowReportModal(true)}
+                      className="p-2 hover:bg-red-50 rounded-lg transition-colors text-gray-600 hover:text-red-600"
+                      title="Báo cáo vi phạm"
+                    >
+                      <Flag className="h-5 w-5" />
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Image Gallery */}
+          <div className="space-y-4">
+            <div className="relative bg-white rounded-xl shadow-sm overflow-hidden">
+              {currentImage ? (
+                <img
+                  src={currentImage}
+                  alt={product.title}
+                  className="w-full h-96 object-cover"
+                  onError={(e) => {
+                    e.target.style.display = "none";
+                  }}
+                />
+              ) : (
+                <div className="w-full h-96 bg-gray-200 flex items-center justify-center">
+                  <Car className="h-16 w-16 text-gray-400" />
+                </div>
+              )}
+
+              {currentImage && inspectedSet.has(currentImage) && (
+                <div className="absolute top-4 left-4 bg-blue-600 text-white px-3 py-1 rounded-full text-xs shadow-lg font-medium">
+                  ✓ Ảnh do Admin kiểm định
+                </div>
+              )}
+
+              {images.length > 1 && (
+                <>
+                  <button
+                    onClick={() => handleImageNavigation("prev")}
+                    className="absolute left-4 top-1/2 transform -translate-y-1/2 bg-white bg-opacity-80 hover:bg-opacity-100 rounded-full p-2 shadow-lg transition-all"
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </button>
+                  <button
+                    onClick={() => handleImageNavigation("next")}
+                    className="absolute right-4 top-1/2 transform -translate-y-1/2 bg-white bg-opacity-80 hover:bg-opacity-100 rounded-full p-2 shadow-lg transition-all"
+                  >
+                    <ChevronRight className="h-5 w-5" />
+                  </button>
+                </>
+              )}
+
+              <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-50 text-white px-3 py-1 rounded-full text-sm">
+                {currentImageIndex + 1} / {images.length}
+              </div>
+            </div>
+
+            {/* Thumbnail Gallery */}
+              {images.length > 1 && (
+              <div className="flex space-x-2 overflow-x-auto pb-2">
+                {images.map((image, index) => (
+                  <button
+                    key={index}
+                    onClick={() => setCurrentImageIndex(index)}
+                    className={`flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border-2 transition-all ${
+                      index === currentImageIndex
+                        ? "border-blue-600"
+                        : "border-gray-200 hover:border-gray-300"
+                    }`}
+                  >
+                    <img
+                      src={image}
+                      alt={`${product.title} ${index + 1}`}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        e.target.style.display = "none";
+                      }}
+                    />
+                      {inspectedSet.has(image) && (
+                        <div className="absolute top-1 left-1 bg-blue-600 text-white px-2 py-0.5 rounded text-[10px] font-medium">
+                          ✓ Admin
+                        </div>
+                      )}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Document Images Button */}
+            {documentImages.length > 0 && (
+              <div className="mt-4">
+                <button
+                  onClick={() => {
+                    console.log(
+                      "🔍 Opening document modal with images:",
+                      documentImages
+                    );
+                    setShowDocumentModal(true);
+                  }}
+                  className="w-full bg-green-600 text-white px-4 py-3 rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center space-x-2"
+                >
+                  <Shield className="h-5 w-5" />
+                  <span>Xem giấy tờ xe ({documentImages.length} ảnh)</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Product Info */}
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex-1">
+                  <h1 className="text-2xl font-bold text-gray-900 mb-2">
+                    {product.title}
+                  </h1>
+
+                  {/* Verification Status Badge */}
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    {product.verificationStatus === "Verified" && (
+                      <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800 border border-green-200">
+                        <CheckCircle className="h-4 w-4 mr-1" />
+                        Đã kiểm định
+                      </span>
+                    )}
+                    
+                    {/* Admin Inspection Images Badge */}
+                    {inspectedSet.size > 0 && (
+                      <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800 border border-blue-200">
+                        <CheckCircle className="h-4 w-4 mr-1" />
+                        Có {inspectedSet.size} ảnh do Admin kiểm định
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Rejection Message */}
+                  {product.verificationStatus === "Rejected" && (
+                    <div className="mb-4 overflow-hidden rounded-xl border-l-4 border-red-500 bg-gradient-to-r from-red-50 to-white shadow-md">
+                      <div className="p-5">
+                        <div className="flex items-start gap-4">
+                          <div className="flex-shrink-0 w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                            <AlertTriangle className="h-5 w-5 text-red-600" />
+                          </div>
+                          <div className="flex-1 space-y-3">
+                            <div>
+                              <h3 className="text-lg font-bold text-red-900 mb-1">
+                                Bài đăng bị từ chối kiểm duyệt
+                              </h3>
+                              <p className="text-sm text-red-700">
+                                Bài đăng của bạn đã được admin xem xét nhưng chưa đạt yêu cầu để hiển thị công khai
+                              </p>
+                            </div>
+                            
+                            {(product.verificationNotes || product.rejectionReason) && (
+                              <div className="bg-white rounded-lg border border-red-200 p-4 shadow-sm">
+                                <div className="flex items-start gap-2">
+                                  <span className="text-lg">📋</span>
+                                  <div className="flex-1">
+                                    <p className="text-sm font-semibold text-gray-900 mb-1">
+                                      Lý do từ chối:
+                                    </p>
+                                    <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                                      {product.verificationNotes || product.rejectionReason}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                            
+                            <div className="bg-blue-50 rounded-lg border border-blue-200 p-4">
+                              <div className="flex items-start gap-2">
+                                <span className="text-lg">💡</span>
+                                <div className="flex-1">
+                                  <p className="text-sm font-semibold text-blue-900 mb-2">
+                                    Bạn có thể làm gì tiếp theo?
+                                  </p>
+                                  <ul className="space-y-2 text-sm text-blue-800">
+                                    <li className="flex items-start gap-2">
+                                      <span className="text-blue-600 mt-0.5">•</span>
+                                      <span>Xem lại lý do từ chối và <strong>chỉnh sửa bài đăng</strong> cho phù hợp với quy định</span>
+                                    </li>
+                                    <li className="flex items-start gap-2">
+                                      <span className="text-blue-600 mt-0.5">•</span>
+                                      <span>Cập nhật thông tin chính xác, hình ảnh rõ ràng và mô tả chi tiết hơn</span>
+                                    </li>
+                                    <li className="flex items-start gap-2">
+                                      <span className="text-blue-600 mt-0.5">•</span>
+                                      <span>Sau khi chỉnh sửa, bài đăng sẽ được gửi lại để admin xem xét</span>
+                                    </li>
+                                  </ul>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {(product.productType?.toLowerCase() === 'vehicle') && (
+                    <p className="text-gray-600">
+                      {product.licensePlate ||
+                        product.license_plate ||
+                        "Biển số: N/A"}
+                    </p>
+                  )}
+
+                  {/* Verification Button - Only show for vehicles, product owner, not verified, and not sold */}
+                  {(() => {
+                    const productStatus = String(product.status || "").toLowerCase();
+                    const isSold = productStatus === "sold";
+                    // Check if product is a vehicle (case-insensitive)
+                    const isVehicle = (product.productType || "").toLowerCase() === "vehicle";
+                    // Check verification status (case-insensitive)
+                    const verificationStatus = (product.verificationStatus || "NotRequested").toString();
+                    const isVerified = verificationStatus.toLowerCase() === "verified";
+                    // Check if user is owner
+                    const isOwner = user &&
+                      (user.id || user.userId || user.accountId) ===
+                        (product.sellerId || product.userId);
+                    
+                    return (
+                      isVehicle &&
+                      !isVerified &&
+                      !isSold &&
+                      isOwner && (
+                        <div className="mt-4">
+                          <VerificationButton
+                            productId={
+                              product.id || product.productId || product.Id
+                            }
+                            currentStatus={verificationStatus}
+                            isOwner={true}
+                            disabled={loading}
+                          />
+                        </div>
+                      )
+                    );
+                  })()}
+                </div>
+                <div className="text-right">
+                  <p className="text-3xl font-bold text-blue-600">
+                    {formatPrice(product.price)}
+                  </p>
+                  <p className="text-sm text-gray-500">Giá niêm yết</p>
+                </div>
+              </div>
+
+              {/* Status Badge */}
+              <div className="mb-4">
+                {(() => {
+                  const status = String(product.status || "").toLowerCase();
+                  return (
+                    <>
+                      {status === "approved" && (
+                        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                          <CheckCircle className="h-4 w-4 mr-1" />
+                          Đã duyệt
+                        </span>
+                      )}
+                      {status === "sold" && (
+                        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+                          <XCircle className="h-4 w-4 mr-1" />
+                          Đã bán
+                        </span>
+                      )}
+                      {product.is_auction && (
+                        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
+                          Đấu giá
+                        </span>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+
+              {/* Key Features */}
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                {/* Show year for vehicles and batteries when year > 0 */}
+                {((product.year && product.year > 0) || (product.manufactureYear && product.manufactureYear > 0)) && (
+                  <div className="flex items-center text-gray-600">
+                    <Calendar className="h-5 w-5 mr-2 text-blue-600" />
+                    <span>Năm sản xuất: {product.year > 0 ? product.year : (product.manufactureYear > 0 ? product.manufactureYear : '')}</span>
+                  </div>
+                )}
+                {product.battery_capacity && product.battery_capacity > 0 && (
+                  <div className="flex items-center text-gray-600">
+                    <Battery className="h-5 w-5 mr-2 text-blue-600" />
+                    <span>Pin: {product.battery_capacity} kWh</span>
+                  </div>
+                )}
+                {product.brand && (
+                  <div className="flex items-center text-gray-600">
+                    <Car className="h-5 w-5 mr-2 text-blue-600" />
+                    <span>Hãng: {product.brand}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="space-y-3">
+                {/* Show sold message if product is sold - check case-insensitive */}
+                {(() => {
+                  const productStatus = String(product.status || "").toLowerCase();
+                  
+                  // ✅ FIX: Check if there's a completed order for this product
+                  const hasCompletedOrder = productOrders.some(order => {
+                    const orderStatus = (order.status || order.Status || order.orderStatus || order.OrderStatus || "").toLowerCase();
+                    return orderStatus === "completed";
+                  });
+                  
+                  // If there's a completed order, product is sold regardless of product status
+                  const isSold = productStatus === "sold" || hasCompletedOrder;
+                  const isReserved = productStatus === "reserved" && !hasCompletedOrder;
+                  
+                  if (isSold) {
+                    return (
+                      <div className="w-full bg-red-50 border border-red-200 text-red-800 py-4 px-6 rounded-lg text-center">
+                        <div className="flex items-center justify-center space-x-2 mb-2">
+                          <XCircle className="h-6 w-6" />
+                          <span className="font-semibold text-lg">Sản phẩm đã được bán</span>
+                        </div>
+                        <p className="text-sm">
+                          Sản phẩm này không còn khả dụng.
+                        </p>
+                      </div>
+                    );
+                  } else if (isReserved) {
+                    return (
+                      <div className="w-full bg-yellow-50 border border-yellow-200 text-yellow-800 py-4 px-6 rounded-lg text-center">
+                        <div className="flex items-center justify-center space-x-2 mb-2">
+                          <Clock className="h-6 w-6" />
+                          <span className="font-semibold text-lg">Sản phẩm đang trong quá trình thanh toán</span>
+                        </div>
+                        <p className="text-sm">
+                          Sản phẩm này đã được khách hàng đặt cọc thành công và đang chờ nhân viên xác nhận. Sau khi có lịch hẹn với người bán, hãy liên hệ nhân viên qua SĐT 0373111370 để xác nhận lịch hẹn với hệ thống.
+                        </p>
+                      </div>
+                    );
+                  } else {
+                    /* ✅ Only show payment button if user is not the seller */
+                    const currentUserId =
+                      user?.id || user?.userId || user?.accountId;
+                    const productSellerId =
+                      product?.sellerId || product?.seller_id;
+                    const isOwnProduct =
+                      currentUserId &&
+                      productSellerId &&
+                      currentUserId == productSellerId;
+
+                    if (isOwnProduct) {
+                      return (
+                        <div className="w-full bg-gray-100 text-gray-500 py-3 px-6 rounded-lg font-medium text-center">
+                          <CreditCard className="h-5 w-5 mr-2 inline" />
+                          Sản phẩm của bạn
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <button
+                        onClick={handleCreateOrder}
+                        disabled={isSold || isReserved}
+                        className="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
+                      >
+                        <CreditCard className="h-5 w-5 mr-2" />
+                        Tạo đơn hàng
+                      </button>
+                    );
+                  }
+                })()}
+
+                {/* ✅ Only show contact button if user is not the seller */}
+                {(() => {
+                  const currentUserId = user?.id || user?.userId || user?.accountId;
+                  const productSellerId = product?.sellerId || product?.seller_id;
+                  const isOwnProduct = currentUserId && productSellerId && currentUserId == productSellerId;
+
+                  if (isOwnProduct) {
+                    return null; // Don't show contact button for own product
+                  }
+
+                  return (
+                    <button
+                      onClick={handleContactSeller}
+                      className="w-full bg-green-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center justify-center"
+                    >
+                      <MessageCircle className="h-5 w-5 mr-2" />
+                      Liên hệ người bán
+                    </button>
+                  );
+                })()}
+              </div>
+            </div>
+
+            {/* Seller Info */}
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                Thông tin người bán
+              </h3>
+              <div className="flex items-center space-x-4">
+                <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center overflow-hidden">
+                  {seller?.avatar ? (
+                    <img
+                      src={seller.avatar}
+                      alt="Seller Avatar"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-blue-600 font-semibold">
+                      {seller?.fullName?.charAt(0) ||
+                        product.sellerName?.charAt(0) ||
+                        "N"}
+                    </span>
+                  )}
+                </div>
+                <div className="flex-1">
+                  <h4 className="font-medium text-gray-900">
+                    {seller?.fullName || product.sellerName || "Người bán"}
+                  </h4>
+                  <p className="text-sm text-gray-600">
+                    <MapPin className="h-4 w-4 inline mr-1" />
+                    {product.location || "Hà Nội"}
+                  </p>
+                </div>
+                <div className="flex flex-col space-y-2">
+                  <button
+                    onClick={() =>
+                      navigate(
+                        `/seller/${product.sellerId || product.seller_id || 1}`
+                      )
+                    }
+                    className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors flex items-center"
+                  >
+                    <Users className="h-4 w-4 mr-1" />
+                    Xem profile
+                  </button>
+                  <button
+                    onClick={() =>
+                      navigate(
+                        `/seller/${
+                          product.sellerId || product.seller_id || 1
+                        }/products`
+                      )
+                    }
+                    className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center"
+                  >
+                    <Package className="h-4 w-4 mr-1" />
+                    Sản phẩm
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Product Details */}
+        <div className="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Main Details */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Description */}
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                Mô tả sản phẩm
+              </h3>
+              <div className="prose prose-gray max-w-none">
+                <p className="text-gray-700 leading-relaxed">
+                  {product.description ||
+                    "Không có mô tả chi tiết cho sản phẩm này."}
+                </p>
+              </div>
+            </div>
+
+            {/* Specifications */}
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                Thông số kỹ thuật
+              </h3>
+              <div className="space-y-3">
+                {/* Thông tin chung */}
+                {product.brand && (
+                  <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
+                    <span className="text-gray-600 font-medium">
+                      {product.productType?.toLowerCase() === "battery"
+                        ? "Hãng pin"
+                        : "Hãng xe"}
+                    </span>
+                    <span className="font-semibold text-gray-900">
+                      {product.brand}
+                    </span>
+                  </div>
+                )}
+                {product.model && (
+                  <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
+                    <span className="text-gray-600 font-medium">
+                      {product.productType?.toLowerCase() === "battery"
+                        ? "Mẫu pin"
+                        : "Mẫu xe"}
+                    </span>
+                    <span className="font-semibold text-gray-900">
+                      {product.model}
+                    </span>
+                  </div>
+                )}
+                {product.condition && (
+                  <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
+                    <span className="text-gray-600 font-medium">Tình trạng</span>
+                    <span className={`font-semibold ${
+                      product.condition === "excellent" || product.condition === "Xuất sắc" 
+                        ? "text-green-600" 
+                        : product.condition === "good" || product.condition === "Tốt"
+                        ? "text-blue-600"
+                        : product.condition === "fair" || product.condition === "Khá"
+                        ? "text-yellow-600"
+                        : "text-orange-600"
+                    }`}>
+                      {product.condition === "excellent" ? "Xuất sắc" :
+                       product.condition === "good" ? "Tốt" :
+                       product.condition === "fair" ? "Khá" :
+                       product.condition === "poor" ? "Cần sửa chữa" :
+                       product.condition}
+                    </span>
+                  </div>
+                )}
+
+                {/* Thông tin xe điện */}
+                {product.productType?.toLowerCase() === "vehicle" && (
+                  <>
+                    {product.year && product.year > 0 && (
+                      <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
+                        <span className="text-gray-600 font-medium">
+                          Năm sản xuất
+                        </span>
+                        <span className="font-semibold text-gray-900">
+                          {product.year}
+                        </span>
+                      </div>
+                    )}
+                    {product.vehicleType && (
+                      <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
+                        <span className="text-gray-600 font-medium">
+                          Loại xe
+                        </span>
+                        <span className="font-semibold text-gray-900">
+                          {product.vehicleType}
+                        </span>
+                      </div>
+                    )}
+                    {product.mileage && product.mileage > 0 && (
+                      <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
+                        <span className="text-gray-600 font-medium">
+                          Số km đã đi
+                        </span>
+                        <span className="font-semibold text-gray-900">
+                          {product.mileage.toLocaleString()} km
+                        </span>
+                      </div>
+                    )}
+
+                    {product.licensePlate && (
+                      <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
+                        <span className="text-gray-600 font-medium">
+                          Biển số
+                        </span>
+                        <span className="font-semibold text-gray-900">
+                          {product.licensePlate}
+                        </span>
+                      </div>
+                    )}
+                    {product.color && (
+                      <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
+                        <span className="text-gray-600 font-medium">
+                          Màu sắc
+                        </span>
+                        <span className="font-semibold text-gray-900">
+                          {product.color}
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Thông tin pin */}
+                {product.productType?.toLowerCase() === "battery" && (
+                  <>
+                    {((product.year && product.year > 0) || (product.manufactureYear && product.manufactureYear > 0)) && (
+                      <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
+                        <span className="text-gray-600 font-medium">
+                          Năm sản xuất
+                        </span>
+                        <span className="font-semibold text-gray-900">
+                          {product.year > 0 ? product.year : (product.manufactureYear > 0 ? product.manufactureYear : '')}
+                        </span>
+                      </div>
+                    )}
+                    {product.batteryType && product.batteryType !== "0" && product.batteryType !== 0 && product.batteryType !== "" && (
+                      <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
+                        <span className="text-gray-600 font-medium">
+                          Loại pin
+                        </span>
+                        <span className="font-semibold text-gray-900">
+                          {product.batteryType}
+                        </span>
+                      </div>
+                    )}
+                    {product.batteryHealth && product.batteryHealth > 0 && (
+                      <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
+                        <span className="text-gray-600 font-medium">
+                          Tình trạng pin
+                        </span>
+                        <span className="font-semibold text-gray-900">
+                          {product.batteryHealth}%
+                        </span>
+                      </div>
+                    )}
+                    {product.capacity && product.capacity > 0 && (
+                      <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
+                        <span className="text-gray-600 font-medium">
+                          Dung lượng
+                        </span>
+                        <span className="font-semibold text-gray-900">
+                          {product.capacity} Ah
+                        </span>
+                      </div>
+                    )}
+                    {product.voltage && product.voltage > 0 && (
+                      <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
+                        <span className="text-gray-600 font-medium">
+                          Điện áp
+                        </span>
+                        <span className="font-semibold text-gray-900">
+                          {product.voltage} V
+                        </span>
+                      </div>
+                    )}
+                    {product.bms && product.bms !== "0" && product.bms !== 0 && product.bms !== "" && (
+                      <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
+                        <span className="text-gray-600 font-medium">BMS</span>
+                        <span className="font-semibold text-gray-900">
+                          {product.bms}
+                        </span>
+                      </div>
+                    )}
+                    {product.cellType && product.cellType !== "0" && product.cellType !== 0 && product.cellType !== "" && (
+                      <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
+                        <span className="text-gray-600 font-medium">
+                          Loại cell
+                        </span>
+                        <span className="font-semibold text-gray-900">
+                          {product.cellType}
+                        </span>
+                      </div>
+                    )}
+                    {product.cycleCount && product.cycleCount > 0 && (
+                      <div className="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
+                        <span className="text-gray-600 font-medium">
+                          Số chu kỳ
+                        </span>
+                        <span className="font-semibold text-gray-900">
+                          {product.cycleCount} chu kỳ
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Sidebar */}
+          <div className="space-y-6">
+            {/* Safety & Trust */}
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                An toàn & Tin cậy
+              </h3>
+              <div className="space-y-3">
+                {/* Show verification status dynamically */}
+                {product?.verificationStatus && (product.verificationStatus.toString().toLowerCase() === "verified") ? (
+                  <div className="flex items-center">
+                    <Shield className="h-5 w-5 text-green-600 mr-3" />
+                    <span className="text-sm text-gray-700">
+                      Sản phẩm đã được kiểm định
+                    </span>
+                  </div>
+                ) : (
+                  // Show verification button for vehicle owners if not verified
+                  (() => {
+                    const isVehicle = (product?.productType || "").toLowerCase() === "vehicle";
+                    const isOwner = user &&
+                      (user.id || user.userId || user.accountId) ===
+                        (product?.sellerId || product?.userId);
+                    const verificationStatus = (product?.verificationStatus || "NotRequested").toString().toLowerCase();
+                    const isVerified = verificationStatus === "verified";
+                    const productStatus = String(product?.status || "").toLowerCase();
+                    const isSold = productStatus === "sold";
+                    
+                    if (isVehicle && !isVerified && !isSold && isOwner) {
+                      return (
+                        <div className="border-t pt-3 mt-3">
+                          <VerificationButton
+                            productId={product?.id || product?.productId || product?.Id}
+                            currentStatus={product?.verificationStatus || "NotRequested"}
+                            isOwner={true}
+                            disabled={loading}
+                          />
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()
+                )}
+                <div className="flex items-center">
+                  <CheckCircle className="h-5 w-5 text-green-600 mr-3" />
+                  <span className="text-sm text-gray-700">
+                    Thông tin chính xác
+                  </span>
+                </div>
+                <div className="flex items-center">
+                  <Truck className="h-5 w-5 text-blue-600 mr-3" />
+                  <span className="text-sm text-gray-700">
+                    Giao hàng tận nơi
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Similar Products */}
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                Sản phẩm tương tự
+              </h3>
+              <p className="text-gray-600 text-sm">
+                Khám phá thêm các sản phẩm khác cùng danh mục
+              </p>
+              <Link
+                to="/"
+                className="mt-3 inline-flex items-center text-blue-600 hover:text-blue-700 font-medium"
+              >
+                Xem tất cả
+                <ChevronRight className="h-4 w-4 ml-1" />
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Chat Modal */}
+      <ChatModal
+        isOpen={showChatModal}
+        onClose={() => setShowChatModal(false)}
+        seller={seller}
+        product={product}
+        onSendMessage={handleSendMessage}
+      />
+
+      {/* Report Modal */}
+      <ReportModal
+        isOpen={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        product={product}
+      />
+
+      {/* Payment Modal */}
+      {showPaymentModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              Tạo đơn hàng
+            </h3>
+            <div className="space-y-4">
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h4 className="font-medium text-gray-900 mb-2">
+                  {product.title}
+                </h4>
+                <p className="text-2xl font-bold text-blue-600">
+                  {formatPrice(product.price)}
+                </p>
+              </div>
+
+              {/* Deposit Information */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center mb-2">
+                  <Shield className="h-5 w-5 text-blue-600 mr-2" />
+                  <h4 className="font-medium text-blue-900">Thông tin cọc</h4>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-blue-700">Số tiền cọc:</span>
+                    <span className="font-bold text-blue-900">
+                      {formatPrice(getDepositAmount())}
+                    </span>
+                  </div>
+                  <p className="text-xs text-blue-600">
+                    Sản phẩm - cọc {formatPrice(depositAmount)} để gặp mặt trực tiếp
+                  </p>
+                </div>
+              </div>
+
+              {/* Important Notice */}
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div className="flex items-start">
+                  <AlertCircle className="h-5 w-5 text-yellow-600 mr-2 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-semibold text-yellow-900 mb-1">Lưu ý quan trọng:</h4>
+                    <p className="text-sm text-yellow-800">
+                      Sau khi thanh toán cọc thành công, vui lòng liên hệ với người bán qua tính năng chat để thỏa thuận ngày giờ gặp mặt. Sau đó, xin hãy liên hệ với Admin qua số điện thoại <span className="font-semibold">0373111370</span> để Admin chốt lịch hẹn cho cả hai bên gặp mặt tại kho và tiến hành giao dịch trực tiếp.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={onPayDeposit}
+                  disabled={paying}
+                  className="w-full p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-center font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <CreditCard className="h-5 w-5 inline mr-2" />
+                  {paying
+                    ? "Đang chuyển tới VNPay..."
+                    : "Thanh toán cọc qua ngân hàng online"}
+                </button>
+              </div>
+            </div>
+            <div className="flex space-x-3 mt-6">
+              <button
+                onClick={() => setShowPaymentModal(false)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Document Images Modal */}
+      {showDocumentModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xl font-semibold text-gray-900 flex items-center">
+                  <Shield className="h-6 w-6 text-green-600 mr-2" />
+                  Giấy tờ xe ({documentImages.length} ảnh)
+                </h3>
+                <button
+                  onClick={() => setShowDocumentModal(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 overflow-y-auto max-h-[70vh]">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {documentImages.map((image, index) => (
+                  <div key={index} className="relative group">
+                    <img
+                      src={image}
+                      alt={`Giấy tờ ${index + 1}`}
+                      className="w-full h-48 object-cover rounded-lg border-2 border-green-200 hover:border-green-400 transition-colors"
+                      onError={(e) => {
+                        e.target.style.display = "none";
+                      }}
+                    />
+                    <div className="absolute bottom-2 left-2 bg-green-600 text-white px-2 py-1 rounded text-xs">
+                      Giấy tờ {index + 1}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {documentImages.length === 0 && (
+                <div className="text-center py-12">
+                  <Shield className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500">Chưa có ảnh giấy tờ nào</p>
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 border-t border-gray-200">
+              <button
+                onClick={() => setShowDocumentModal(false)}
+                className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
